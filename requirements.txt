@@ -1,0 +1,13 @@
+# GST Billing Software Requirements
+# Install with: pip install -r requirements.txt
+
+PyQt5>=5.15.0
+PyQt5-tools>=5.15.0
+# Additional recommended packages
+pandas>=1.5.0
+reportlab>=3.6.0
+python-dateutil>=2.8.2
+# Optional: for HTML->PDF rendering
+# weasyprint>=57.0
+# For password hashing
+# bcrypt>=4.0.1

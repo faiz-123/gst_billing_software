@@ -1,0 +1,31 @@
+{
+    "app": {
+        "name": "GST Billing Software",
+        "version": "1.0.0",
+        "last_updated": "2025-09-30T17:28:57.194617"
+    },
+    "company": {
+        "current_company_id": null,
+        "name": "",
+        "gstin": "",
+        "address": "",
+        "mobile": "",
+        "email": ""
+    },
+    "invoice": {
+        "auto_generate_number": true,
+        "number_prefix": "INV",
+        "starting_number": 1001,
+        "default_tax_rate": 18.0
+    },
+    "ui": {
+        "theme": "default",
+        "window_maximized": true,
+        "last_screen": "parties"
+    },
+    "database": {
+        "path": "data/gst_billing.db",
+        "backup_enabled": true,
+        "backup_interval_days": 7
+    }
+}
