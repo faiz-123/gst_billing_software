@@ -8,9 +8,9 @@ inputs and will call `db.add_party` if available.
 from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QWidget,
     QFrame, QDialog, QMessageBox, QLineEdit, QComboBox, QTextEdit, QCheckBox,
-    QShortcut
+    QShortcut, QToolButton, QSizePolicy, QStyle
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QFont, QKeySequence
 import re
 
@@ -33,7 +33,7 @@ class PartiesScreen(BaseScreen):
 
     def setup_parties_screen(self):
         self.setup_action_bar()
-        self.setup_header_stats()
+        # self.setup_header_stats()
         self.setup_filters()
         self.setup_parties_table()
 
@@ -142,6 +142,11 @@ class PartiesScreen(BaseScreen):
         search_layout.addWidget(search_icon)
 
         self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search with name")
+        try:
+            self.search_input.setClearButtonEnabled(True)
+        except Exception:
+            pass
         self.search_input.setAlignment(Qt.AlignLeft)
         self.search_input.setStyleSheet("""
             QLineEdit {
@@ -300,7 +305,7 @@ class PartiesScreen(BaseScreen):
 
         for icon, tooltip, callback in action_buttons:
             btn = QPushButton(icon)
-            btn.setFixedSize(35, 35)
+            # btn.setFixedSize(50, 35)
             btn.setToolTip(tooltip)
             btn.setStyleSheet(f"""
                 QPushButton {{
@@ -372,36 +377,9 @@ class PartiesScreen(BaseScreen):
         view_layout.setSpacing(5)
         view_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.grid_view_btn = QPushButton("⊞")
-        self.list_view_btn = QPushButton("☰")
-
-        for btn in [self.grid_view_btn, self.list_view_btn]:
-            btn.setFixedSize(30, 30)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    border: 1px solid {BORDER};
-                    border-radius: 6px;
-                    background: {WHITE};
-                    font-size: 14px;
-                }}
-                QPushButton:hover {{
-                    background: {PRIMARY};
-                    color: white;
-                }}
-            """)
-            view_layout.addWidget(btn)
-
-        self.list_view_btn.setStyleSheet(f"""
-            QPushButton {{
-                border: 2px solid {PRIMARY};
-                border-radius: 6px;
-                background: {PRIMARY};
-                color: white;
-                font-size: 14px;
-            }}
-        """)
-
-        header_layout.addWidget(view_buttons)
+        # Optional: view toggle buttons can be added here later
+        # header_layout.addWidget(view_buttons)
+        # Add header (title + count) above the table
         table_layout.addLayout(header_layout)
 
         # Enhanced table
@@ -441,14 +419,20 @@ class PartiesScreen(BaseScreen):
         """)
 
         # Set optimal column widths
-        column_widths = [60, 180, 100, 150, 120, 100, 120]
+        column_widths = [40, 180, 100, 150, 120, 100, 120]
         for i, width in enumerate(column_widths):
             self.parties_table.setColumnWidth(i, width)
 
         # Set minimum height for better appearance
         self.parties_table.setMinimumHeight(400)
+        # Ensure rows are tall enough for action buttons
+        try:
+            vh = self.parties_table.verticalHeader()
+            vh.setDefaultSectionSize(36)
+        except Exception:
+            pass
         self.parties_table.setColumnWidth(5, 100)  # Balance
-        self.parties_table.setColumnWidth(6, 120)  # Actions
+        self.parties_table.setColumnWidth(6, 120)  # Actions (compact)
 
         table_layout.addWidget(self.parties_table)
         self.add_content(table_frame)
@@ -463,6 +447,9 @@ class PartiesScreen(BaseScreen):
             self.all_parties_data = parties
             self.populate_table(parties)
             self.update_header_stats()
+            # Ensure count label shows total on initial load
+            if hasattr(self, 'count_label'):
+                self.count_label.setText(f"📊 Total: {len(self.all_parties_data)} parties")
         except Exception as e:
             # Show enhanced sample data if database not available
             print(f"Database not available, using sample data: {e}")
@@ -474,22 +461,22 @@ class PartiesScreen(BaseScreen):
 
         for row, party in enumerate(parties_data):
             # Column 0: Row number
-            self.parties_table.setItem(row, 0, self.parties_table.create_item(str(row + 1)))
+            self.parties_table.setItem(row, 0, self.parties_table.create_item(str(row + 1), Qt.AlignCenter))
 
             # Column 1: Party name
-            self.parties_table.setItem(row, 1, self.parties_table.create_item(party['name']))
+            self.parties_table.setItem(row, 1, self.parties_table.create_item(party['name'], Qt.AlignCenter))
 
             # Column 2: Type with icon
             party_type = party['type']
             type_icon = "🏢" if party_type == "Customer" else "🏭" if party_type == "Supplier" else "🔄"
             type_display = f"{type_icon} {party_type}"
-            self.parties_table.setItem(row, 2, self.parties_table.create_item(type_display))
+            self.parties_table.setItem(row, 2, self.parties_table.create_item(type_display, Qt.AlignCenter))
 
             # Column 3: Contact (phone/email)
             phone = party.get('phone', '')
             email = party.get('email', '')
             contact_display = phone if phone else email if email else "No contact"
-            self.parties_table.setItem(row, 3, self.parties_table.create_item(contact_display))
+            self.parties_table.setItem(row, 3, self.parties_table.create_item(contact_display, Qt.AlignCenter))
 
             # Column 4: GST Status with icon
             gst_number = party.get('gst_number', '')
@@ -497,12 +484,12 @@ class PartiesScreen(BaseScreen):
                 gst_display = f"✅ {gst_number[:15]}{'...' if len(gst_number) > 15 else ''}"
             else:
                 gst_display = "❌ Not Registered"
-            self.parties_table.setItem(row, 4, self.parties_table.create_item(gst_display))
+            self.parties_table.setItem(row, 4, self.parties_table.create_item(gst_display, Qt.AlignCenter))
 
             # Format balance
             balance = party.get('opening_balance', 0)
             balance_text = f"₹{abs(balance):,.2f} {'Dr' if balance >= 0 else 'Cr'}"
-            self.parties_table.setItem(row, 5, self.parties_table.create_item(balance_text))
+            self.parties_table.setItem(row, 5, self.parties_table.create_item(balance_text, Qt.AlignCenter))
 
             # Action buttons
             actions_widget = self.create_action_buttons(party)
@@ -511,41 +498,53 @@ class PartiesScreen(BaseScreen):
     def create_action_buttons(self, party):
         """Create action buttons for each row"""
         widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        widget.setFixedHeight(25)
+        widget.setContentsMargins(0, 0, 0, 0)
+        widget.setStyleSheet("background: transparent;")
+        widget.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
 
-        # Edit button
-        edit_btn = QPushButton("✏️")
-        edit_btn.setFixedSize(25, 25)
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(25)
+        layout.setAlignment(Qt.AlignCenter)
+
+        # Edit tool button (emoji text for consistent rendering)
+        edit_btn = QToolButton()
+        edit_btn.setText("✎")
+        edit_btn.setToolTip("Edit")
+        edit_btn.setFixedSize(22, 22)
+        edit_btn.setAutoRaise(True)
         edit_btn.setStyleSheet(f"""
-            QPushButton {{
+            QToolButton {{
                 border: 1px solid {PRIMARY};
-                border-radius: 12px;
-                background: {WHITE};
-                color: {PRIMARY};
+                border-radius: 11px;
+                padding: 0px;
+                background: transparent;
             }}
-            QPushButton:hover {{
+            QToolButton:hover {{
                 background: {PRIMARY};
-                color: {WHITE};
+                color: white;
             }}
         """)
         edit_btn.clicked.connect(lambda: self.edit_party(party))
         layout.addWidget(edit_btn)
 
-        # Delete button
-        delete_btn = QPushButton("🗑️")
-        delete_btn.setFixedSize(25, 25)
+        # Delete tool button (emoji text)
+        delete_btn = QToolButton()
+        delete_btn.setText("🗑️")
+        delete_btn.setToolTip("Delete")
+        delete_btn.setFixedSize(22, 22)
+        delete_btn.setAutoRaise(True)
         delete_btn.setStyleSheet(f"""
-            QPushButton {{
+            QToolButton {{
                 border: 1px solid {DANGER};
-                border-radius: 12px;
-                background: {WHITE};
-                color: {DANGER};
+                border-radius: 11px;
+                padding: 0px;
+                background: transparent;
             }}
-            QPushButton:hover {{
+            QToolButton:hover {{
                 background: {DANGER};
-                color: {WHITE};
+                color: white;
             }}
         """)
         delete_btn.clicked.connect(lambda: self.delete_party(party))
@@ -553,7 +552,7 @@ class PartiesScreen(BaseScreen):
 
         return widget
 
-    def filter_parties(self):
+    def filter_parties(self, *_):
         """Enhanced filter parties based on search and multiple filters"""
         search_text = self.search_input.text().lower()
 
@@ -570,10 +569,12 @@ class PartiesScreen(BaseScreen):
         for party in self.all_parties_data:
             # Search filter (name, phone, email)
             if search_text:
+                # Safely handle None values in fields
                 search_fields = [
-                    party.get('name', '').lower(),
-                    party.get('phone', '').lower(),
-                    party.get('email', '').lower()
+                    (party.get('name') or '').lower(),
+                    (party.get('phone') or '').lower(),
+                    (party.get('email') or '').lower(),
+                    (party.get('gst_number') or '').lower(),
                 ]
                 if not any(search_text in field for field in search_fields):
                     continue
@@ -835,6 +836,9 @@ class PartiesScreen(BaseScreen):
         self.all_parties_data = sample_data
         self.populate_table(sample_data)
         self.update_header_stats()
+        # Ensure count label shows total when using sample data
+        if hasattr(self, 'count_label'):
+            self.count_label.setText(f"📊 Total: {len(self.all_parties_data)} parties")
 
     def edit_party(self, party):
         """Open edit party dialog"""

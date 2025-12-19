@@ -72,13 +72,19 @@ class PartyDialog(QDialog):
                 lbl.setTextFormat(Qt.RichText)
             return lbl
 
+        # Base style reused to reset inputs after error state
+        default_input_style = f"border: 1px solid {BORDER}; border-radius: 6px; padding: 10px; color: {TEXT_PRIMARY}; background: {WHITE}; font-size: 14px;"
+
         def create_input(value="", placeholder=""):
             e = QLineEdit(value)
-            e.setStyleSheet(f"border: 1px solid {BORDER}; border-radius: 6px; padding: 10px; color: {TEXT_PRIMARY}; background: {WHITE}; font-size: 14px;")
+            e.setStyleSheet(default_input_style)
             e.setMinimumHeight(40)
             if placeholder:
                 e.setPlaceholderText(placeholder)
             return e
+
+        # Store for use in validation reset
+        self._input_base_style = default_input_style
 
         # General Details (rows 0, 2, 4 combined)
         general_frame = QFrame()
@@ -103,6 +109,11 @@ class PartyDialog(QDialog):
 
         # Name, Mobile, Email
         self.name_input = create_input(self.party_data.get('name', ''), "Enter party name")
+        # Clear error highlight as soon as user types
+        try:
+            self.name_input.textChanged.connect(self._clear_name_error)
+        except Exception:
+            pass
         self.phone_input = create_input(self.party_data.get('phone', ''), "Enter mobile number")
         self.email_input = create_input(self.party_data.get('email', ''), "Enter email address")
         general_grid.addWidget(create_label("Party Name"), 0, 0)
@@ -116,6 +127,13 @@ class PartyDialog(QDialog):
         self.gst_number_input = create_input(self.party_data.get('gstin', self.party_data.get('gst_number', '')), "Enter GSTIN")
         self.pan_input = create_input(self.party_data.get('pan', ''), "Enter PAN number")
         self.type_combo = QComboBox(); self.type_combo.addItems(["", "Customer", "Supplier", "Both"])
+        # Default to Customer on new party
+        try:
+            idx = self.type_combo.findText("Customer")
+            if idx >= 0:
+                self.type_combo.setCurrentIndex(idx)
+        except Exception:
+            pass
         general_grid.addWidget(create_label("GSTIN"), 2, 0)
         general_grid.addWidget(create_label("PAN Number"), 2, 1)
         general_grid.addWidget(create_label("Party Type"), 2, 2)
@@ -251,7 +269,13 @@ class PartyDialog(QDialog):
         state = self.state_input.text().strip()
 
         if not name:
-            QMessageBox.warning(self, "Validation", "Party name is required"); return
+            # Highlight name input instead of showing a message box
+            self.name_input.setStyleSheet(
+                f"border: 1px solid #DC2626; border-radius: 6px; padding: 10px; "
+                f"color: {TEXT_PRIMARY}; background: #FEE2E2; font-size: 14px;"
+            )
+            self.name_input.setFocus()
+            return
         if email and not re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", email):
             QMessageBox.warning(self, "Validation", "Please enter a valid email address"); return
         try:
@@ -286,6 +310,13 @@ class PartyDialog(QDialog):
             print(f"Warning: error while saving to db: {e}")
 
         self.result_data = party; self.accept()
+
+    def _clear_name_error(self, *_):
+        """Reset Party Name field style when user edits it."""
+        try:
+            self.name_input.setStyleSheet(self._input_base_style)
+        except Exception:
+            pass
 
     def open_bank_details(self):
         dlg = BankAccountDialog(self)
