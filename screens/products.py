@@ -5,481 +5,20 @@ import sys
 from PyQt5.QtWidgets import (
     QApplication, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, 
     QFrame, QDialog, QMessageBox, QFormLayout, QLineEdit, QComboBox,
-    QTextEdit, QCheckBox, QSpinBox, QDoubleSpinBox, QTabWidget, QTableWidgetItem
+    QTextEdit, QCheckBox, QSpinBox, QDoubleSpinBox, QTabWidget, QTableWidgetItem,
+    QToolButton, QSizePolicy
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 
 from .base_screen import BaseScreen
+from .product_dialogue import ProductDialog
 from widgets import CustomButton, CustomTable, CustomInput, FormField
 from theme import (
     SUCCESS, DANGER, PRIMARY, WARNING, WHITE, TEXT_PRIMARY, 
     BORDER, BACKGROUND, TEXT_SECONDARY, PRIMARY_HOVER, get_title_font
 )
 from database import db
-
-class ProductDialog(QDialog):
-    """Dialog for adding/editing products"""
-    def __init__(self, parent=None, product_data=None):
-        super().__init__(parent)
-        self.product_data = product_data
-        self.setWindowTitle("Add Product" if not product_data else "Edit Product")
-        self.setModal(True)
-        self.setFixedSize(900, 900)
-        # self.setup_ui_old()
-        self.build_ui()
-    
-    def build_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(40, 40, 40, 40)
-        main_layout.setSpacing(16)
-
-        # Title
-        title = QLabel("Add Product")
-        title.setFont(QFont("Arial", 28, QFont.Bold))
-        title.setStyleSheet(f"color: {TEXT_PRIMARY}; padding: 2px 0px 2px 0px;")
-        main_layout.addWidget(title, alignment=Qt.AlignLeft)
-
-        # Form Frame
-        form_frame = QFrame()
-        form_frame.setStyleSheet(f"""
-            background: white;
-            border: 1px solid {BORDER};
-            border-radius: 16px;
-        """)
-        form_frame.setMinimumWidth(600)
-        form_frame.setMinimumHeight(500)
-        form_layout = QVBoxLayout(form_frame)
-        form_layout.setContentsMargins(40, 40, 40, 40)
-        form_layout.setSpacing(18)
-
-        # HSN Code & Item Name (side by side)
-        row_hsn_item = QHBoxLayout()
-        row_hsn_item.setSpacing(16)
-        item_col = QVBoxLayout()
-        item_col.addWidget(self.label("Item Name"))
-        self.name_input = self.input()
-        self.name_input.setPlaceholderText("Enter Item Name")
-        item_col.addWidget(self.name_input)
-        hsn_col = QVBoxLayout()
-        hsn_col.addWidget(self.label("HSN Code"))
-        self.hsn_code = self.input()
-        self.hsn_code.setPlaceholderText("Enter HSN Code")
-        hsn_col.addWidget(self.hsn_code)
-        row_hsn_item.addLayout(item_col)
-        row_hsn_item.addSpacing(16)
-        row_hsn_item.addLayout(hsn_col)
-        form_layout.addLayout(row_hsn_item)
-
-        # Unit of Measure & Barcode (side by side)
-        row_uom_barcode = QHBoxLayout()
-        row_uom_barcode.setSpacing(16)
-        barcode_col = QVBoxLayout()
-        barcode_col.addWidget(self.label("Barcode / SKU"))
-        self.barcode_input = self.input()
-        self.barcode_input.setPlaceholderText("Enter Barcode or SKU")
-        barcode_col.addWidget(self.barcode_input)
-        uom_col = QVBoxLayout()
-        uom_col.addWidget(self.label("Unit of Measure"))
-        self.unit_combo = QComboBox()
-        self.unit_combo.addItems(["PCS", "KG", "LTR", "BOX"])
-        self.unit_combo.setMinimumHeight(40)
-        self.unit_combo.setStyleSheet(f"""
-            QComboBox {{
-                border: 1px solid {BORDER};
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: {TEXT_PRIMARY};
-                background-color: white;
-                font-size: 16px;
-                min-height: 20px;
-            }}
-            QComboBox:focus {{
-                border-color: {PRIMARY};
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 30px;
-            }}
-            QComboBox::down-arrow {{
-                image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 6px solid {TEXT_PRIMARY};
-                margin-right: 8px;
-            }}
-        """)
-        uom_col.addWidget(self.unit_combo)
-        row_uom_barcode.addLayout(barcode_col, 1)
-        row_uom_barcode.addSpacing(16)
-        row_uom_barcode.addLayout(uom_col, 1)
-        form_layout.addLayout(row_uom_barcode)
-
-        # Sales Rate & Purchase Rate (side by side)
-        row_sales_purchase = QHBoxLayout()
-        row_sales_purchase.setSpacing(16)
-        sales_col = QVBoxLayout()
-        sales_col.addWidget(self.label("Sales Rate"))
-        self.selling_price = QDoubleSpinBox()
-        self.selling_price.setRange(0, 999999.99)
-        self.selling_price.setDecimals(2)
-        self.selling_price.setMinimumHeight(40)
-        self.selling_price.setStyleSheet(self.input_style())
-        sales_col.addWidget(self.selling_price)
-        purchase_col = QVBoxLayout()
-        purchase_col.addWidget(self.label("Purchase Rate"))
-        self.purchase_price = QDoubleSpinBox()
-        self.purchase_price.setRange(0, 999999.99)
-        self.purchase_price.setDecimals(2)
-        self.purchase_price.setMinimumHeight(40)
-        self.purchase_price.setStyleSheet(self.input_style())
-        purchase_col.addWidget(self.purchase_price)
-        row_sales_purchase.addLayout(sales_col)
-        row_sales_purchase.addSpacing(16)
-        row_sales_purchase.addLayout(purchase_col)
-        form_layout.addLayout(row_sales_purchase)
-
-
-        # Discount & MRP (side by side)
-        row_discount_mrp = QHBoxLayout()
-        row_discount_mrp.setSpacing(16)
-        discount_col = QVBoxLayout()
-        discount_col.addWidget(self.label("Discount %"))
-        self.discount_input = QDoubleSpinBox()
-        self.discount_input.setRange(0, 100)
-        self.discount_input.setDecimals(2)
-        self.discount_input.setSuffix("%")
-        self.discount_input.setMinimumHeight(40)
-        self.discount_input.setStyleSheet(self.input_style())
-        discount_col.addWidget(self.discount_input)
-        mrp_col = QVBoxLayout()
-        mrp_col.addWidget(self.label("MRP"))
-        self.mrp = QDoubleSpinBox()
-        self.mrp.setRange(0, 999999.99)
-        self.mrp.setDecimals(2)
-        self.mrp.setMinimumHeight(40)
-        self.mrp.setStyleSheet(self.input_style())
-        mrp_col.addWidget(self.mrp)
-        row_discount_mrp.addLayout(discount_col)
-        row_discount_mrp.addSpacing(16)
-        row_discount_mrp.addLayout(mrp_col)
-        form_layout.addLayout(row_discount_mrp)
-
-        # Tax Rate (GST)
-        row_tax = QHBoxLayout()
-        row_tax.setSpacing(16)
-        tax_col = QVBoxLayout()
-        tax_col.addWidget(self.label("Tax Rate (GST) %"))
-        self.tax_rate = QDoubleSpinBox()
-        self.tax_rate.setRange(0, 100)
-        self.tax_rate.setDecimals(2)
-        self.tax_rate.setValue(18.0)  # Default GST rate
-        self.tax_rate.setMinimumHeight(40)
-        self.tax_rate.setStyleSheet(self.input_style())
-        tax_col.addWidget(self.tax_rate)
-        
-        # Tax inclusive checkbox
-        checkbox_col = QVBoxLayout()
-        checkbox_col.addWidget(self.label("Tax Options"))
-        self.tax_inclusive = QCheckBox("Price is inclusive of tax")
-        self.tax_inclusive.setStyleSheet(f"font-size: 14px; color: {TEXT_PRIMARY};")
-        checkbox_col.addWidget(self.tax_inclusive)
-        
-        row_tax.addLayout(tax_col)
-        row_tax.addSpacing(16)
-        row_tax.addLayout(checkbox_col)
-        form_layout.addLayout(row_tax)
-
-        # Opening Qty & Low Stock Alert (side by side)
-        row_opening = QHBoxLayout()
-        row_opening.setSpacing(16)
-        qty_col = QVBoxLayout()
-        qty_col.addWidget(self.label("Opening Stock"))
-        self.opening_stock = QSpinBox()
-        self.opening_stock.setRange(0, 999999)
-        self.opening_stock.setMinimumHeight(40)
-        self.opening_stock.setStyleSheet(self.input_style())
-        qty_col.addWidget(self.opening_stock)
-        alert_col = QVBoxLayout()
-        alert_col.addWidget(self.label("Low Stock Alert"))
-        self.low_stock_alert = QSpinBox()
-        self.low_stock_alert.setRange(0, 999999)
-        self.low_stock_alert.setValue(10)
-        self.low_stock_alert.setMinimumHeight(40)
-        self.low_stock_alert.setStyleSheet(self.input_style())
-        alert_col.addWidget(self.low_stock_alert)
-        row_opening.addLayout(qty_col)
-        row_opening.addSpacing(16)
-        row_opening.addLayout(alert_col)
-        form_layout.addLayout(row_opening)
-
-        # Additional Product Details
-        row_additional = QHBoxLayout()
-        row_additional.setSpacing(16)
-        
-        # Product Type
-        type_col = QVBoxLayout()
-        type_col.addWidget(self.label("Product Type"))
-        self.type_combo = QComboBox()
-        self.type_combo.addItems(["Goods", "Service"])
-        self.type_combo.setMinimumHeight(40)
-        self.type_combo.setStyleSheet(f"""
-            QComboBox {{
-                border: 1px solid {BORDER};
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: {TEXT_PRIMARY};
-                background-color: white;
-                font-size: 16px;
-                min-height: 20px;
-            }}
-            QComboBox:focus {{
-                border-color: {PRIMARY};
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 30px;
-            }}
-            QComboBox::down-arrow {{
-                image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 6px solid {TEXT_PRIMARY};
-                margin-right: 8px;
-            }}
-        """)
-        type_col.addWidget(self.type_combo)
-        
-        # Category
-        category_col = QVBoxLayout()
-        category_col.addWidget(self.label("Category"))
-        self.category_input = self.input()
-        self.category_input.setPlaceholderText("e.g., Electronics, Clothing")
-        category_col.addWidget(self.category_input)
-        
-        row_additional.addLayout(type_col)
-        row_additional.addSpacing(16)
-        row_additional.addLayout(category_col)
-        form_layout.addLayout(row_additional)
-
-        # Description & Additional Fields
-        desc_row = QHBoxLayout()
-        desc_row.setSpacing(16)
-        
-        # Description column
-        desc_col = QVBoxLayout()
-        desc_col.addWidget(self.label("Description"))
-        self.description_input = QTextEdit()
-        self.description_input.setPlaceholderText("Enter product description")
-        self.description_input.setMinimumHeight(60)
-        self.description_input.setMaximumHeight(80)
-        self.description_input.setStyleSheet(f"""
-            QTextEdit {{
-                border: 1px solid {BORDER};
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: {TEXT_PRIMARY};
-                background-color: white;
-                font-size: 16px;
-                font-family: Arial;
-            }}
-            QTextEdit:focus {{
-                border-color: {PRIMARY};
-            }}
-        """)
-        desc_col.addWidget(self.description_input)
-        
-        # Additional fields column
-        additional_col = QVBoxLayout()
-        
-        # Add some spacing at top
-        additional_col.addSpacing(20)
-        
-        # Track stock checkbox
-        self.track_stock = QCheckBox("Track stock for this product")
-        self.track_stock.setChecked(True)
-        self.track_stock.setStyleSheet(f"""
-            QCheckBox {{
-                font-size: 16px; 
-                color: {TEXT_PRIMARY}; 
-                margin-top: 10px;
-                font-weight: 500;
-            }}
-            QCheckBox::indicator {{
-                width: 18px;
-                height: 18px;
-                border: 2px solid {BORDER};
-                border-radius: 3px;
-                background: {WHITE};
-            }}
-            QCheckBox::indicator:checked {{
-                background: {PRIMARY};
-                border-color: {PRIMARY};
-            }}
-        """)
-        additional_col.addWidget(self.track_stock)
-        
-        desc_row.addLayout(desc_col, 2)
-        desc_row.addSpacing(20)
-        desc_row.addLayout(additional_col, 1)
-        form_layout.addLayout(desc_row)
-
-        form_frame.setLayout(form_layout)
-        main_layout.addWidget(form_frame)
-
-        # Buttons
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch(1)
-
-        save_btn = QPushButton("Save")
-        save_btn.setCursor(Qt.PointingHandCursor)
-        save_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {PRIMARY};
-                color: white;
-                border-radius: 6px;
-                padding: 10px 50px;
-                font-weight: bold;
-                font-size: 16px;
-            }}
-            QPushButton:hover {{
-                background-color: {PRIMARY_HOVER};
-            }}
-        """)
-
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setCursor(Qt.PointingHandCursor)
-        cancel_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {TEXT_SECONDARY};
-                border: 2px solid {BORDER};
-                border-radius: 6px;
-                padding: 10px 50px;
-                font-size: 16px;
-            }}
-            QPushButton:hover {{
-                background-color: {BORDER};
-            }}
-        """)
-
-        # Connect button signals
-        save_btn.clicked.connect(self.save_product)
-        cancel_btn.clicked.connect(self.reject)
-
-        btn_layout.addWidget(save_btn)
-        btn_layout.addWidget(cancel_btn)
-        main_layout.addLayout(btn_layout)
-
-        # Populate form if editing
-        if self.product_data:
-            self.populate_form()
-
-    def label(self, text):
-        lbl = QLabel(text)
-        lbl.setFont(QFont("Arial", 16))
-        lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-weight: bold; border: none;")
-        return lbl
-
-    def input(self):
-        edit = QLineEdit()
-        edit.setStyleSheet(self.input_style())
-        edit.setMinimumHeight(40)
-        edit.setFont(QFont("Arial", 16))
-        return edit
-
-    def input_style(self):
-        return f"""
-            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit {{
-                border: 1px solid {BORDER};
-                border-radius: 6px;
-                padding: 12px;
-                color: {TEXT_PRIMARY};
-                background-color: white;
-                font-size: 16px;
-            }}
-            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTextEdit:focus {{
-                border-color: {PRIMARY};
-            }}
-        """
-    
-    def populate_form(self):
-        """Populate form with existing product data"""
-        data = self.product_data
-        
-        # Basic info
-        self.name_input.setText(data.get('name', ''))
-        
-        type_index = self.type_combo.findText(data.get('type', 'Goods'))
-        if type_index >= 0:
-            self.type_combo.setCurrentIndex(type_index)
-        
-        self.category_input.setText(data.get('category', ''))
-        self.barcode_input.setText(data.get('barcode', ''))
-        self.description_input.setPlainText(data.get('description', ''))
-        
-        # Pricing
-        self.purchase_price.setValue(data.get('purchase_price', 0))
-        self.selling_price.setValue(data.get('selling_price', 0))
-        self.mrp.setValue(data.get('mrp', 0))
-        self.discount_input.setValue(data.get('discount', 0))
-        self.tax_rate.setValue(data.get('tax_rate', 18))
-        self.hsn_code.setText(data.get('hsn_code', ''))
-        self.tax_inclusive.setChecked(data.get('tax_inclusive', False))
-        
-        # Stock
-        unit_index = self.unit_combo.findText(data.get('unit', 'Piece'))
-        if unit_index >= 0:
-            self.unit_combo.setCurrentIndex(unit_index)
-        
-        self.track_stock.setChecked(data.get('track_stock', True))
-        self.opening_stock.setValue(data.get('stock_quantity', 0))
-        self.low_stock_alert.setValue(data.get('low_stock_alert', 10))
-    
-    def save_product(self):
-        """Save product data"""
-        name = self.name_input.text().strip()
-        if not name:
-            QMessageBox.warning(self, "Error", "Product name is required!")
-            return
-        
-        selling_price = self.selling_price.value()
-        if selling_price <= 0:
-            QMessageBox.warning(self, "Error", "Selling price must be greater than 0!")
-            return
-        
-        product_data = {
-            'name': name,
-            'type': self.type_combo.currentText(),
-            'category': self.category_input.text().strip(),
-            'barcode': self.barcode_input.text().strip(),
-            'description': self.description_input.toPlainText().strip(),
-            'purchase_price': self.purchase_price.value(),
-            'selling_price': selling_price,
-            'mrp': self.mrp.value(),
-            'discount': self.discount_input.value(),
-            'tax_rate': self.tax_rate.value(),
-            'hsn_code': self.hsn_code.text().strip(),
-            'tax_inclusive': self.tax_inclusive.isChecked(),
-            'unit': self.unit_combo.currentText(),
-            'track_stock': self.track_stock.isChecked(),
-            'stock_quantity': self.opening_stock.value() if self.track_stock.isChecked() else 0,
-            'low_stock_alert': self.low_stock_alert.value() if self.track_stock.isChecked() else 0
-        }
-        
-        try:
-            if self.product_data:  # Editing
-                product_data['id'] = self.product_data['id']
-                db.update_product(product_data)
-                QMessageBox.information(self, "Success", "Product updated successfully!")
-            else:  # Adding new
-                db.add_product(product_data)
-                QMessageBox.information(self, "Success", "Product added successfully!")
-            
-            self.accept()
-        
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save product: {str(e)}")
 
 class ProductsScreen(BaseScreen):
     def __init__(self):
@@ -584,8 +123,6 @@ class ProductsScreen(BaseScreen):
                     stop:0 {WHITE}, stop:1 #F8FAFC);
                 border: 2px solid {BORDER};
                 border-radius: 15px;
-                margin: 5px;
-                padding: 10px;
             }}
         """)
         
@@ -595,7 +132,7 @@ class ProductsScreen(BaseScreen):
         # Enhanced search with icon
         search_container = QFrame()
         search_container.setFixedWidth(350)
-        search_container.setFixedHeight(45)
+        search_container.setFixedHeight(55)
         search_container.setStyleSheet(f"""
             QFrame {{
                 border: 2px solid {BORDER};
@@ -776,7 +313,7 @@ class ProductsScreen(BaseScreen):
         
         for icon, tooltip, callback in action_buttons:
             btn = QPushButton(icon)
-            btn.setFixedSize(35, 35)
+            # btn.setFixedSize(35, 35)
             btn.setToolTip(tooltip)
             btn.setStyleSheet(f"""
                 QPushButton {{
@@ -838,45 +375,11 @@ class ProductsScreen(BaseScreen):
         
         header_layout.addStretch()
         
-        # View toggle buttons
-        view_buttons = QWidget()
-        view_layout = QHBoxLayout(view_buttons)
-        view_layout.setSpacing(5)
-        view_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.grid_view_btn = QPushButton("⊞")
-        self.list_view_btn = QPushButton("☰")
-        
-        for btn in [self.grid_view_btn, self.list_view_btn]:
-            btn.setFixedSize(30, 30)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    border: 1px solid {BORDER};
-                    border-radius: 6px;
-                    background: {WHITE};
-                    font-size: 14px;
-                }}
-                QPushButton:hover {{
-                    background: {PRIMARY};
-                    color: white;
-                }}
-            """)
-            view_layout.addWidget(btn)
-        
-        self.list_view_btn.setStyleSheet(f"""
-            QPushButton {{
-                border: 2px solid {PRIMARY};
-                border-radius: 6px;
-                background: {PRIMARY};
-                color: white;
-                font-size: 14px;
-            }}
-        """)
-        
-        header_layout.addWidget(view_buttons)
+        # View toggle buttons removed
         table_layout.addLayout(header_layout)
         
         # Enhanced table
+        # Include 'Type' to match columns used in populate_table (indexes 0..8)
         headers = ["#", "Product Name", "Type", "Category", "SKU", "Price", "Stock", "Status", "Actions"]
         self.products_table = CustomTable(0, len(headers), headers)
         
@@ -911,14 +414,21 @@ class ProductsScreen(BaseScreen):
             }}
         """)
         
-        # Set optimal column widths
-        column_widths = [50, 200, 80, 120, 100, 100, 80, 100, 140]
+    # Set optimal column widths
+        column_widths = [50, 300, 80, 120, 100, 100, 80, 100, 160]
         for i, width in enumerate(column_widths):
             self.products_table.setColumnWidth(i, width)
         
-        # Set minimum height for better appearance
+        # Set minimum height for better appearance and row size for actions
         self.products_table.setMinimumHeight(400)
-        
+        try:
+            vh = self.products_table.verticalHeader()
+            vh.setDefaultSectionSize(52)
+        except Exception:
+            pass
+
+        self.products_table.setColumnWidth(8, 120)  # Actions (compact)
+
         table_layout.addWidget(self.products_table)
         self.add_content(table_frame)
         
@@ -1008,6 +518,8 @@ class ProductsScreen(BaseScreen):
         self.products_table.setRowCount(len(products_data))
         
         for row, product in enumerate(products_data):
+            # Ensure adequate row height for action buttons
+            self.products_table.setRowHeight(row, 38)
             # Column 0: Row number
             self.products_table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
             
@@ -1095,71 +607,62 @@ class ProductsScreen(BaseScreen):
             return "In Stock"
     
     def create_action_buttons(self, product):
-        """Create action buttons for each row"""
+        """Create action buttons for each row (styled like Parties)"""
         widget = QWidget()
+        widget.setFixedHeight(25)
+        widget.setContentsMargins(0, 0, 0, 0)
+        widget.setStyleSheet("background: transparent;")
+        widget.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+
         layout = QHBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
-        
-        # View button
-        view_btn = QPushButton("👁️")
-        view_btn.setFixedSize(25, 25)
-        view_btn.setToolTip("View Details")
-        view_btn.setStyleSheet(f"""
-            QPushButton {{
-                border: 1px solid {PRIMARY};
-                border-radius: 12px;
-                background: {WHITE};
-                color: {PRIMARY};
-            }}
-            QPushButton:hover {{
-                background: {PRIMARY};
-                color: {WHITE};
-            }}
-        """)
-        view_btn.clicked.connect(lambda: self.view_product(product))
-        layout.addWidget(view_btn)
-        
-        # Edit button
-        edit_btn = QPushButton("✏️")
-        edit_btn.setFixedSize(25, 25)
-        edit_btn.setToolTip("Edit Product")
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(25)
+        layout.setAlignment(Qt.AlignCenter)
+
+        # Edit tool button (emoji text for consistent rendering)
+        edit_btn = QToolButton()
+        edit_btn.setText("✎")
+        edit_btn.setToolTip("Edit")
+        edit_btn.setFixedSize(22, 22)
+        edit_btn.setAutoRaise(True)
         edit_btn.setStyleSheet(f"""
-            QPushButton {{
-                border: 1px solid {SUCCESS};
-                border-radius: 12px;
-                background: {WHITE};
-                color: {SUCCESS};
+            QToolButton {{
+                border: 1px solid {PRIMARY};
+                border-radius: 11px;
+                padding: 0px;
+                background: transparent;
             }}
-            QPushButton:hover {{
-                background: {SUCCESS};
-                color: {WHITE};
+            QToolButton:hover {{
+                background: {PRIMARY};
+                color: white;
             }}
         """)
         edit_btn.clicked.connect(lambda: self.edit_product(product))
         layout.addWidget(edit_btn)
-        
-        # Delete button
-        delete_btn = QPushButton("🗑️")
-        delete_btn.setFixedSize(25, 25)
-        delete_btn.setToolTip("Delete Product")
+
+        # Delete tool button (emoji text)
+        delete_btn = QToolButton()
+        delete_btn.setText("🗑️")
+        delete_btn.setToolTip("Delete")
+        delete_btn.setFixedSize(22, 22)
+        delete_btn.setAutoRaise(True)
         delete_btn.setStyleSheet(f"""
-            QPushButton {{
+            QToolButton {{
                 border: 1px solid {DANGER};
-                border-radius: 12px;
-                background: {WHITE};
-                color: {DANGER};
+                border-radius: 11px;
+                padding: 0px;
+                background: transparent;
             }}
-            QPushButton:hover {{
+            QToolButton:hover {{
                 background: {DANGER};
-                color: {WHITE};
+                color: white;
             }}
         """)
         delete_btn.clicked.connect(lambda: self.delete_product(product))
         layout.addWidget(delete_btn)
-        
+
         return widget
-    
+
     def filter_products(self):
         """Enhanced filter products based on search and multiple filters"""
         search_text = self.search_input.text().lower()
@@ -1224,51 +727,6 @@ class ProductsScreen(BaseScreen):
             return "Low Stock"
         else:
             return "In Stock"
-    
-    def create_action_buttons(self, product):
-        """Create action buttons for each row"""
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
-        
-        # Edit button
-        edit_btn = QPushButton("✏️")
-        edit_btn.setFixedSize(25, 25)
-        edit_btn.setStyleSheet(f"""
-            QPushButton {{
-                border: 1px solid {PRIMARY};
-                border-radius: 12px;
-                background: {WHITE};
-                color: {PRIMARY};
-            }}
-            QPushButton:hover {{
-                background: {PRIMARY};
-                color: {WHITE};
-            }}
-        """)
-        edit_btn.clicked.connect(lambda: self.edit_product(product))
-        layout.addWidget(edit_btn)
-        
-        # Delete button
-        delete_btn = QPushButton("🗑️")
-        delete_btn.setFixedSize(25, 25)
-        delete_btn.setStyleSheet(f"""
-            QPushButton {{
-                border: 1px solid {DANGER};
-                border-radius: 12px;
-                background: {WHITE};
-                color: {DANGER};
-            }}
-            QPushButton:hover {{
-                background: {DANGER};
-                color: {WHITE};
-            }}
-        """)
-        delete_btn.clicked.connect(lambda: self.delete_product(product))
-        layout.addWidget(delete_btn)
-        
-        return widget
     
     def update_stats(self, products):
         """Update quick stats labels"""

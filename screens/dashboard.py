@@ -18,7 +18,7 @@ from database import db
 
 # Import dialog classes for direct navigation
 from .invoices import InvoiceDialog
-from .products import ProductDialog  
+from .product_dialogue import ProductDialog  
 from .parties import PartyDialog
 from .payments import PaymentDialog
 
