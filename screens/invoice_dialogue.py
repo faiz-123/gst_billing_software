@@ -8,12 +8,12 @@ from PyQt5.QtWidgets import (
     QFrame, QDialog, QMessageBox, QFormLayout, QLineEdit, QComboBox,
     QTextEdit, QCheckBox, QSpinBox, QDoubleSpinBox, QTableWidget,
     QTableWidgetItem, QHeaderView, QDateEdit, QScrollArea, QSplitter,
-    QAbstractItemView, QMenu, QAction, QShortcut, 
+    QAbstractItemView, QMenu, QAction, QShortcut, QListWidget
 )
 from PyQt5.QtCore import Qt, QDate, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QPixmap, QIcon, QColor, QKeySequence
 from PyQt5.QtWidgets import QCompleter
-from .party_selector import PartySelector
+from .party_selector import PartySelector, ProductSelector
 
 from widgets import CustomButton, CustomTable, CustomInput, FormField
 from theme import (
@@ -32,6 +32,7 @@ class InvoiceItemWidget(QWidget):
     def __init__(self, item_data=None, products=None):
         super().__init__()
         self.products = products or []
+        self._product_selector_active = False
         self.setup_ui()
         if item_data:
             self.populate_data(item_data)
@@ -82,20 +83,46 @@ class InvoiceItemWidget(QWidget):
         """)
         layout.addWidget(self.row_no_edit)
         
-        # Product selection with enhanced styling
-        self.product_combo = QComboBox()
-        self.product_combo.addItem("🛍️ Select Product", None)
-        for product in self.products:
-            icon = "📦" if product.get('type') == 'Goods' else "🔧"
-            display_text = f"{icon} {product['name']} - ₹{product.get('selling_price', 0):,.0f}"
-            self.product_combo.addItem(display_text, product)
-        # Align with header width (Product ~300px when preceded by No=60px and HSN=100px)
-        self.product_combo.setFixedWidth(500)
-        self.product_combo.setFixedHeight(40)
-        self.product_combo.setStyleSheet(widget_style)
-        self.product_combo.currentIndexChanged.connect(self.on_product_changed)
-        layout.addWidget(self.product_combo)
+        # Product selection: QLineEdit with suggestion box (QCompleter)
+        self.product_input = QLineEdit()
+        self.product_input.setPlaceholderText("🛍️ Type to select product…")
+        self.product_input.setFixedWidth(500)
+        self.product_input.setFixedHeight(40)
+        self.product_input.setStyleSheet(f"""
+            QLineEdit {{
+                border: 1px solid {BORDER};
+                border-radius: 6px;
+                padding: 6px 8px;
+                background: {WHITE};
+                font-size: 14px;
+                color: {TEXT_PRIMARY};
+            }}
+            QLineEdit:focus {{
+                border-color: {BORDER};
+                background: #F8FAFC;
+            }}
+        """)
+        # Build completer data
+        self._product_map = {}
+        product_names = []
+        for p in (self.products or []):
+            name = p.get('name', '').strip()
+            if name:
+                self._product_map[name] = p
+                product_names.append(name)
+
+        layout.addWidget(self.product_input)
         layout.setSpacing(20)
+
+        try:
+            self.product_input.textEdited.connect(self.on_product_search_edited)
+        except Exception:
+            pass
+        # Enter opens selector
+        try:
+            self.product_input.returnPressed.connect(self.open_product_selector)
+        except Exception:
+            pass
 
         # HSN No entry box
         self.hsn_edit = QLineEdit()
@@ -200,6 +227,42 @@ class InvoiceItemWidget(QWidget):
         self.amount_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.amount_label)
 
+        # Enhanced add button
+        self.add_btn = QPushButton("➕")
+        self.add_btn.setFixedSize(30, 30)
+        self.add_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {SUCCESS};
+                color: {WHITE};
+                border: none;
+                border-radius: 15px;
+                font-weight: bold;
+                font-size: 12px;
+                padding: 5px;
+            }}
+            QPushButton:hover {{
+                background: #059669;
+
+                color: {WHITE};
+                border: none;
+                border-radius: 15px;
+                font-weight: bold;
+                font-size: 12px;
+                padding: 5px;
+            }}
+            QPushButton:hover {{
+                background: #059669;
+
+            }}
+            QPushButton:pressed {{
+                background: #B91C1C;
+            }}
+        """)
+        self.add_btn.setToolTip("Add this item")
+        # Emit signal so parent can add a new row
+        self.add_btn.clicked.connect(self.add_requested.emit)
+        layout.addWidget(self.add_btn)
+
         # Enhanced remove button
         self.remove_btn = QPushButton("✖")
         self.remove_btn.setFixedSize(30, 30)
@@ -224,32 +287,7 @@ class InvoiceItemWidget(QWidget):
         self.remove_btn.setToolTip("Remove this item")
         layout.addWidget(self.remove_btn)
 
-        # Enhanced remove button
-        self.add_btn = QPushButton("➕")
-        self.add_btn.setFixedSize(30, 30)
-        self.add_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {SUCCESS};
-                color: {WHITE};
-                border: none;
-                border-radius: 15px;
-                font-weight: bold;
-                font-size: 12px;
-                padding: 5px;
-            }}
-            QPushButton:hover {{
-                background: #059669;
-
-            }}
-            QPushButton:pressed {{
-                background: #B91C1C;
-            }}
-        """)
-        self.add_btn.setToolTip("Add this item")
-        # Emit signal so parent can add a new row
-        self.add_btn.clicked.connect(self.add_requested.emit)
-        layout.addWidget(self.add_btn)
-        layout.setAlignment(self.product_combo, Qt.AlignLeft)
+        # layout.setAlignment(self.product_combo, Qt.AlignLeft)
         layout.setAlignment(self.hsn_edit, Qt.AlignLeft)
         layout.setAlignment(self.quantity_spin, Qt.AlignLeft)
         layout.setAlignment(self.unit_label, Qt.AlignLeft)
@@ -266,18 +304,93 @@ class InvoiceItemWidget(QWidget):
         except Exception:
             pass
 
+    def on_product_search_edited(self, text: str):
+        """Open ProductSelector when user types in the product search box.
+        Prefill selector search with typed text and avoid opening multiple times.
+        """
+        try:
+            if self._product_selector_active:
+                return
+            if not text or not text.strip():
+                return
+            self._product_selector_active = True
+            selected = self._open_product_selector_dialog(prefill_text=text)
+            if selected:
+                # Set chosen product name back to the input without re-triggering textEdited
+                old_state = self.product_input.blockSignals(True)
+                try:
+                    self.product_input.setText(selected)
+                    # Immediately apply selected product data to rate/discount/tax/unit
+                    try:
+                        self.on_product_selected(selected)
+                    except Exception as _e:
+                        print(f"on_product_selected failed: {_e}")
+                finally:
+                    self.product_input.blockSignals(old_state)
+        except Exception as e:
+            print(f"Product search edit handler error: {e}")
+        finally:
+            self._product_selector_active = False
 
-    def on_product_changed(self):
-        """Handle product selection change with validation"""
-        product_data = self.product_combo.currentData()
+    # The following helper sections mirror the original dialog
+    def open_product_selector(self):
+        try:
+            selected = self._open_product_selector_dialog()
+            if selected:
+                self.product_input.setText(selected)
+                # Apply selected product to update dependent fields
+                try:
+                    self.on_product_selected(selected)
+                except Exception as _e:
+                    print(f"on_product_selected failed: {_e}")
+        except Exception as e:
+            print(f"Product selector failed: {e}")
+
+    def _open_product_selector_dialog(self, prefill_text: str = None):
+        """Create, size, position and open the ProductSelector below the input.
+        Returns the selected name if accepted, else None.
+        """
+        dlg = ProductSelector(self.products, self)
+        # Prefill search
+        try:
+            if prefill_text:
+                dlg.search.setText(prefill_text)
+                dlg.search.setCursorPosition(len(prefill_text))
+        except Exception:
+            pass
+        # Size and position
+        try:
+            from PyQt5.QtWidgets import QApplication
+            input_w = max(300, self.product_input.width())
+            dlg_h = min(dlg.sizeHint().height(), 420)
+            margin = 8  # vertical gap to avoid overlap with the input
+            dlg.resize(input_w, dlg_h)
+            bl = self.product_input.mapToGlobal(self.product_input.rect().bottomLeft())
+            x, y = bl.x(), bl.y() + margin
+            screen = QApplication.desktop().availableGeometry(self.product_input)
+            if y + dlg_h > screen.bottom():
+                tl = self.product_input.mapToGlobal(self.product_input.rect().topLeft())
+                y = tl.y() - dlg_h - margin
+            if x + input_w > screen.right():
+                x = max(screen.left(), screen.right() - input_w)
+            dlg.move(int(x), int(y+65))
+        except Exception:
+            pass
+        return dlg.selected_name if dlg.exec_() == QDialog.Accepted and getattr(dlg, 'selected_name', None) else None
+
+
+    def on_product_selected(self, name: str):
+        """Handle product selection from completer and update fields"""
+        product_data = self._product_map.get(name)
+        self.selected_product = product_data
         if product_data:
-            self.rate_spin.setValue(product_data.get('selling_price', 0))
+            self.rate_spin.setValue(product_data.get('sales_rate', 0))
             self.tax_spin.setValue(product_data.get('tax_rate', 18))
             self.unit_label.setText(product_data.get('unit', 'Piece'))
             
             # Auto-apply product discount if available
-            if 'discount' in product_data:
-                self.discount_spin.setValue(product_data.get('discount', 0))
+            if 'discount_percent' in product_data:
+                self.discount_spin.setValue(product_data.get('discount_percent', 0))
             
             self.calculate_total()
             self.item_changed.emit()
@@ -331,7 +444,12 @@ class InvoiceItemWidget(QWidget):
     
     def get_item_data(self):
         """Get item data as dictionary"""
-        product_data = self.product_combo.currentData()
+        # Use the selected product from completer or fallback to typed name lookup
+        product_data = getattr(self, 'selected_product', None)
+        if not product_data and hasattr(self, 'product_input'):
+            name = self.product_input.text().strip()
+            if name and hasattr(self, '_product_map'):
+                product_data = self._product_map.get(name)
         if not product_data:
             return None
         
@@ -347,8 +465,8 @@ class InvoiceItemWidget(QWidget):
         total = after_discount + tax_amount
         
         return {
-            'product_id': product_data['id'],
-            'product_name': product_data['name'],
+            'product_id': product_data.get('id'),
+            'product_name': product_data.get('name') or self.product_input.text().strip(),
             'hsn_no': self.hsn_edit.text().strip(),
             'quantity': quantity,
             'unit': product_data.get('unit', 'Piece'),
@@ -368,6 +486,8 @@ class InvoiceDialog(QDialog):
         self.invoice_data = invoice_data
         self.products = []
         self.parties = []
+        # Guard to avoid re-entrant opening of PartySelector from typing
+        self._party_selector_active = False
 
         # Initialize window properties
         self.init_window()
@@ -437,6 +557,24 @@ class InvoiceDialog(QDialog):
         self.setup_content_sections()
         self.setup_action_buttons()
         self.apply_final_styling()
+        # Connect date changes to update due days
+        try:
+            if hasattr(self, 'invoice_date') and hasattr(self, 'due_date') and hasattr(self, 'due_days_spin'):
+                self.invoice_date.dateChanged.connect(self.update_due_days)
+                self.due_date.dateChanged.connect(self.update_due_days)
+                self.update_due_days()  # Set initial value
+        except Exception:
+            pass
+# At end of InvoiceDialog class
+    def update_due_days(self):
+        """Calculate and update Due Days based on invoice and due date."""
+        try:
+            inv_date = self.invoice_date.date()
+            due_date = self.due_date.date()
+            days = inv_date.daysTo(due_date)
+            self.due_days_spin.setValue(max(0, days))
+        except Exception:
+            pass
 
     def setup_content_sections(self):
         """Setup the main content sections with enhanced layout"""
@@ -659,18 +797,50 @@ class InvoiceDialog(QDialog):
     # The following helper sections mirror the original dialog
     def open_party_selector(self):
         try:
-            dlg = PartySelector(self.parties, self)
-            if dlg.exec_() == QDialog.Accepted and dlg.selected_name:
-                self.party_search.setText(dlg.selected_name)
+            selected = self._open_party_selector_dialog()
+            if selected:
+                self.party_search.setText(selected)
         except Exception as e:
             print(f"Party selector failed: {e}")
+
+    def _open_party_selector_dialog(self, prefill_text: str = None):
+        """Create, size, position and open the PartySelector below the input.
+        Returns the selected name if accepted, else None.
+        """
+        dlg = PartySelector(self.parties, self)
+        # Prefill search
+        try:
+            if prefill_text:
+                dlg.search.setText(prefill_text)
+                dlg.search.setCursorPosition(len(prefill_text))
+        except Exception:
+            pass
+        # Size and position
+        try:
+            from PyQt5.QtWidgets import QApplication
+            input_w = max(300, self.party_search.width())
+            dlg_h = min(dlg.sizeHint().height(), 420)
+            margin = 8  # vertical gap to avoid overlap with the input
+            dlg.resize(input_w, dlg_h)
+            bl = self.party_search.mapToGlobal(self.party_search.rect().bottomLeft())
+            x, y = bl.x(), bl.y() + margin
+            screen = QApplication.desktop().availableGeometry(self.party_search)
+            if y + dlg_h > screen.bottom():
+                tl = self.party_search.mapToGlobal(self.party_search.rect().topLeft())
+                y = tl.y() - dlg_h - margin
+            if x + input_w > screen.right():
+                x = max(screen.left(), screen.right() - input_w)
+            dlg.move(int(x), int(y+65))
+        except Exception:
+            pass
+        return dlg.selected_name if dlg.exec_() == QDialog.Accepted and getattr(dlg, 'selected_name', None) else None
 
     def create_header_section(self):
         frame = QFrame()
         frame.setStyleSheet(f"""
             QFrame {{ background: {WHITE}; border: 2px solid {BORDER}; border-radius: 15px; }}
         """)
-        frame.setFixedHeight(120)
+        frame.setFixedHeight(200)
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(25, 0, 25, 0)
         layout.setSpacing(10)
@@ -678,122 +848,254 @@ class InvoiceDialog(QDialog):
         label_style = f"""
             QLabel {{ font-weight: 600; color: {TEXT_PRIMARY}; font-size: 14px; border: none; background: transparent; }}
         """
+        input_style = f"""
+                QLineEdit, QDateEdit, QComboBox, QTextEdit {{
+                    border: 2px solid {BORDER}; border-radius: 8px; background: {WHITE};
+                    font-size: 16px; color: {TEXT_PRIMARY}; }}
+            """
+        # --- New header layout: VBox with two rows ---
+        header_vbox = QVBoxLayout()
+        header_vbox.setSpacing(5)
+        header_vbox.setContentsMargins(0, 0, 0, 0)
 
-        invoice_layout = QHBoxLayout()
-        invoice_layout.setSpacing(15)
+        # Row 1: Bill Type and Invoice Type horizontally
+        row1_hbox = QHBoxLayout()
+        row1_hbox.setAlignment(Qt.AlignLeft)
+        row1_hbox.setSpacing(12)
+        row1_hbox.setContentsMargins(0, 0, 0, 0)
 
-        # Party selection
+        # Bill Type (CASH/CREDIT)
+        billtype_widget = QWidget()
+        billtype_widget.setStyleSheet(f"background: {WHITE};")
+        billtype_layout = QVBoxLayout(billtype_widget)
+        billtype_layout.setSpacing(5)
+        billtype_lbl = QLabel("💵 Bill Type:")
+        billtype_lbl.setStyleSheet(f"border: none; font-weight: bold;")
+        billtype_layout.addWidget(billtype_lbl)
+        billtype_widget.setFixedWidth(170)
+        billtype_widget.setFixedHeight(90)
+        self.billtype_combo = QComboBox()
+        self.billtype_combo.addItems(["CASH", "CREDIT"])
+        self.billtype_combo.setFixedHeight(40)
+        self.billtype_combo.setFixedWidth(120)
+        # Set initial style based on selection
+        def update_billtype_style():
+            base_style = """
+                QComboBox {{
+                    border: 2px solid {BORDER};
+                    border-radius: 8px;
+                    font-size: 16px;
+                    padding: 6px 12px;
+                }}
+                QComboBox QAbstractItemView {{
+                    color: {TEXT_PRIMARY};
+                    background: {WHITE};
+                    selection-background-color: #e5e7eb;
+                    border: 1px solid {BORDER};
+                }}
+            """
+            if self.billtype_combo.currentText() == "CASH":
+                self.billtype_combo.setStyleSheet(f"""
+                    QComboBox {{
+                        background: {SUCCESS};
+                        color: {WHITE};
+                        border: 2px solid {BORDER};
+                        border-radius: 8px;
+                        font-size: 16px bold;
+                        padding: 6px 12px;
+                    }}
+                    QComboBox QAbstractItemView {{
+                        color: {TEXT_PRIMARY};
+                        background: #5F9EA0;
+                        selection-background-color: #e5e7eb;
+                        border: 1px solid {BORDER};
+                    }}
+                """)
+            else:
+                self.billtype_combo.setStyleSheet(f"""
+                    QComboBox {{
+                        background: {DANGER};
+                        color: {WHITE};
+                        border: 2px solid {BORDER};
+                        border-radius: 8px;
+                        font-size: 16px bold;
+                        padding: 6px 12px;
+                    }}
+                    QComboBox QAbstractItemView {{
+                        color: {TEXT_PRIMARY};
+                        background: #5F9EA0;
+                        selection-background-color: #e5e7eb;
+                        border: 1px solid {BORDER};
+                    }}
+                """)
+        self.billtype_combo.currentIndexChanged.connect(update_billtype_style)
+        update_billtype_style()
+        billtype_layout.addWidget(self.billtype_combo)
+        row1_hbox.addWidget(billtype_widget)
+
+        # Invoice Type (GST/Non-GST)
+        gst_widget = QWidget()
+        gst_widget.setStyleSheet(f"background: {WHITE};")
+        gst_layout = QVBoxLayout(gst_widget)
+        gst_layout.setSpacing(5)
+        gst_lbl = QLabel("📋 Invoice Type:")
+        gst_lbl.setStyleSheet(f"border: none; font-weight: bold;")
+        gst_layout.addWidget(gst_lbl)
+        gst_widget.setFixedWidth(170)
+        gst_widget.setFixedHeight(90)
+        gst_combo = QComboBox()
+        gst_combo.addItems(["GST", "Non-GST"])
+        gst_layout.addWidget(gst_combo)
+        gst_combo.setFixedHeight(40)
+        gst_combo.setFixedWidth(120)
+        gst_combo.setStyleSheet(f"""
+                    QComboBox {{
+                        background: {PRIMARY};
+                        color: {WHITE};
+                        border: 2px solid {BORDER};
+                        border-radius: 8px;
+                        font-size: 16px bold;
+                        padding: 6px 12px;
+                    }}
+                    QComboBox QAbstractItemView {{
+                        color: {TEXT_PRIMARY};
+                        background:#5F9EA0;
+                        selection-background-color: #e5e7eb;
+                        border: 1px solid {BORDER};
+                    }}
+                """)
+        # gst_combo.setStyleSheet(input_style+f"background: {PRIMARY}; border: 2px solid {BORDER}; border-radius: 8px; padding: 6px 12px; font-size: 16px;")
+        # gst_combo.setStyleSheet(f"background: {PRIMARY}; border: 2px solid {BORDER}; border-radius: 8px; padding: 6px 12px; font-size: 16px;")
+        row1_hbox.addWidget(gst_widget)
+
+        header_vbox.addLayout(row1_hbox)
+
+        # Row 2: Select Party (vertical)
         party_widget = QWidget()
+        party_widget.setStyleSheet(f"background: {WHITE};")
         party_layout = QVBoxLayout(party_widget)
-        party_layout.setSpacing(1)
         select_party_lbl = QLabel("🏢 Select Party:")
-        select_party_lbl.setFixedHeight(30)
-        select_party_lbl.setFixedWidth(150)
-        select_party_lbl.setStyleSheet(label_style)
+        select_party_lbl.setFixedHeight(20)
+        party_layout.setSpacing(5)
+        select_party_lbl.setStyleSheet(f"border: none; font-weight: bold;")
         party_layout.addWidget(select_party_lbl)
 
         self.party_search = QLineEdit()
         self.party_search.setPlaceholderText("🔍 Search and select customer/client...")
         # autocomplete
-        party_names = []
         self.party_data_map = {}
-        parties_to_use = self.parties or []
-        if not parties_to_use:
-            parties_to_use = [
-                {'id': 1, 'name': 'ABC Corporation'},
-            ]
-        for party in parties_to_use:
+        for party in (self.parties or []):
             name = party.get('name', '').strip()
-            if not name:
-                continue
-            party_names.append(name)
-            self.party_data_map[name] = party
-            completer = QCompleter(party_names)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        completer.setFilterMode(Qt.MatchContains)
-        completer.setCompletionMode(QCompleter.PopupCompletion)
-        # completer.setMaxVisibleItems(4)
-        popup = completer.popup()
+            if name:
+                self.party_data_map[name] = party
+        self.party_search.setFixedWidth(600)
+        self.party_search.setFixedHeight(55)
         try:
-            popup.setMinimumWidth(self.party_search.width())
-            popup.setFixedHeight(140)
+            self.party_search.textEdited.connect(self.on_party_search_edited)
         except Exception:
             pass
-        popup.setStyleSheet(f"""
-            QAbstractItemView {{
-                background: {WHITE};
-                border: 1px solid {BORDER};
-                border-radius: 8px;
-                outline: none;
-                selection-background-color: {PRIMARY};
-                selection-color: white;
-                padding: 8px;
-                font-size: 18px;
-            }}
-        """)
-        self.party_search.setCompleter(completer)
-        input_style = f"""
-            QLineEdit, QDateEdit, QComboBox, QTextEdit {{
-                border: 2px solid {BORDER}; border-radius: 8px; padding: 10px 12px; background: {WHITE};
-                font-size: 14px; color: {TEXT_PRIMARY}; min-height: 20px; }}
-        """
-        self.party_search.setStyleSheet(input_style)
-        party_input_row = QHBoxLayout()
-        party_input_row.setSpacing(8)
-        party_input_row.addWidget(self.party_search)
-        select_btn = QPushButton("Select")
-        select_btn.setFixedHeight(35)
-        select_btn.clicked.connect(self.open_party_selector)
-        party_input_row.addWidget(select_btn)
-        party_layout.addLayout(party_input_row)
-        self.party_search.setFixedWidth(600)
-        self.party_search.setFixedHeight(35)
         # Enter opens selector
         try:
             self.party_search.returnPressed.connect(self.open_party_selector)
         except Exception:
             pass
-        invoice_layout.addWidget(party_widget)
-        # layout.addSpacing(200)
+        self.party_search.setStyleSheet(f"""
+            QLineEdit {{
+                background: {WHITE};
+                border: 2px solid {BORDER};
+                border-radius: 8px;
+                padding: 10px 12px;
+                font-size: 18px;
+                color: {TEXT_PRIMARY};
+                min-height: 20px;
+            }}
+            QLineEdit:hover {{
+                border: 2px solid {PRIMARY};
+            }}
+        """)
+        party_layout.addWidget(self.party_search)
+        header_vbox.addWidget(party_widget)
 
-        # GST/Non-GST
-        gst_widget = QWidget()
-        gst_layout = QVBoxLayout(gst_widget)
-        gst_layout.setSpacing(1)
-        gst_lbl = QLabel("📋 Invoice Type:")
-        gst_lbl.setFixedHeight(35)
-        gst_lbl.setStyleSheet(label_style)
-        gst_layout.addWidget(gst_lbl)
-        gst_widget.setFixedWidth(150)
-        gst_combo = QComboBox()
-        gst_combo.addItems(["GST", "Non-GST"])
-        gst_combo.setStyleSheet(input_style)
-        gst_layout.addWidget(gst_combo)
-        gst_combo.setFixedHeight(35)
-        invoice_layout.addWidget(gst_widget)
+        # --- Vertical stack: Invoice Number ---
+        vertical_frame = QWidget()
+        vertical_frame.setStyleSheet(f"border: 2px solid {PRIMARY}; border-radius: 8px; padding: 10px;")
+        vertical_layout = QVBoxLayout(vertical_frame)
+        vertical_layout.setSpacing(8)
+        vertical_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Invoice number and date
+        # Invoice number
         inv_num_widget = QWidget()
+        inv_num_widget.setStyleSheet(f"background: {WHITE};")
         inv_num_layout = QVBoxLayout(inv_num_widget)
         inv_num_lbl = QLabel("📄 Invoice Number:")
         inv_num_lbl.setFixedHeight(35)
         inv_num_lbl.setStyleSheet(label_style)
         inv_num_layout.addWidget(inv_num_lbl)
         inv_num_widget.setFixedWidth(170)
-        invoice_number = QLineEdit("Auto-generated")
+        invoice_number = QLineEdit("05")
         invoice_number.setReadOnly(True)
-        invoice_number.setStyleSheet(input_style + f"background: {BACKGROUND};")
+        invoice_number.setStyleSheet(f"background: {WHITE}; color: {DANGER}; font-size: 25x bold;")
+        invoice_number.setAlignment(Qt.AlignCenter)
         invoice_number.setFixedWidth(150)
+        invoice_number.setFixedHeight(45)
         inv_num_layout.addWidget(invoice_number)
+        vertical_layout.addWidget(inv_num_widget)
+
+
+        # Add Due Days input below Due Date
+        # due_days_widget = QWidget()
+        # due_days_widget.setFixedWidth(300)
+        # due_days_layout = QVBoxLayout(due_days_widget)
+        # due_days_layout.setAlignment(Qt.AlignRight)
+        # due_days_layout.setContentsMargins(0, 0, 0, 0)
+        # due_days_layout.setSpacing(8)
+        due_days_lbl = QLabel("📆 Due Days:")
+        due_days_lbl.setFixedHeight(35)
+        due_days_lbl.setStyleSheet(label_style)
+        # due_days_layout.addWidget(due_days_lbl)
+        inv_num_layout.addWidget(due_days_lbl)
+        self.due_days_spin = QSpinBox()
+        self.due_days_spin.setRange(0, 365)
+        self.due_days_spin.setValue(14)
+        self.due_days_spin.setFixedHeight(35)
+        self.due_days_spin.setFixedWidth(150)
+        # self.due_days_spin.setStyleSheet(input_style)
+        self.due_days_spin.setStyleSheet(f"border: 2px solid {BORDER}; border-radius: 8px; padding: 4px; font-size: 16px bold; color: {TEXT_PRIMARY};")
+        self.due_days_spin.setAlignment(Qt.AlignCenter)
+        self.due_days_spin.setToolTip("Number of days until due date")
+        # due_days_layout.addWidget(self.due_days_spin)
+        inv_num_layout.addWidget(self.due_days_spin)
+        # vertical_layout.addWidget(due_days_widget)
+
+
+        # --- Add header widgets to layout ---
+        invoice_layout = QHBoxLayout()
+        invoice_layout.setSpacing(15)
+        invoice_layout.addLayout(header_vbox)
+        invoice_layout.addWidget(vertical_frame)
+
+        # Dates stacked vertically (Invoice Date above Due Date)
+        dates_container = QWidget()
+        dates_container.setStyleSheet(f"background: {WHITE};")
+        dates_container.setFixedWidth(300)
+
+        dates_vlayout = QVBoxLayout(dates_container)
+        dates_vlayout.setSpacing(6)
+        dates_vlayout.setContentsMargins(0, 0, 0, 0)
+        dates_vlayout.setAlignment(Qt.AlignRight)
 
         # Invoice date
         inv_date_widget = QWidget()
+        # inv_date_widget.setStyleSheet(f"border: 2px solid {DANGER};")
+        inv_date_widget.setFixedWidth(300)
         inv_date_layout = QVBoxLayout(inv_date_widget)
+        inv_date_layout.setAlignment(Qt.AlignRight)
+        inv_date_layout.setContentsMargins(0, 0, 0, 0)
+        inv_date_layout.setSpacing(8)
         inv_date_lbl = QLabel("📅 Invoice Date:")
-        inv_date_lbl.setFixedHeight(35)
+        inv_date_lbl.setFixedHeight(20)
         inv_date_lbl.setStyleSheet(label_style)
         inv_date_layout.addWidget(inv_date_lbl)
-        inv_date_widget.setFixedWidth(160)
         self.invoice_date = QDateEdit()
         self.invoice_date.setDate(QDate.currentDate())
         self.invoice_date.setCalendarPopup(True)
@@ -801,30 +1103,40 @@ class InvoiceDialog(QDialog):
                 QDateEdit::drop-down {{
                     subcontrol-origin: padding;
                     subcontrol-position: center right;
-                    width: 35px;
-                    height: 45px;
+                    width: 40px;
+                    height: 30px;
                     border-left: 2px solid {BORDER};
-                    background: {PRIMARY};
                     border-top-right-radius: 8px;
                     border-bottom-right-radius: 8px;
                 }}
                 QDateEdit::drop-down:hover {{ background: {PRIMARY_HOVER}; }}
                 QDateEdit::down-arrow {{
-                    width: 18px;
-                    height: 18px;
-                    margin: 6px;
+                    image: url(assets/icons/calendar.svg);
+                    width: 30px;
+                    height: 30px;
+                    margin: 8px;
+                }}
+                QDateEdit::down-arrow:disabled {{
+                    image: url(assets/icons/calendar.svg);
                 }}
             """)
+        self.invoice_date.setFixedHeight(35)
+        self.invoice_date.setFixedWidth(150)
         inv_date_layout.addWidget(self.invoice_date)
+        dates_vlayout.addWidget(inv_date_widget)
 
         # Due date
         due_date_widget = QWidget()
+        # due_date_widget.setStyleSheet(f"border: 2px solid {DANGER};")
+        due_date_widget.setFixedWidth(300)
         due_date_layout = QVBoxLayout(due_date_widget)
-        due_date_lbl = QLabel("⏰ Due Date:")
+        due_date_layout.setAlignment(Qt.AlignRight)
+        due_date_layout.setContentsMargins(0, 0, 0, 0)
+        due_date_layout.setSpacing(8)
+        due_date_lbl = QLabel("📆 Due Date:")
         due_date_lbl.setFixedHeight(35)
         due_date_lbl.setStyleSheet(label_style)
         due_date_layout.addWidget(due_date_lbl)
-        due_date_widget.setFixedWidth(160)
         self.due_date = QDateEdit()
         self.due_date.setDate(QDate.currentDate().addDays(14))
         self.due_date.setCalendarPopup(True)
@@ -832,29 +1144,58 @@ class InvoiceDialog(QDialog):
                 QDateEdit::drop-down {{
                     subcontrol-origin: padding;
                     subcontrol-position: center right;
-                    width: 35px;
-                    height: 45px;
+                    width: 40px;
+                    height: 50px;
                     border-left: 2px solid {BORDER};
-                    background: {PRIMARY};
                     border-top-right-radius: 8px;
                     border-bottom-right-radius: 8px;
                 }}
                 QDateEdit::drop-down:hover {{ background: {PRIMARY_HOVER}; }}
                 QDateEdit::down-arrow {{
-                    width: 18px;
-                    height: 18px;
-                    margin: 6px;
+                    image: url(assets/icons/calendar.svg);
+                    width: 30px;
+                    height: 30px;
+                    margin: 8px;
+                }}
+                QDateEdit::down-arrow:disabled {{
+                    image: url(assets/icons/calendar.svg);
                 }}
             """)
+        self.due_date.setFixedHeight(35)
+        self.due_date.setFixedWidth(150)
         due_date_layout.addWidget(self.due_date)
+        dates_vlayout.addWidget(due_date_widget)
 
         # Add header widgets to layout
+        invoice_layout.addWidget(dates_container, 1)
+        # invoice_layout.addWidget(gst_widget)
         invoice_layout.addWidget(inv_num_widget, 1)
-        invoice_layout.addWidget(inv_date_widget, 1)
-        invoice_layout.addWidget(due_date_widget, 1)
 
         layout.addLayout(invoice_layout)
         return frame
+
+    def on_party_search_edited(self, text: str):
+        """Open PartySelector when user types in the party search box.
+        Prefill selector search with typed text and avoid opening multiple times.
+        """
+        try:
+            if self._party_selector_active:
+                return
+            if not text or not text.strip():
+                return
+            self._party_selector_active = True
+            selected = self._open_party_selector_dialog(prefill_text=text)
+            if selected:
+                # Set chosen party name back to the input without re-triggering textEdited
+                old_state = self.party_search.blockSignals(True)
+                try:
+                    self.party_search.setText(selected)
+                finally:
+                    self.party_search.blockSignals(old_state)
+        except Exception as e:
+            print(f"Party search edit handler error: {e}")
+        finally:
+            self._party_selector_active = False
 
     def create_items_section(self):
         frame = QFrame()
@@ -864,22 +1205,6 @@ class InvoiceDialog(QDialog):
         frame.setFixedHeight(500)
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(5, 5, 5, 20)
-        # layout.setSpacing(20)
-        # # Toolbar
-        # toolbar = QHBoxLayout()
-        # add_btn = QPushButton("➕ Add Item")
-        # add_btn.setCursor(Qt.PointingHandCursor)
-        # add_btn.setFixedHeight(34)
-        # add_btn.setStyleSheet(f"""
-        #     QPushButton {{
-        #         background: {PRIMARY}; color: white; border: none; border-radius: 8px; padding: 6px 12px; font-weight: 600;
-        #     }}
-        #     QPushButton:hover {{ background: {PRIMARY_HOVER}; }}
-        # """)
-        # add_btn.clicked.connect(self.add_item)
-        # toolbar.addWidget(add_btn)
-        # toolbar.addStretch()
-        # layout.addLayout(toolbar)
 
         headers_layout = QHBoxLayout()
         headers_layout.setSpacing(0)
@@ -895,7 +1220,7 @@ class InvoiceDialog(QDialog):
             label.setFixedWidth(width)
             label.setFixedHeight(35)
             label.setStyleSheet(f"""
-                QLabel {{ font-weight: bold; color: {TEXT_PRIMARY}; padding: 0; margin: 0; background: {BACKGROUND}; border: 1px solid {BORDER}; border-radius: 0px; font-size: 13px; }}
+                QLabel {{ font-weight: bold; color: {TEXT_PRIMARY}; padding: 0; margin: 0; background: {BACKGROUND}; border: 1px solid {PRIMARY}; border-radius: 6px; font-size: 13px; }}
             """)
             label.setAlignment(Qt.AlignCenter)
             headers_layout.addWidget(label)
@@ -923,34 +1248,52 @@ class InvoiceDialog(QDialog):
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        # Notes area
+        # Notes area: lazy add via text link
         notes_container = QVBoxLayout()
-        notes_label = QLabel("📝 Notes")
-        notes_label.setStyleSheet(f"font-weight: 600; color: {TEXT_PRIMARY};")
-        self.notes = QTextEdit()
-        self.notes.setPlaceholderText("Add any additional information or terms...")
-        self.notes.setStyleSheet(f"border: 2px solid {BORDER}; border-radius: 8px; padding: 10px; background: {WHITE}; font-size: 13px;")
-        self.notes.setFixedHeight(80)
-        notes_container.addWidget(notes_label)
-        notes_container.addWidget(self.notes)
+        notes_header = QHBoxLayout()
+        add_note_link = QLabel("<a href='add'>+Add Note</a>")
+        add_note_link.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        add_note_link.setOpenExternalLinks(False)
+        add_note_link.setStyleSheet("color: #2563EB; font-size: 13px; border: none;")
+        # Handler to create/show notes editor lazily
+        def _handle_add_note_link(_):
+            try:
+                if not hasattr(self, 'notes') or self.notes is None:
+                    self.notes = QTextEdit()
+                    self.notes.setPlaceholderText("Add any additional information or terms...")
+                    self.notes.setStyleSheet(f"border: 2px solid {BORDER}; border-radius: 8px; padding: 10px; background: {WHITE}; font-size: 13px;")
+                    self.notes.setFixedHeight(80)
+                    notes_container.insertWidget(1, self.notes)
+                else:
+                    self.notes.setVisible(True)
+            except Exception as e:
+                print(f"Failed to add notes editor: {e}")
+        add_note_link.linkActivated.connect(_handle_add_note_link)
+        # Place the link at the left; stretch goes after to push remaining content to the right
+        notes_header.addWidget(add_note_link)
+        notes_header.addStretch()
+        notes_container.addLayout(notes_header)
+        # Initially, no notes editor is shown; created on demand via link
+        if not hasattr(self, 'notes'):
+            self.notes = None
         notes_container.addStretch()
 
         layout.addLayout(notes_container, 2)
 
         # Totals on the right
         totals_layout = QFormLayout()
-        totals_layout.setSpacing(8)
+        totals_layout.setSpacing(15)
         self.subtotal_label = QLabel("₹0.00")
-        self.subtotal_label.setStyleSheet("font-size: 14px;")
+        self.subtotal_label.setStyleSheet("font-size: 16px; border: none; background: transparent;")
         totals_layout.addRow("Subtotal:", self.subtotal_label)
         self.discount_label = QLabel("₹0.00")
-        self.discount_label.setStyleSheet("font-size: 14px; color: red;")
+        self.discount_label.setStyleSheet("font-size: 16px; color: red; border: none; background: transparent;")
         totals_layout.addRow("Total Discount:", self.discount_label)
         self.tax_label = QLabel("₹0.00")
-        self.tax_label.setStyleSheet("font-size: 14px;")
+        self.tax_label.setStyleSheet("font-size: 16px; border: none; background: transparent;")
         totals_layout.addRow("Total Tax:", self.tax_label)
         self.grand_total_label = QLabel("₹0.00")
-        self.grand_total_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {PRIMARY}; background: {BACKGROUND}; padding: 8px; border-radius: 4px;")
+        self.grand_total_label.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {PRIMARY}; background: {BACKGROUND}; padding: 8px; border-radius: 4px;")
         totals_layout.addRow("Grand Total:", self.grand_total_label)
         layout.addStretch(1)
         layout.addLayout(totals_layout, 1)
@@ -1037,7 +1380,9 @@ class InvoiceDialog(QDialog):
         total_discount = sum(item['discount_amount'] for item in items)
         total_tax = sum(item['tax_amount'] for item in items)
         grand_total = subtotal - total_discount + total_tax
-        notes_text = getattr(self, 'notes').toPlainText() if hasattr(self, 'notes') else ''
+        notes_text = ''
+        if hasattr(self, 'notes') and self.notes is not None:
+            notes_text = self.notes.toPlainText()
         invoice_data = {
             'party_id': party_data['id'],
             'party_name': party_data['name'],
@@ -1051,12 +1396,28 @@ class InvoiceDialog(QDialog):
             'items': items
         }
         try:
+            invoice_no = invoice_data.get('invoice_no', '')
+            if not invoice_no:
+                QMessageBox.warning(self, "Error", "Invoice number cannot be empty!")
+                return
+            # Check for duplicate invoice number only when creating new
+            if not self.invoice_data and hasattr(db, 'invoice_no_exists') and db.invoice_no_exists(invoice_no):
+                QMessageBox.warning(self, "Error", f"Invoice number '{invoice_no}' already exists. Please use a unique invoice number.")
+                return
             if self.invoice_data:
                 invoice_data['id'] = self.invoice_data['id']
                 db.update_invoice(invoice_data)
                 QMessageBox.information(self, "Success", "Invoice updated successfully!")
             else:
-                db.add_invoice(invoice_data)
+                db.add_invoice(
+                    invoice_no,
+                    invoice_data.get('invoice_date', ''),
+                    invoice_data.get('party_id', ''),
+                    invoice_data.get('status', 'GST'),
+                    invoice_data.get('subtotal', 0),
+                    0, 0, 0, 0,  # cgst, sgst, igst, round_off (defaults)
+                    invoice_data.get('grand_total', 0)
+                )
                 QMessageBox.information(self, "Success", "Invoice created successfully!")
             self.accept()
         except Exception as e:
