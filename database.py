@@ -49,6 +49,7 @@ class Database:
 
     # --- schema ---
     def create_tables(self):
+        # Create table for companies
         self._execute(
             """
             CREATE TABLE IF NOT EXISTS companies (
@@ -61,35 +62,51 @@ class Database:
             )
             """
         )
+        # Create table for parties
         self._execute(
             """
             CREATE TABLE IF NOT EXISTS parties (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
-                phone TEXT,
+                mobile TEXT,
                 email TEXT,
-                type TEXT,
+                party_type TEXT NOT NULL,
                 gst_number TEXT,
                 pan TEXT,
                 address TEXT,
+                city TEXT,
                 state TEXT,
+                pincode TEXT,
                 opening_balance REAL DEFAULT 0,
-                balance_type TEXT DEFAULT 'dr',
-                is_gst_registered INTEGER DEFAULT 0
+                balance_type TEXT DEFAULT 'dr'
             )
             """
         )
+        # Create table for products
         self._execute(
             """
             CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 hsn_code TEXT,
+                barcode TEXT,
+                unit TEXT,
                 sales_rate REAL DEFAULT 0,
-                stock_quantity REAL DEFAULT 0
+                purchase_rate REAL DEFAULT 0,
+                discount_percent REAL DEFAULT 0,
+                mrp REAL DEFAULT 0,
+                tax_rate REAL DEFAULT 18,
+                sgst_rate REAL DEFAULT 9,
+                cgst_rate REAL DEFAULT 9,
+                opening_stock REAL DEFAULT 0,
+                low_stock REAL DEFAULT 0,
+                product_type TEXT,
+                category TEXT,
+                description TEXT
             )
             """
         )
+        # Create table for invoices
         self._execute(
             """
             CREATE TABLE IF NOT EXISTS invoices (
@@ -102,6 +119,31 @@ class Database:
             )
             """
         )
+        
+        # Create table for invoice items (line items)
+        self._execute(
+            """
+            CREATE TABLE IF NOT EXISTS invoice_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                invoice_id INTEGER NOT NULL,
+                product_id INTEGER,
+                product_name TEXT NOT NULL,
+                hsn_code TEXT,
+                quantity REAL NOT NULL DEFAULT 0,
+                unit TEXT DEFAULT 'Piece',
+                rate REAL NOT NULL DEFAULT 0,
+                discount_percent REAL DEFAULT 0,
+                discount_amount REAL DEFAULT 0,
+                tax_percent REAL DEFAULT 0,
+                tax_amount REAL DEFAULT 0,
+                amount REAL NOT NULL DEFAULT 0,
+                FOREIGN KEY(invoice_id) REFERENCES invoices(id),
+                FOREIGN KEY(product_id) REFERENCES products(id)
+            )
+            """
+        )
+        
+        # Create table for payments
         self._execute(
             """
             CREATE TABLE IF NOT EXISTS payments (
@@ -122,10 +164,10 @@ class Database:
     def ensure_seed(self):
         # Seed a couple of rows if tables are empty
         if not self._query("SELECT id FROM parties LIMIT 1"):
-            self.add_party('Demo Customer', mobile='9999999999', email='demo@example.com', gstin='', pan=None, address=None, city=None, party_type='Customer')
-            self.add_party('Sample Supplier', mobile='8888888888', email='supplier@example.com', gstin='', pan=None, address=None, city=None, party_type='Supplier')
+            self.add_party('DEMO CUSTOMER', mobile='9999999999', email='demo@example.com', gstin='', pan=None, address=None, city=None, party_type='Customer')
+            self.add_party('SAMPLE SUPPLIER', mobile='8888888888', email='supplier@example.com', gstin='', pan=None, address=None, city=None, party_type='Supplier')
         if not self._query("SELECT id FROM products LIMIT 1"):
-            self.add_product('Sample Product', hsn_code='', sales_rate=100.0, stock_quantity=10)
+            self.add_product('SAMPLE PRODUCT', hsn_code='', sales_rate=100.0)
 
     # --- migrations / schema checks ---
     def _table_columns(self, table: str) -> List[str]:
@@ -141,16 +183,17 @@ class Database:
     def _ensure_schema(self):
         # Parties required columns
         for col, decl in [
-            ("phone", "TEXT"),
+            ("mobile", "TEXT"),
             ("email", "TEXT"),
-            ("type", "TEXT"),
+            ("party_type", "TEXT"),
             ("gst_number", "TEXT"),
             ("pan", "TEXT"),
             ("address", "TEXT"),
+            ("city", "TEXT"),
             ("state", "TEXT"),
+            ("pincode", "TEXT"),
             ("opening_balance", "REAL DEFAULT 0"),
             ("balance_type", "TEXT DEFAULT 'dr'"),
-            ("is_gst_registered", "INTEGER DEFAULT 0"),
         ]:
             try:
                 self._ensure_column("parties", col, decl)
@@ -159,8 +202,20 @@ class Database:
         # Products
         for col, decl in [
             ("hsn_code", "TEXT"),
+            ("barcode", "TEXT"),
+            ("unit", "TEXT"),
             ("sales_rate", "REAL DEFAULT 0"),
-            ("stock_quantity", "REAL DEFAULT 0"),
+            ("purchase_rate", "REAL DEFAULT 0"),
+            ("discount_percent", "REAL DEFAULT 0"),
+            ("mrp", "REAL DEFAULT 0"),
+            ("tax_rate", "REAL DEFAULT 18"),
+            ("sgst_rate", "REAL DEFAULT 9"),
+            ("cgst_rate", "REAL DEFAULT 9"),
+            ("opening_stock", "REAL DEFAULT 0"),
+            ("low_stock", "REAL DEFAULT 0"),
+            ("product_type", "TEXT"),
+            ("category", "TEXT"),
+            ("description", "TEXT"),
         ]:
             try:
                 self._ensure_column("products", col, decl)
@@ -191,6 +246,21 @@ class Database:
                 self._ensure_column("payments", col, decl)
             except Exception:
                 pass
+        # Invoice items table schema updates
+        for col, decl in [
+            ("unit", "TEXT DEFAULT 'Piece'"),
+            ("rate", "REAL DEFAULT 0"),
+            ("discount_percent", "REAL DEFAULT 0"),
+            ("discount_amount", "REAL DEFAULT 0"),
+            ("tax_percent", "REAL DEFAULT 0"),
+            ("tax_amount", "REAL DEFAULT 0"),
+            ("amount", "REAL DEFAULT 0"),
+        ]:
+            try:
+                self._ensure_column("invoice_items", col, decl)
+            except Exception:
+                pass
+        
         # Companies
         for col, decl in [
             ("name", "TEXT"),
@@ -219,8 +289,8 @@ class Database:
     def add_party(self, *args, **kwargs):
         """Supports both dict input and positional params to match existing callers.
 
-        Dict keys: name, phone/mobile, email, gst_number/gstin, pan, address, state, opening_balance, balance_type, is_gst_registered, type
-        Positional signature: (name, mobile=None, email=None, gstin=None, pan=None, address=None, city=None, party_type='Customer')
+        Dict keys: name, phone/mobile, email, gst_number/gstin, pan, address, city, state, pincode, opening_balance, balance_type, is_gst_registered, party_type
+        Positional signature: (name, phone=None, email=None, gstin=None, pan=None, address=None, city=None, state=None, pincode=None, opening_balance=0, balance_type='dr', is_gst_registered=0, party_type='Customer')
         """
         if args and isinstance(args[0], dict):
             d = args[0]
@@ -230,31 +300,35 @@ class Database:
             gst = d.get('gst_number') or d.get('gstin')
             pan = d.get('pan')
             address = d.get('address')
+            city = d.get('city')
             state = d.get('state')
+            pincode = d.get('pincode')
             opening = d.get('opening_balance', 0) or 0
             bal_type = d.get('balance_type', 'dr')
             is_gst = d.get('is_gst_registered', 1 if gst else 0)
-            ptype = d.get('type', 'Customer')
+            party_type = d.get('type') or d.get('party_type', 'Customer')
         else:
             # Map legacy positional args
             name = args[0] if args else kwargs.get('name')
-            phone = kwargs.get('mobile')
+            phone = kwargs.get('phone') or kwargs.get('mobile')
             email = kwargs.get('email')
             gst = kwargs.get('gstin')
             pan = kwargs.get('pan')
             address = kwargs.get('address')
-            state = kwargs.get('state') or kwargs.get('city')
-            opening = 0
-            bal_type = 'dr'
-            is_gst = 1 if gst else 0
-            ptype = kwargs.get('party_type', 'Customer')
+            city = kwargs.get('city')
+            state = kwargs.get('state')
+            pincode = kwargs.get('pincode')
+            opening = kwargs.get('opening_balance', 0) or 0
+            bal_type = kwargs.get('balance_type', 'dr')
+            is_gst = kwargs.get('is_gst_registered', 0)
+            party_type = kwargs.get('party_type', 'Customer')
 
         cur = self._execute(
             """
-            INSERT INTO parties(name, phone, email, type, gst_number, pan, address, state, opening_balance, balance_type, is_gst_registered)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO parties(name, mobile, email, party_type, gst_number, pan, address, city, state, pincode, opening_balance, balance_type)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             """,
-            (name, phone, email, ptype, gst, pan, address, state, float(opening or 0), bal_type, int(1 if is_gst else 0)),
+            (name, phone, email, party_type, gst, pan, address, city, state, pincode, float(opening or 0), bal_type),
         )
         return cur.lastrowid
 
@@ -272,10 +346,10 @@ class Database:
         self._execute("DELETE FROM parties WHERE id = ?", (party_id,))
 
     # --- products ---
-    def add_product(self, name, hsn_code=None, barcode=None, unit='PCS', sales_rate=0, purchase_rate=0, discount_percent=0, mrp=0, stock_quantity=0, product_type='Goods'):
+    def add_product(self, name, hsn_code=None, barcode=None, unit='PCS', sales_rate=0, purchase_rate=0, discount_percent=0, mrp=0, opening_stock=0, low_stock=0, product_type='Goods', category=None, description=None):
         cur = self._execute(
-            "INSERT INTO products(name, hsn_code, sales_rate, stock_quantity) VALUES(?,?,?,?)",
-            (name, hsn_code, float(sales_rate or 0), float(stock_quantity or 0)),
+            "INSERT INTO products(name, hsn_code, barcode, unit, sales_rate, purchase_rate, discount_percent, mrp, opening_stock, low_stock, product_type, category, description) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (name, hsn_code, barcode, unit, float(sales_rate or 0), float(purchase_rate or 0), float(discount_percent or 0), float(mrp or 0), float(opening_stock or 0), float(low_stock or 0), product_type, category, description),
         )
         return cur.lastrowid
 
@@ -284,13 +358,32 @@ class Database:
         if not pid:
             return False
         self._execute(
-            "UPDATE products SET name = ?, hsn_code = ?, sales_rate = ?, stock_quantity = ? WHERE id = ?",
+            """
+            UPDATE products SET
+            name = ?, hsn_code = ?, barcode = ?, unit = ?,
+            sales_rate = ?, purchase_rate = ?, discount_percent = ?, mrp = ?,
+            tax_rate = ?, sgst_rate = ?, cgst_rate = ?,
+            opening_stock = ?, low_stock = ?, product_type = ?, category = ?, description = ?
+            WHERE id = ?
+            """,
             (
-                product_data.get('name'),
-                product_data.get('hsn_code'),
-                float(product_data.get('sales_rate') or 0),
-                float(product_data.get('stock_quantity') or 0),
-                pid,
+            product_data.get('name'),
+            product_data.get('hsn_code'),
+            product_data.get('barcode'),
+            product_data.get('unit'),
+            float(product_data.get('sales_rate') or 0),
+            float(product_data.get('purchase_rate') or 0),
+            float(product_data.get('discount_percent') or 0),
+            float(product_data.get('mrp') or 0),
+            float(product_data.get('tax_rate') or 0),
+            float(product_data.get('sgst_rate') or 0),
+            float(product_data.get('cgst_rate') or 0),
+            float(product_data.get('opening_stock') or 0),
+            float(product_data.get('low_stock') or 0),
+            product_data.get('product_type'),
+            product_data.get('category'),
+            product_data.get('description'),
+            pid,
             ),
         )
         return True
@@ -329,7 +422,73 @@ class Database:
         return True
 
     def delete_invoice(self, invoice_id: int):
+        # Delete invoice items first (foreign key constraint)
+        self._execute("DELETE FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
+        # Then delete the invoice
         self._execute("DELETE FROM invoices WHERE id = ?", (invoice_id,))
+
+    def get_invoice_by_number(self, invoice_no: str):
+        """Get invoice by invoice number"""
+        invoices = self._query("SELECT * FROM invoices WHERE invoice_no = ? LIMIT 1", (invoice_no,))
+        return invoices[0] if invoices else None
+        
+    def get_invoice_by_id(self, invoice_id: int):
+        """Get invoice by ID"""
+        invoices = self._query("SELECT * FROM invoices WHERE id = ? LIMIT 1", (invoice_id,))
+        return invoices[0] if invoices else None
+    
+    def invoice_no_exists(self, invoice_no: str):
+        """Check if invoice number already exists"""
+        result = self._query("SELECT COUNT(*) as count FROM invoices WHERE invoice_no = ?", (invoice_no,))
+        return result[0]['count'] > 0 if result else False
+
+    # --- invoice items ---
+    def add_invoice_item(self, invoice_id: int, product_id: int, product_name: str, 
+                        hsn_code: str = None, quantity: float = 0, unit: str = 'Piece',
+                        rate: float = 0, discount_percent: float = 0, discount_amount: float = 0,
+                        tax_percent: float = 0, tax_amount: float = 0, amount: float = 0):
+        """Add a line item to an invoice"""
+        cur = self._execute(
+            """
+            INSERT INTO invoice_items(invoice_id, product_id, product_name, hsn_code, 
+                                    quantity, unit, rate, discount_percent, discount_amount,
+                                    tax_percent, tax_amount, amount) 
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (invoice_id, product_id, product_name, hsn_code, float(quantity), unit,
+             float(rate), float(discount_percent), float(discount_amount),
+             float(tax_percent), float(tax_amount), float(amount))
+        )
+        return cur.lastrowid
+
+    def get_invoice_items(self, invoice_id: int):
+        """Get all line items for an invoice"""
+        return self._query("SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY id", (invoice_id,))
+    
+    def delete_invoice_items(self, invoice_id: int):
+        """Delete all line items for an invoice"""
+        self._execute("DELETE FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
+    
+    def get_invoice_with_items(self, invoice_no: str):
+        """Get complete invoice with line items"""
+        invoice = self.get_invoice_by_number(invoice_no)
+        if not invoice:
+            return None
+        
+        # Get party details
+        party = None
+        if invoice['party_id']:
+            parties = self._query("SELECT * FROM parties WHERE id = ?", (invoice['party_id'],))
+            party = parties[0] if parties else None
+        
+        # Get line items
+        items = self.get_invoice_items(invoice['id'])
+        
+        return {
+            'invoice': invoice,
+            'party': party,
+            'items': items
+        }
 
     # --- payments (minimal) ---
     def add_payment(self, payment_id, party_id, amount, date, mode='Cash', invoice_id=None, notes=None):

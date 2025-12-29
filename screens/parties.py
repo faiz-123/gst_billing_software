@@ -156,10 +156,12 @@ class PartiesScreen(BaseScreen):
             }
         """)
         self.search_input.textChanged.connect(self.filter_parties)
+        
         search_layout.addWidget(self.search_input)
-
         action_layout.addWidget(search_container)
         action_layout.addStretch()
+
+       
 
         buttons_data = [
             ("📊 Export", "secondary", self.export_parties),
@@ -211,6 +213,12 @@ class PartiesScreen(BaseScreen):
             action_layout.addWidget(btn)
 
         self.add_content(action_frame)
+
+    def force_upper(self, text):
+        if text != text.upper():
+            cursor_pos = self.search_input.cursorPosition()
+            self.search_input.setText(text.upper())
+            self.search_input.setCursorPosition(cursor_pos)
 
     def setup_filters(self):
         """Setup enhanced filter controls"""
@@ -451,9 +459,12 @@ class PartiesScreen(BaseScreen):
             if hasattr(self, 'count_label'):
                 self.count_label.setText(f"📊 Total: {len(self.all_parties_data)} parties")
         except Exception as e:
-            # Show enhanced sample data if database not available
-            print(f"Database not available, using sample data: {e}")
-            self.load_sample_data()
+            # Show error if database not available
+            QMessageBox.critical(self, "Database Error", f"Could not load parties from database:\n{e}")
+            self.all_parties_data = []
+            self.populate_table([])
+            if hasattr(self, 'count_label'):
+                self.count_label.setText("No parties found.")
 
     def populate_table(self, parties_data):
         """Populate table with enhanced party data"""
@@ -467,7 +478,7 @@ class PartiesScreen(BaseScreen):
             self.parties_table.setItem(row, 1, self.parties_table.create_item(party['name'], Qt.AlignCenter))
 
             # Column 2: Type with icon
-            party_type = party['type']
+            party_type = party.get('party_type', '')
             type_icon = "🏢" if party_type == "Customer" else "🏭" if party_type == "Supplier" else "🔄"
             type_display = f"{type_icon} {party_type}"
             self.parties_table.setItem(row, 2, self.parties_table.create_item(type_display, Qt.AlignCenter))
@@ -554,6 +565,7 @@ class PartiesScreen(BaseScreen):
 
     def filter_parties(self, *_):
         """Enhanced filter parties based on search and multiple filters"""
+        self.force_upper(self.search_input.text())
         search_text = self.search_input.text().lower()
 
         # Get filter values
@@ -580,7 +592,7 @@ class PartiesScreen(BaseScreen):
                     continue
 
             # Type filter
-            if type_text != "All" and party.get('type', '') != type_text:
+            if type_text != "All" and party.get('party_type', '') != type_text:
                 continue
 
             # GST filter
@@ -619,14 +631,14 @@ class PartiesScreen(BaseScreen):
                 return
 
             total = len(filtered_data)
-            customers = len([p for p in filtered_data if p.get('type') == 'Customer'])
-            suppliers = len([p for p in filtered_data if p.get('type') == 'Supplier'])
-            both_type = len([p for p in filtered_data if p.get('type') == 'Both'])
+            customers = len([p for p in filtered_data if p.get('party_type') == 'Customer'])
+            suppliers = len([p for p in filtered_data if p.get('party_type') == 'Supplier'])
+            both_type = len([p for p in filtered_data if p.get('party_type') == 'Both'])
             gst_registered = len([p for p in filtered_data if p.get('gst_number')])
 
             # Print filtered stats for debugging
-            print(f"Filtered Stats - Total: {total}, Customers: {customers + both_type}, "
-                  f"Suppliers: {suppliers + both_type}, GST Registered: {gst_registered}")
+            # print(f"Filtered Stats - Total: {total}, Customers: {customers + both_type}, "
+            #       f"Suppliers: {suppliers + both_type}, GST Registered: {gst_registered}")
 
         except Exception as e:
             print(f"Error updating filtered stats: {e}")
@@ -779,9 +791,9 @@ class PartiesScreen(BaseScreen):
                 return
 
             total_parties = len(self.all_parties_data)
-            customers = len([p for p in self.all_parties_data if p.get('type') == 'Customer'])
-            suppliers = len([p for p in self.all_parties_data if p.get('type') == 'Supplier'])
-            both_type = len([p for p in self.all_parties_data if p.get('type') == 'Both'])
+            customers = len([p for p in self.all_parties_data if p.get('party_type') == 'Customer'])
+            suppliers = len([p for p in self.all_parties_data if p.get('party_type') == 'Supplier'])
+            both_type = len([p for p in self.all_parties_data if p.get('party_type') == 'Both'])
             gst_registered = len([p for p in self.all_parties_data if p.get('gst_number')])
 
             # Update stats if we have dynamic references (this would need to be implemented)
@@ -793,52 +805,13 @@ class PartiesScreen(BaseScreen):
             }
 
             # For now, we'll print the updated stats
-            print(f"Updated Stats - Total: {total_parties}, Customers: {customers + both_type}, "
-                  f"Suppliers: {suppliers + both_type}, GST Registered: {gst_registered}")
+            # print(f"Updated Stats - Total: {total_parties}, Customers: {customers + both_type}, "
+            #       f"Suppliers: {suppliers + both_type}, GST Registered: {gst_registered}")
 
         except Exception as e:
             print(f"Error updating header stats: {e}")
 
-    def load_sample_data(self):
-        """Load enhanced sample data"""
-        sample_data = [
-            {
-                'id': 1, 'name': 'ABC Corporation', 'type': 'Customer',
-                'phone': '9876543210', 'email': 'abc@corp.com',
-                'gst_number': '27AABCU9603R1Z0', 'opening_balance': 5000,
-                'address': '123 Business Park, Mumbai', 'pan': 'AABCU9603R'
-            },
-            {
-                'id': 2, 'name': 'XYZ Suppliers', 'type': 'Supplier',
-                'phone': '9876543211', 'email': 'xyz@supplier.com',
-                'gst_number': '27AABCU9603R1Z1', 'opening_balance': -2000,
-                'address': '456 Industrial Area, Delhi', 'pan': 'AABCU9603S'
-            },
-            {
-                'id': 3, 'name': 'Global Traders', 'type': 'Both',
-                'phone': '9876543212', 'email': 'global@traders.com',
-                'gst_number': '27AABCU9603R1Z2', 'opening_balance': 1500,
-                'address': '789 Commercial Complex, Bangalore', 'pan': 'AABCU9603T'
-            },
-            {
-                'id': 4, 'name': 'Local Vendor', 'type': 'Supplier',
-                'phone': '9876543213', 'email': 'local@vendor.com',
-                'gst_number': '', 'opening_balance': -500,
-                'address': '321 Market Street, Chennai', 'pan': ''
-            },
-            {
-                'id': 5, 'name': 'Premium Client', 'type': 'Customer',
-                'phone': '9876543214', 'email': 'premium@client.com',
-                'gst_number': '27AABCU9603R1Z4', 'opening_balance': 10000,
-                'address': '567 Corporate Tower, Pune', 'pan': 'AABCU9603P'
-            }
-        ]
-        self.all_parties_data = sample_data
-        self.populate_table(sample_data)
-        self.update_header_stats()
-        # Ensure count label shows total when using sample data
-        if hasattr(self, 'count_label'):
-            self.count_label.setText(f"📊 Total: {len(self.all_parties_data)} parties")
+    # Removed load_sample_data: always show actual database data
 
     def edit_party(self, party):
         """Open edit party dialog"""

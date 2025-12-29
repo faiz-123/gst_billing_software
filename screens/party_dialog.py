@@ -109,6 +109,13 @@ class PartyDialog(QDialog):
 
         # Name, Mobile, Email
         self.name_input = create_input(self.party_data.get('name', ''), "Enter party name")
+        # Force uppercase in Party Name QLineEdit
+        def force_upper(text):
+            if text != text.upper():
+                cursor_pos = self.name_input.cursorPosition()
+                self.name_input.setText(text.upper())
+                self.name_input.setCursorPosition(cursor_pos)
+        self.name_input.textChanged.connect(force_upper)
         # Clear error highlight as soon as user types
         try:
             self.name_input.textChanged.connect(self._clear_name_error)
@@ -172,16 +179,19 @@ class PartyDialog(QDialog):
         self.address_input.setMinimumHeight(40)
         self.address_input.setStyleSheet(f"QTextEdit {{ border: 1px solid {BORDER}; border-radius: 6px; padding: 8px; color: {TEXT_PRIMARY}; background: {WHITE}; }}")
         address_container.addWidget(self.address_input)
-        # Inline grid for State/Pin under Address
+        # Inline grid for State/City/Pin under Address
         location_grid = QGridLayout()
         location_grid.setHorizontalSpacing(12)
         location_grid.setVerticalSpacing(8)
+        self.city_input = create_input(self.party_data.get('city', ''), "Enter city")
         self.state_input = create_input(self.party_data.get('state', ''), "Enter state")
         self.pincode_input = create_input(self.party_data.get('pincode', ''), "Enter pin code")
-        location_grid.addWidget(create_label("State"), 0, 0)
-        location_grid.addWidget(create_label("Pin Code"), 0, 1)
-        location_grid.addWidget(self.state_input, 1, 0)
-        location_grid.addWidget(self.pincode_input, 1, 1)
+        location_grid.addWidget(create_label("City"), 0, 0)
+        location_grid.addWidget(create_label("State"), 0, 1)
+        location_grid.addWidget(create_label("Pin Code"), 0, 2)
+        location_grid.addWidget(self.city_input, 1, 0)
+        location_grid.addWidget(self.state_input, 1, 1)
+        location_grid.addWidget(self.pincode_input, 1, 2)
         address_container.addLayout(location_grid)
         form_layout.addWidget(address_frame, 1, 0, 1, 3)
 
@@ -258,15 +268,25 @@ class PartyDialog(QDialog):
         if bi >= 0:
             self.balance_type.setCurrentIndex(bi)
         self.state_input.setText(d.get('state', ''))
+        self.city_input.setText(d.get('city', ''))
 
     def save_party(self):
         name = self.name_input.text().strip()
+        # Check for duplicate party name (case-insensitive)
+        if hasattr(db, 'get_parties'):
+            existing_parties = db.get_parties()
+            for p in existing_parties:
+                if p.get('name', '').strip().upper() == name.upper():
+                    QMessageBox.warning(self, "Duplicate Name", f"A party with the name '{name}' already exists.")
+                    self.name_input.setFocus()
+                    return
         phone = self.phone_input.text().strip()
         email = self.email_input.text().strip()
         gst = self.gst_number_input.text().strip()
         pan = self.pan_input.text().strip()
         address = self.address_input.toPlainText().strip()
         state = self.state_input.text().strip()
+        city = self.city_input.text().strip()
 
         if not name:
             # Highlight name input instead of showing a message box
@@ -291,6 +311,7 @@ class PartyDialog(QDialog):
             'pan': pan,
             'address': address,
             'state': state,
+            'city': city,
             'opening_balance': opening,
             'balance_type': 'dr' if 'Receivable' in self.balance_type.currentText() else 'cr',
             'is_gst_registered': 1 if gst else 0,

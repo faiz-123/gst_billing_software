@@ -46,15 +46,15 @@ class ProductsScreen(BaseScreen):
         stats_layout.setObjectName("stats_layout")
 
         # Create stat cards and store label references
-        self.total_products_label, card1 = self.create_stat_card("📦", "Total Products", "0", PRIMARY)
-        self.in_stock_label, card2 = self.create_stat_card("📈", "In Stock", "0", SUCCESS)
-        self.low_stock_label, card3 = self.create_stat_card("⚠️", "Low Stock", "0", WARNING)
-        self.out_stock_label, card4 = self.create_stat_card("❌", "Out of Stock", "0", DANGER)
+        # self.total_products_label, card1 = self.create_stat_card("📦", "Total Products", "0", PRIMARY)
+        # self.in_stock_label, card2 = self.create_stat_card("📈", "In Stock", "0", SUCCESS)
+        # self.low_stock_label, card3 = self.create_stat_card("⚠️", "Low Stock", "0", WARNING)
+        # self.out_stock_label, card4 = self.create_stat_card("❌", "Out of Stock", "0", DANGER)
         
-        stats_layout.addWidget(card1)
-        stats_layout.addWidget(card2)
-        stats_layout.addWidget(card3)
-        stats_layout.addWidget(card4)
+        # stats_layout.addWidget(card1)
+        # stats_layout.addWidget(card2)
+        # stats_layout.addWidget(card3)
+        # stats_layout.addWidget(card4)
         
         stats_widget = QWidget()
         stats_widget.setLayout(stats_layout)
@@ -161,7 +161,15 @@ class ProductsScreen(BaseScreen):
                 background: transparent;
             }
         """)
-        self.search_input.textChanged.connect(self.filter_products)
+        # Force uppercase as user types
+        def force_upper(text):
+            cursor_pos = self.search_input.cursorPosition()
+            self.search_input.blockSignals(True)
+            self.search_input.setText(text.upper())
+            self.search_input.setCursorPosition(cursor_pos)
+            self.search_input.blockSignals(False)
+            self.filter_products()
+        self.search_input.textChanged.connect(force_upper)
         search_layout.addWidget(self.search_input)
         
         action_layout.addWidget(search_container)
@@ -379,10 +387,9 @@ class ProductsScreen(BaseScreen):
         table_layout.addLayout(header_layout)
         
         # Enhanced table
-        # Include 'Type' to match columns used in populate_table (indexes 0..8)
-        headers = ["#", "Product Name", "Type", "Category", "SKU", "Price", "Stock", "Status", "Actions"]
+        headers = ["No", "Product Name", "Price", "Stock", "Status", "Actions"]
         self.products_table = CustomTable(0, len(headers), headers)
-        
+
         # Enhanced table styling
         self.products_table.setStyleSheet(f"""
             QTableWidget {{
@@ -414,11 +421,11 @@ class ProductsScreen(BaseScreen):
             }}
         """)
         
-    # Set optimal column widths
-        column_widths = [50, 300, 80, 120, 100, 100, 80, 100, 160]
+        # Set optimal column widths for 7 columns
+        column_widths = [30, 700, 100, 100, 100, 120]
         for i, width in enumerate(column_widths):
             self.products_table.setColumnWidth(i, width)
-        
+
         # Set minimum height for better appearance and row size for actions
         self.products_table.setMinimumHeight(400)
         try:
@@ -426,8 +433,6 @@ class ProductsScreen(BaseScreen):
             vh.setDefaultSectionSize(52)
         except Exception:
             pass
-
-        self.products_table.setColumnWidth(8, 120)  # Actions (compact)
 
         table_layout.addWidget(self.products_table)
         self.add_content(table_frame)
@@ -516,61 +521,42 @@ class ProductsScreen(BaseScreen):
     def populate_table(self, products_data):
         """Populate table with enhanced products data"""
         self.products_table.setRowCount(len(products_data))
-        
         for row, product in enumerate(products_data):
-            # Ensure adequate row height for action buttons
             self.products_table.setRowHeight(row, 38)
             # Column 0: Row number
             self.products_table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
-            
             # Column 1: Product name with icon
             product_type = product.get('type', '')
             type_icon = "📦" if product_type == "Goods" else "🔧"
             name_display = f"{type_icon} {product.get('name', '')}"
             self.products_table.setItem(row, 1, QTableWidgetItem(name_display))
-            
-            # Column 2: Type with styling
-            self.products_table.setItem(row, 2, QTableWidgetItem(product.get('type', '')))
-            
-            # Column 3: Category
-            self.products_table.setItem(row, 3, QTableWidgetItem(product.get('category', 'N/A')))
-            
-            # Column 4: SKU
-            self.products_table.setItem(row, 4, QTableWidgetItem(product.get('sku', 'N/A')))
-            
-            # Column 5: Price with currency
-            price_display = f"₹{product.get('selling_price', 0):,.2f}"
-            self.products_table.setItem(row, 5, QTableWidgetItem(price_display))
-            
-            # Column 6: Stock display with units
-            stock = product.get('stock_quantity', 0)
+            # Column 2: Price with currency
+            price_display = f"₹{product.get('sales_rate', 0):,.2f}"
+            self.products_table.setItem(row, 2, QTableWidgetItem(price_display))
+            # Column 3: Stock display with units
+            stock = product.get('opening_stock', 0)
             unit = product.get('unit', 'Piece')
             if product.get('type', '') == 'Service':
                 stock_text = "∞"
             else:
                 stock_text = f"{stock} {unit}"
-            self.products_table.setItem(row, 6, QTableWidgetItem(stock_text))
-            
-            # Column 7: Status with color coding
+            self.products_table.setItem(row, 3, QTableWidgetItem(stock_text))
+            # Column 4: Status with color coding
             status = self.get_stock_status(product)
             status_item = QTableWidgetItem(status)
-            
-            # Color code status
             if status == "In Stock":
                 status_item.setBackground(Qt.green)
-                status_item.setForeground(Qt.white)
+                status_item.setForeground(Qt.black)
             elif status == "Low Stock":
                 status_item.setBackground(Qt.yellow)
                 status_item.setForeground(Qt.black)
             elif status == "Out of Stock":
                 status_item.setBackground(Qt.red)
-                status_item.setForeground(Qt.white)
-            
-            self.products_table.setItem(row, 7, status_item)
-            
-            # Column 8: Action buttons
+                status_item.setForeground(Qt.black)
+            self.products_table.setItem(row, 4, status_item)
+            # Column 5: Action buttons
             actions_widget = self.create_action_buttons(product)
-            self.products_table.setCellWidget(row, 8, actions_widget)
+            self.products_table.setCellWidget(row, 5, actions_widget)
     
     def update_stats(self, products_data):
         """Update statistics with real data"""
@@ -681,9 +667,9 @@ class ProductsScreen(BaseScreen):
             # Search filter (name, SKU, category)
             if search_text:
                 search_fields = [
-                    product.get('name', '').lower(),
-                    product.get('sku', '').lower(),
-                    product.get('category', '').lower()
+                    (product.get('name') or '').lower(),
+                    (product.get('sku') or '').lower(),
+                    (product.get('category') or '').lower()
                 ]
                 if not any(search_text in field for field in search_fields):
                     continue
@@ -735,10 +721,10 @@ class ProductsScreen(BaseScreen):
         low_stock_count = sum(1 for p in products if self.get_stock_status(p) == "Low Stock")
         out_stock_count = sum(1 for p in products if self.get_stock_status(p) == "Out of Stock")
         
-        self.total_products_label.setText(str(total))
-        self.in_stock_label.setText(str(in_stock_count))
-        self.low_stock_label.setText(str(low_stock_count))
-        self.out_stock_label.setText(str(out_stock_count))
+        # self.total_products_label.setText(str(total))
+        # self.in_stock_label.setText(str(in_stock_count))
+        # self.low_stock_label.setText(str(low_stock_count))
+        # self.out_stock_label.setText(str(out_stock_count))
     
     def add_product(self):
         """Open add product dialog"""

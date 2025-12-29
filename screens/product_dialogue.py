@@ -133,7 +133,7 @@ class ProductDialog(QDialog):
         row_discount_mrp.addSpacing(16)
         row_discount_mrp.addLayout(mrp_col)
         form_layout.addLayout(row_discount_mrp)
-        # Tax row
+        # Tax row with GST, SGST, CGST
         row_tax = QHBoxLayout()
         row_tax.setSpacing(16)
         tax_col = QVBoxLayout()
@@ -144,16 +144,32 @@ class ProductDialog(QDialog):
         self.tax_rate.setValue(18.0)
         self.tax_rate.setMinimumHeight(40)
         self.tax_rate.setStyleSheet(self.input_style())
+        self.tax_rate.valueChanged.connect(self._on_gst_changed)
         tax_col.addWidget(self.tax_rate)
-        checkbox_col = QVBoxLayout()
-        checkbox_col.addWidget(self.label("Tax Options"))
-        self.tax_inclusive = QCheckBox("Price is inclusive of tax")
-        self.tax_inclusive.setStyleSheet(f"font-size: 14px; color: {TEXT_PRIMARY};")
-        checkbox_col.addWidget(self.tax_inclusive)
+
+        # Remove Tax Options, move SGST/CGST to right side
+        sgst_cgst_col = QHBoxLayout()
+        sgst_cgst_col.addWidget(self.label("SGST %"))
+        self.sgst_input = QDoubleSpinBox()
+        self.sgst_input.setRange(0, 100)
+        self.sgst_input.setDecimals(2)
+        self.sgst_input.setValue(9.0)
+        self.sgst_input.setMinimumHeight(40)
+        self.sgst_input.setStyleSheet(self.input_style())
+        sgst_cgst_col.addWidget(self.sgst_input)
+        sgst_cgst_col.addWidget(self.label("CGST %"))
+        self.cgst_input = QDoubleSpinBox()
+        self.cgst_input.setRange(0, 100)
+        self.cgst_input.setDecimals(2)
+        self.cgst_input.setValue(9.0)
+        self.cgst_input.setMinimumHeight(40)
+        self.cgst_input.setStyleSheet(self.input_style())
+        sgst_cgst_col.addWidget(self.cgst_input)
         row_tax.addLayout(tax_col)
         row_tax.addSpacing(16)
-        row_tax.addLayout(checkbox_col)
+        row_tax.addLayout(sgst_cgst_col)
         form_layout.addLayout(row_tax)
+
         # Opening & Low Stock
         row_opening = QHBoxLayout()
         row_opening.setSpacing(16)
@@ -290,6 +306,11 @@ class ProductDialog(QDialog):
         if self.product_data:
             self.populate_form()
 
+    def _on_gst_changed(self, value):
+        half = round(value / 2, 2)
+        self.sgst_input.setValue(half)
+        self.cgst_input.setValue(half)
+
     def label(self, text):
         lbl = QLabel(text)
         lbl.setFont(QFont("Arial", 16))
@@ -301,7 +322,19 @@ class ProductDialog(QDialog):
         edit.setStyleSheet(self.input_style())
         edit.setMinimumHeight(40)
         edit.setFont(QFont("Arial", 16))
+        # Force uppercase input
+        edit.textChanged.connect(lambda text: self._to_upper(edit, text))
         return edit
+
+    @staticmethod
+    def _to_upper(edit, text):
+        upper = text.upper()
+        if text != upper:
+            cursor_pos = edit.cursorPosition()
+            edit.blockSignals(True)
+            edit.setText(upper)
+            edit.setCursorPosition(cursor_pos)
+            edit.blockSignals(False)
 
     def input_style(self):
         return f"""
@@ -339,6 +372,8 @@ class ProductDialog(QDialog):
         self.mrp.setValue(data.get('mrp', 0))
         self.discount_input.setValue(data.get('discount', 0))
         self.tax_rate.setValue(data.get('tax_rate', 18))
+        self.sgst_input.setValue(data.get('sgst', 9))
+        self.cgst_input.setValue(data.get('cgst', 9))
         self.hsn_code.setText(data.get('hsn_code', ''))
         self.tax_inclusive.setChecked(data.get('tax_inclusive', False))
         
@@ -371,6 +406,9 @@ class ProductDialog(QDialog):
         hsn = self.hsn_code.text().strip() or None
         stock_qty = float(self.opening_stock.value() if self.track_stock.isChecked() else 0)
 
+        sgst = self.sgst_input.value()
+        cgst = self.cgst_input.value()
+        tax_rate = self.tax_rate.value()
         try:
             if self.product_data:  # Editing
                 update_payload = {
@@ -379,6 +417,9 @@ class ProductDialog(QDialog):
                     'hsn_code': hsn,
                     'sales_rate': float(selling_price),
                     'stock_quantity': stock_qty,
+                    'sgst': sgst,
+                    'cgst': cgst,
+                    'tax_rate': tax_rate,
                 }
                 db.update_product(update_payload)
                 QMessageBox.information(self, "Success", "Product updated successfully!")
@@ -386,8 +427,17 @@ class ProductDialog(QDialog):
                 db.add_product(
                     name=name,
                     hsn_code=hsn,
+                    barcode=self.barcode_input.text().strip() or None,
+                    unit=self.unit_combo.currentText(),
                     sales_rate=float(selling_price),
-                    stock_quantity=stock_qty,
+                    purchase_rate=float(self.purchase_price.value()),
+                    discount_percent=float(self.discount_input.value()),
+                    mrp=float(self.mrp.value()),
+                    opening_stock=float(self.opening_stock.value()),
+                    low_stock=float(self.low_stock_alert.value()),
+                    product_type=self.type_combo.currentText(),
+                    category=self.category_input.text().strip() or None,
+                    description=self.description_input.toPlainText().strip() or None
                 )
                 QMessageBox.information(self, "Success", "Product added successfully!")
             

@@ -378,7 +378,6 @@ class InvoiceItemWidget(QWidget):
             pass
         return dlg.selected_name if dlg.exec_() == QDialog.Accepted and getattr(dlg, 'selected_name', None) else None
 
-
     def on_product_selected(self, name: str):
         """Handle product selection from completer and update fields"""
         product_data = self._product_map.get(name)
@@ -481,13 +480,17 @@ class InvoiceItemWidget(QWidget):
 
 class InvoiceDialog(QDialog):
     """Enhanced dialog for creating/editing invoices with modern UI"""
-    def __init__(self, parent=None, invoice_data=None):
+    def __init__(self, parent=None, invoice_data=None, invoice_number=None):
         super().__init__(parent)
         self.invoice_data = invoice_data
         self.products = []
         self.parties = []
         # Guard to avoid re-entrant opening of PartySelector from typing
         self._party_selector_active = False
+
+        # Load existing invoice if invoice_number is provided
+        if invoice_number and not invoice_data:
+            self.load_existing_invoice(invoice_number)
 
         # Initialize window properties
         self.init_window()
@@ -498,8 +501,90 @@ class InvoiceDialog(QDialog):
         # Setup the complete UI
         self.setup_ui()
 
+        # Populate data if editing
+        if self.invoice_data:
+            self.populate_invoice_data()
+
         # Force maximize after everything is set up
         QTimer.singleShot(100, self.ensure_maximized)
+
+    def load_existing_invoice(self, invoice_number):
+        """Load existing invoice data by invoice number"""
+        try:
+            invoice_data = db.get_invoice_with_items(invoice_number)
+            if invoice_data:
+                self.invoice_data = invoice_data
+            else:
+                QMessageBox.warning(self, "Error", f"Invoice '{invoice_number}' not found!")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load invoice: {str(e)}")
+
+    def populate_invoice_data(self):
+        """Populate form fields with existing invoice data"""
+        if not self.invoice_data:
+            return
+        
+        try:
+            invoice = self.invoice_data['invoice']
+            party = self.invoice_data['party']
+            items = self.invoice_data.get('items', [])
+            
+            # Set invoice number
+            if hasattr(self, 'invoice_number'):
+                self.invoice_number.setText(invoice['invoice_no'])
+            
+            # Set dates
+            if hasattr(self, 'invoice_date'):
+                from PyQt5.QtCore import QDate
+                date_obj = QDate.fromString(invoice['date'], 'yyyy-MM-dd')
+                self.invoice_date.setDate(date_obj)
+            
+            # Set party
+            if hasattr(self, 'party_search') and party:
+                self.party_search.setText(party['name'])
+            
+            # Populate items
+            if items:
+                # Clear existing items first
+                for i in reversed(range(self.items_layout.count() - 1)):
+                    item_widget = self.items_layout.itemAt(i).widget()
+                    if isinstance(item_widget, InvoiceItemWidget):
+                        self.items_layout.removeWidget(item_widget)
+                        item_widget.deleteLater()
+                
+                # Add items from database
+                for item_data in items:
+                    item_widget = InvoiceItemWidget(products=self.products)
+                    
+                    # Set product name
+                    item_widget.product_input.setText(item_data['product_name'])
+                    
+                    # Set HSN code
+                    item_widget.hsn_edit.setText(item_data.get('hsn_code', ''))
+                    
+                    # Set values
+                    item_widget.quantity_spin.setValue(item_data['quantity'])
+                    item_widget.rate_spin.setValue(item_data['rate'])
+                    item_widget.discount_spin.setValue(item_data['discount_percent'])
+                    item_widget.tax_spin.setValue(item_data['tax_percent'])
+                    
+                    # Set unit
+                    item_widget.unit_label.setText(item_data.get('unit', 'Piece'))
+                    
+                    # Connect signals
+                    item_widget.add_requested.connect(self.add_item)
+                    item_widget.remove_btn.clicked.connect(lambda checked, w=item_widget: self.remove_item(w))
+                    item_widget.item_changed.connect(self.update_totals)
+                    
+                    # Add to layout
+                    self.items_layout.insertWidget(self.items_layout.count() - 1, item_widget)
+                
+                # Update row numbers and totals
+                self.number_items()
+                self.update_totals()
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Warning", f"Error populating invoice data: {str(e)}")
 
     def ensure_maximized(self):
         """Ensure the window is properly maximized"""
@@ -579,11 +664,11 @@ class InvoiceDialog(QDialog):
     def setup_content_sections(self):
         """Setup the main content sections with enhanced layout"""
         self.content_splitter = QSplitter(Qt.Vertical)
-        self.content_splitter.setStyleSheet(f"""
-            QSplitter {{ border: none; background: transparent; }}
-            QSplitter::handle {{ background: {BORDER}; border-radius: 3px; height: 6px; margin: 2px 10px; }}
-            QSplitter::handle:hover {{ background: {PRIMARY}; }}
-        """)
+        # self.content_splitter.setStyleSheet(f"""
+        #     QSplitter {{ border: none; background: transparent; }}
+        #     QSplitter::handle {{ background: {BORDER}; border-radius: 3px; height: 6px; margin: 2px 10px; }}
+        #     QSplitter::handle:hover {{ background: {PRIMARY}; }}
+        # """)
         self.header_frame = self.create_header_section()
         self.content_splitter.addWidget(self.header_frame)
         self.items_frame = self.create_items_section()
@@ -722,54 +807,71 @@ class InvoiceDialog(QDialog):
             f"</tr>"
             for i, it in enumerate(items)
         ])
+        
+        # Add totals rows directly in the main table
+        totals_rows = f"""
+            <tr style='border-top: 2px solid #666;'>
+                <td colspan='8' style='padding:8px;border:1px solid #ddd;text-align:right;font-weight:bold;background:#f9fafb;'>Subtotal:</td>
+                <td style='padding:8px;border:1px solid #ddd;text-align:right;font-weight:bold;background:#f9fafb;'>₹{subtotal:,.2f}</td>
+            </tr>
+            <tr>
+                <td colspan='8' style='padding:8px;border:1px solid #ddd;text-align:right;font-weight:bold;background:#f9fafb;'>Total Discount:</td>
+                <td style='padding:8px;border:1px solid #ddd;text-align:right;font-weight:bold;background:#f9fafb;'>-₹{total_discount:,.2f}</td>
+            </tr>
+            <tr>
+                <td colspan='8' style='padding:8px;border:1px solid #ddd;text-align:right;font-weight:bold;background:#f9fafb;'>Total Tax:</td>
+                <td style='padding:8px;border:1px solid #ddd;text-align:right;font-weight:bold;background:#f9fafb;'>₹{total_tax:,.2f}</td>
+            </tr>
+            <tr>
+                <td colspan='8' style='padding:8px;border:1px solid #ddd;text-align:right;font-weight:bold;background:#e5e7eb;'>Grand Total:</td>
+                <td style='padding:8px;border:1px solid #ddd;text-align:right;font-weight:bold;background:#e5e7eb;'>₹{grand_total:,.2f}</td>
+            </tr>
+        """
         html = f"""
         <html>
         <head>
             <meta charset='utf-8'>
             <style>
-                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827; }}
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827; margin: 20px; }}
                 h2 {{ margin: 0 0 8px 0; }}
                 .meta {{ margin-bottom: 12px; font-size: 14px; color: #374151; }}
-                table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
-                th {{ background:#f3f4f6; border:1px solid #ddd; padding:8px; text-align:left; }}
-                td {{ padding:8px; border:1px solid #ddd; }}
-                .totals-box {{ margin: 12px 0 0 0; width: 180px; float: right; border: 1px solid #ddd; border-radius: 6px; }}
-                .totals-box table {{ width: 100%; border-collapse: collapse; }}
-                .totals-box td {{ border: none; padding: 6px 8px; font-size: 14px; }}
-                .totals-box td.label {{ text-align: left; width: 60%; }}
-                .totals-box td.value {{ text-align: right; width: 40%; }}
+                .invoice-container {{ position: relative; }}
+                .main-table {{ border-collapse: collapse; width: 100%; font-size: 13px; margin-bottom: 15px; }}
+                .main-table th {{ background:#f3f4f6; border:1px solid #ddd; padding:8px; text-align:left; }}
+                .main-table td {{ padding:8px; border:1px solid #ddd; }}
+                .clearfix {{ clear: both; }}
             </style>
         </head>
         <body>
-            <h2>Invoice Preview</h2>
-            <div class='meta'>
-                <div><b>Party:</b> {party_name or '—'}</div>
-                <div><b>Date:</b> {inv_date or '—'} &nbsp;&nbsp; <b>Due:</b> {due_date or '—'}</div>
+            <div class='invoice-container'>
+                <h2>Invoice Preview</h2>
+                <div class='meta'>
+                    <div><b>Party:</b> {party_name or '—'}</div>
+                    <div><b>Date:</b> {inv_date or '—'} &nbsp;&nbsp; <b>Due:</b> {due_date or '—'}</div>
+                </div>
+                
+                <table class='main-table'>
+                    <thead>
+                        <tr>
+                            <th style='width: 40px;'>No</th>
+                            <th style='width: auto;'>Product</th>
+                            <th style='width: 80px;'>HSN</th>
+                            <th style='width: 80px; text-align:right;'>Qty</th>
+                            <th style='width: 60px;'>Unit</th>
+                            <th style='width: 100px; text-align:right;'>Rate</th>
+                            <th style='width: 80px; text-align:right;'>Disc%</th>
+                            <th style='width: 80px; text-align:right;'>Tax%</th>
+                            <th style='width: 120px; text-align:right;'>Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows_html if rows_html else "<tr><td colspan='9' style='text-align:center;color:#6b7280'>No items added</td></tr>"}
+                        {totals_rows if items else ""}
+                    </tbody>
+                </table>
+                
+                <div class='clearfix'></div>
             </div>
-            <table>
-                <colgroup>
-                    <col span="8" />
-                    <col style="width: 180px" />
-                </colgroup>
-                <thead>
-                    <tr>
-                        <th>No</th><th>Product</th><th>HSN</th><th style='text-align:right'>Qty</th>
-                        <th>Unit</th><th style='text-align:right'>Rate</th><th style='text-align:right'>Disc%</th>
-                        <th style='text-align:right'>Tax%</th><th style='text-align:right'>Amount</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows_html if rows_html else "<tr><td colspan='9' style='text-align:center;color:#6b7280'>No items added</td></tr>"}
-                </tbody>
-            </table>
-                        <div class='totals-box'>
-                            <table>
-                                <tr><td class='label'><b>Subtotal</b></td><td class='value'>₹{subtotal:,.2f}</td></tr>
-                                <tr><td class='label'><b>Total Discount</b></td><td class='value'>-₹{total_discount:,.2f}</td></tr>
-                                <tr><td class='label'><b>Total Tax</b></td><td class='value'>₹{total_tax:,.2f}</td></tr>
-                                <tr><td class='label'><b>Grand Total</b></td><td class='value'><b>₹{grand_total:,.2f}</b></td></tr>
-                            </table>
-                        </div>
         </body>
         </html>
         """
@@ -787,12 +889,81 @@ class InvoiceDialog(QDialog):
 
         actions = QHBoxLayout()
         actions.addStretch()
+        
+        # Print button
+        print_btn = QPushButton("🖨️ Print")
+        print_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {PRIMARY};
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: 500;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{
+                background: #1d4ed8;
+            }}
+        """)
+        print_btn.clicked.connect(lambda: self.print_invoice(html))
+        actions.addWidget(print_btn)
+        
         close_btn = QPushButton("Close")
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {TEXT_SECONDARY};
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: 500;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{
+                background: #4b5563;
+            }}
+        """)
         close_btn.clicked.connect(dlg.reject)
         actions.addWidget(close_btn)
         container.addLayout(actions)
 
         dlg.exec_()
+
+    def print_invoice(self, html_content):
+        """Print the invoice using the system's print dialog"""
+        try:
+            from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
+            from PyQt5.QtGui import QTextDocument
+            from PyQt5.QtCore import QMarginsF
+            
+            # Create a printer
+            printer = QPrinter(QPrinter.HighResolution)
+            printer.setPageSize(QPrinter.A4)
+            printer.setPageMargins(QMarginsF(15, 15, 15, 15), QPrinter.Millimeter)
+            
+            # Show print dialog
+            print_dialog = QPrintDialog(printer, self)
+            print_dialog.setWindowTitle("Print Invoice")
+            
+            if print_dialog.exec_() == QPrintDialog.Accepted:
+                # Create a QTextDocument and set the HTML content
+                document = QTextDocument()
+                document.setHtml(html_content)
+                
+                # Print the document
+                document.print_(printer)
+                
+                QMessageBox.information(self, "Success", "Invoice sent to printer successfully!")
+                
+        except ImportError:
+            # Fallback if print support is not available
+            QMessageBox.warning(self, "Print Unavailable", 
+                              "Print functionality requires PyQt5 print support.\n"
+                              "You can copy the invoice content and print manually.")
+        except Exception as e:
+            QMessageBox.critical(self, "Print Error", 
+                               f"An error occurred while printing:\n{str(e)}")
 
     # The following helper sections mirror the original dialog
     def open_party_selector(self):
@@ -1032,13 +1203,44 @@ class InvoiceDialog(QDialog):
         inv_num_lbl.setStyleSheet(label_style)
         inv_num_layout.addWidget(inv_num_lbl)
         inv_num_widget.setFixedWidth(170)
-        invoice_number = QLineEdit("05")
-        invoice_number.setReadOnly(True)
-        invoice_number.setStyleSheet(f"background: {WHITE}; color: {DANGER}; font-size: 25x bold;")
-        invoice_number.setAlignment(Qt.AlignCenter)
-        invoice_number.setFixedWidth(150)
-        invoice_number.setFixedHeight(45)
-        inv_num_layout.addWidget(invoice_number)
+        # Fetch next invoice number from database if creating new
+        if not self.invoice_data:
+            try:
+                if hasattr(db, 'get_next_invoice_number'):
+                    next_inv_no = db.get_next_invoice_number()
+                else:
+                    # Fallback: get max invoice_no and increment
+                    invoices = db.get_invoices() or []
+                    max_no = 0
+                    for inv in invoices:
+                        inv_no = str(inv.get('invoice_no', ''))
+                        if inv_no.startswith('INV-'):
+                            try:
+                                num = int(inv_no.replace('INV-', '').split()[0])
+                                max_no = max(max_no, num)
+                            except Exception:
+                                pass
+                    next_inv_no = f"INV-{max_no+1:03d}"
+            except Exception:
+                next_inv_no = "INV-001"
+        else:
+            # Editing existing invoice
+            if isinstance(self.invoice_data, dict):
+                # New format: dict with invoice data
+                if 'invoice' in self.invoice_data:
+                    next_inv_no = self.invoice_data['invoice'].get('invoice_no', "INV-001")
+                else:
+                    next_inv_no = self.invoice_data.get('invoice_no', "INV-001")
+            else:
+                # Old format or unexpected data
+                next_inv_no = "INV-001"
+        self.invoice_number = QLineEdit(next_inv_no)
+        self.invoice_number.setReadOnly(True)
+        self.invoice_number.setStyleSheet(f"background: {WHITE}; color: {DANGER}; font-size: 25x bold;")
+        self.invoice_number.setAlignment(Qt.AlignCenter)
+        self.invoice_number.setFixedWidth(150)
+        self.invoice_number.setFixedHeight(45)
+        inv_num_layout.addWidget(self.invoice_number)
         vertical_layout.addWidget(inv_num_widget)
 
 
@@ -1202,7 +1404,7 @@ class InvoiceDialog(QDialog):
         frame.setStyleSheet(f"""
             QFrame {{ background: {WHITE}; border: 2px solid {BORDER}; border-radius: 15px; margin: 5px; }}
         """)
-        frame.setFixedHeight(500)
+        frame.setFixedHeight(480)
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(5, 5, 5, 20)
 
@@ -1228,7 +1430,7 @@ class InvoiceDialog(QDialog):
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setFixedHeight(435)
+        scroll_area.setFixedHeight(335)
         scroll_area.setStyleSheet(f"""
             QScrollArea {{ border: 1px solid {BORDER}; border-radius: 10px; background: {BACKGROUND}; }}
         """)
@@ -1244,7 +1446,7 @@ class InvoiceDialog(QDialog):
     def create_totals_section(self):
         frame = QFrame()
         frame.setStyleSheet(f""" QFrame {{ background: {WHITE}; border: 1px solid {BORDER}; border-radius: 12px; }} """)
-        frame.setFixedHeight(200)
+        frame.setFixedHeight(230)
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(20, 20, 20, 20)
 
@@ -1294,11 +1496,45 @@ class InvoiceDialog(QDialog):
         totals_layout.addRow("Total Tax:", self.tax_label)
         self.grand_total_label = QLabel("₹0.00")
         self.grand_total_label.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {PRIMARY}; background: {BACKGROUND}; padding: 8px; border-radius: 4px;")
+        self.grand_total_label.setFixedWidth(130)
+        self.grand_total_label.setFixedWidth(130)
         totals_layout.addRow("Grand Total:", self.grand_total_label)
+        # Paid Amount field
+        
+        from PyQt5.QtWidgets import QDoubleSpinBox
+        self.paid_amount_spin = QDoubleSpinBox()
+        self.paid_amount_spin.setRange(0, 999999999)
+        self.paid_amount_spin.setDecimals(2)
+        self.paid_amount_spin.setPrefix("₹")
+        self.paid_amount_spin.setStyleSheet("font-size: 16px; border: 1px solid #ccc; border-radius: 6px; padding: 4px; background: #fff;")
+        self.paid_amount_spin.setFixedWidth(130)
+        self.paid_amount_spin.setFixedHeight(30)
+        self.paid_amount_spin.setValue(0)
+        # totals_layout.addRow("Paid Amount:", self.paid_amount_spin)
+        # Balance label
+        self.balance_label = QLabel("₹0.00")
+        self.balance_label.setFixedWidth(130)
+        self.balance_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #EF4444; background: #FEF2F2; padding: 6px; border-radius: 4px;")
+        totals_layout.addRow("Balance Due:", self.balance_label)
+        # Update balance when paid amount changes
+        self.paid_amount_spin.valueChanged.connect(self.update_balance_due)
         layout.addStretch(1)
         layout.addLayout(totals_layout, 1)
         return frame
 
+    def update_balance_due(self):
+            try:
+                grand_total = 0.0
+                try:
+                    grand_total = float(self.grand_total_label.text().replace('₹','').replace(',',''))
+                except Exception:
+                    pass
+                paid = self.paid_amount_spin.value()
+                balance = max(0, grand_total - paid)
+                self.balance_label.setText(f"₹{balance:,.2f}")
+            except Exception:
+                self.balance_label.setText("₹0.00")
+            
     # Items management
     def add_item(self):
         item_widget = InvoiceItemWidget(products=self.products)
@@ -1357,6 +1593,7 @@ class InvoiceDialog(QDialog):
             self.discount_label.setText(f"-₹{total_discount:,.2f}")
             self.tax_label.setText(f"₹{total_tax:,.2f}")
             self.grand_total_label.setText(f"₹{grand_total:,.2f}")
+            self.update_balance_due()
         except Exception as e:
             print(f"Error updating totals: {e}")
 
@@ -1392,11 +1629,13 @@ class InvoiceDialog(QDialog):
             'subtotal': subtotal,
             'total_discount': total_discount,
             'grand_total': grand_total,
+            'paid_amount': self.paid_amount_spin.value(),
+            'balance_due': max(0, grand_total - self.paid_amount_spin.value()),
             'status': 'Draft',
             'items': items
         }
         try:
-            invoice_no = invoice_data.get('invoice_no', '')
+            invoice_no = self.invoice_number.text().strip() if hasattr(self, 'invoice_number') else ''
             if not invoice_no:
                 QMessageBox.warning(self, "Error", "Invoice number cannot be empty!")
                 return
@@ -1404,12 +1643,31 @@ class InvoiceDialog(QDialog):
             if not self.invoice_data and hasattr(db, 'invoice_no_exists') and db.invoice_no_exists(invoice_no):
                 QMessageBox.warning(self, "Error", f"Invoice number '{invoice_no}' already exists. Please use a unique invoice number.")
                 return
+            invoice_data['invoice_no'] = invoice_no
             if self.invoice_data:
                 invoice_data['id'] = self.invoice_data['id']
                 db.update_invoice(invoice_data)
+                # Update invoice items
+                db.delete_invoice_items(self.invoice_data['id'])
+                for item in items:
+                    db.add_invoice_item(
+                        self.invoice_data['id'],
+                        item.get('product_id'),
+                        item['product_name'],
+                        item.get('hsn_no', ''),
+                        item['quantity'],
+                        item.get('unit', 'Piece'),
+                        item['rate'],
+                        item['discount_percent'],
+                        item['discount_amount'],
+                        item['tax_percent'],
+                        item['tax_amount'],
+                        item['amount']
+                    )
                 QMessageBox.information(self, "Success", "Invoice updated successfully!")
             else:
-                db.add_invoice(
+                # Create new invoice
+                invoice_id = db.add_invoice(
                     invoice_no,
                     invoice_data.get('invoice_date', ''),
                     invoice_data.get('party_id', ''),
@@ -1418,6 +1676,22 @@ class InvoiceDialog(QDialog):
                     0, 0, 0, 0,  # cgst, sgst, igst, round_off (defaults)
                     invoice_data.get('grand_total', 0)
                 )
+                # Add invoice items
+                for item in items:
+                    db.add_invoice_item(
+                        invoice_id,
+                        item.get('product_id'),
+                        item['product_name'],
+                        item.get('hsn_no', ''),
+                        item['quantity'],
+                        item.get('unit', 'Piece'),
+                        item['rate'],
+                        item['discount_percent'],
+                        item['discount_amount'],
+                        item['tax_percent'],
+                        item['tax_amount'],
+                        item['amount']
+                    )
                 QMessageBox.information(self, "Success", "Invoice created successfully!")
             self.accept()
         except Exception as e:
