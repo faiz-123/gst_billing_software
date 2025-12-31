@@ -574,6 +574,166 @@ class InvoiceItemWidget(QWidget):
 
 
 class InvoiceDialog(QDialog):
+    def generate_invoice_html(self):
+        # This method returns the HTML string for the invoice (same as used in preview_invoice)
+        party_name = getattr(self, 'party_search').text().strip() if hasattr(self, 'party_search') else ''
+        inv_date = self.invoice_date.date().toString('yyyy-MM-dd') if hasattr(self, 'invoice_date') else ''
+        invoice_no = self.invoice_number.text() if hasattr(self, 'invoice_number') else ''
+        bill_type = self.billtype_combo.currentText() if hasattr(self, 'billtype_combo') else ''
+        items = []
+        for i in range(self.items_layout.count() - 1):
+            w = self.items_layout.itemAt(i).widget()
+            if isinstance(w, InvoiceItemWidget):
+                d = w.get_item_data()
+                if d:
+                    items.append(d)
+        subtotal = sum((it['quantity'] * it['rate']) for it in items) if items else 0
+        total_discount = sum(it['discount_amount'] for it in items) if items else 0
+        total_tax = sum(it['tax_amount'] for it in items) if items else 0
+        grand_total = subtotal - total_discount + total_tax
+        cgst = sum(it['tax_amount']/2 for it in items if it['tax_amount'] > 0) if items else 0
+        sgst = cgst
+        igst = 0  # For now, assuming intra-state
+        gst_rate = items[0]['tax_percent'] if items else 0
+        gst_summary = f"""
+            <tr>
+                <td style='border:1px solid #bbb;padding:4px;'>GST%</td>
+                <td style='border:1px solid #bbb;padding:4px;text-align:right;'>{gst_rate:.2f}</td>
+                <td style='border:1px solid #bbb;padding:4px;text-align:right;'>{subtotal-total_discount:,.2f}</td>
+                <td style='border:1px solid #bbb;padding:4px;text-align:right;'>{cgst:,.2f}</td>
+                <td style='border:1px solid #bbb;padding:4px;text-align:right;'>{sgst:,.2f}</td>
+                <td style='border:1px solid #bbb;padding:4px;text-align:right;'>{igst:,.2f}</td>
+                <td style='border:1px solid #bbb;padding:4px;text-align:right;'>{total_tax:,.2f}</td>
+            </tr>
+        """
+        rows_html = "".join([
+            f"<tr>"
+            f"<td style='padding:6px;border:1px solid #bbb;text-align:center'>{i+1}</td>"
+            f"<td style='padding:6px;border:1px solid #bbb'>{it['product_name']}</td>"
+            f"<td style='padding:6px;border:1px solid #bbb'>{it.get('hsn_no','')}</td>"
+            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>{it['quantity']:.2f}</td>"
+            f"<td style='padding:6px;border:1px solid #bbb'>{it.get('unit','')}</td>"
+            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>₹{it['rate']:,.2f}</td>"
+            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>{it['discount_percent']:,.2f}%</td>"
+            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>{it['tax_percent']:,.2f}%</td>"
+            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>₹{it['amount']:,.2f}</td>"
+            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>₹{it['tax_amount']/2:,.2f}</td>"  # CGST
+            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>₹{it['tax_amount']/2:,.2f}</td>"  # SGST
+            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>₹0.00</td>"  # IGST
+            f"</tr>"
+            for i, it in enumerate(items)
+        ])
+        def num2words(n):
+            import math
+            units = ["", "Thousand", "Lakh", "Crore"]
+            s = ""
+            if n == 0:
+                return "Zero"
+            if n < 0:
+                return "Minus " + num2words(-n)
+            i = 0
+            while n > 0:
+                rem = n % 1000 if i == 0 else n % 100
+                if rem != 0:
+                    s = f"{rem} {units[i]} " + s
+                n = n // 1000 if i == 0 else n // 100
+                i += 1
+            return s.strip()
+        in_words = num2words(int(round(grand_total))) + " Only"
+        html = f"""
+        <html>
+        <head>
+        <meta charset='utf-8'>
+        <style>
+        body {{ font-family: Arial, sans-serif; color: #222; margin: 0; background: #fff; }}
+        .invoice-box {{ max-width: 900px; margin: 20px auto; border: 1px solid #bbb; padding: 24px 32px 32px 32px; background: #fff; }}
+        .header {{ text-align: center; border-bottom: 2px solid #222; padding-bottom: 8px; margin-bottom: 8px; }}
+        .header h1 {{ font-size: 24px; margin: 0; letter-spacing: 2px; }}
+        .header .subtitle {{ font-size: 13px; color: #444; margin-top: 2px; }}
+        .meta-table, .meta-table td {{ font-size: 13px; }}
+        .meta-table {{ width: 100%; margin-bottom: 8px; }}
+        .meta-table td {{ padding: 2px 6px; }}
+        .section-title {{ background: #e5e7eb; font-weight: bold; padding: 4px 8px; border: 1px solid #bbb; }}
+        .items-table {{ border-collapse: collapse; width: 100%; font-size: 12px; margin-bottom: 0; }}
+        .items-table th, .items-table td {{ border: 1px solid #bbb; padding: 5px 4px; }}
+        .items-table th {{ background: #f3f4f6; font-size: 13px; }}
+        .totals-table {{ border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 0; }}
+        .totals-table td {{ border: 1px solid #bbb; padding: 4px 6px; }}
+        .totals-table .label {{ text-align: right; font-weight: bold; background: #f9fafb; }}
+        .totals-table .value {{ text-align: right; font-weight: bold; background: #f9fafb; }}
+        .gst-summary-table {{ border-collapse: collapse; width: 100%; font-size: 12px; margin-top: 0; }}
+        .gst-summary-table td {{ border: 1px solid #bbb; padding: 4px 6px; }}
+        .footer-box {{ background: #e0f2fe; border: 1px solid #bbb; padding: 10px 16px; margin-top: 18px; font-size: 15px; font-weight: bold; text-align: right; }}
+        .footer-details {{ font-size: 12px; color: #444; margin-top: 8px; }}
+        </style>
+        </head>
+        <body>
+        <div class='invoice-box'>
+            <div class='header'>
+                <div style='font-size:11px; text-align:right; float:right;'>TAX INVOICE</div>
+                <h1>SUPER POWER BATTERIES (INDIA)</h1>
+                <div class='subtitle'>A-1/2, Gangotri Appartment, R. V. Desai Road, Vadodara - 390001 Gujarat<br>ph. (0265-2427631, 8815991781 | mail : )</div>
+                <div class='subtitle' style='font-weight:bold;'>Terms : {bill_type}</div>
+            </div>
+            <table class='meta-table'>
+                <tr>
+                    <td><b>Buyer's Name and Address</b><br>{party_name or '—'}<br>GSTIN: —</td>
+                    <td>
+                        <table style='width:100%; font-size:13px;'>
+                            <tr><td>Invoice No.:</td><td>{invoice_no}</td></tr>
+                            <tr><td>Date:</td><td>{inv_date}</td></tr>
+                            <tr><td>Ref No. & Dt.:</td><td> </td></tr>
+                            <tr><td>Vehicle No.:</td><td> </td></tr>
+                            <tr><td>Transport:</td><td> </td></tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
+            <div class='section-title'>Item Details</div>
+            <table class='items-table'>
+                <tr>
+                    <th>No</th><th>Description</th><th>HSN Code</th><th>MRP</th><th>Qty</th><th>Unit</th><th>Rate</th><th>Discount</th><th>Tax%</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th>
+                </tr>
+                {rows_html if rows_html else "<tr><td colspan='13' style='text-align:center;color:#6b7280'>No items added</td></tr>"}
+            </table>
+            <table class='totals-table'>
+                <tr><td class='label' colspan='12'>Total Amount Before Tax</td><td class='value'>₹{subtotal:,.2f}</td></tr>
+                <tr><td class='label' colspan='12'>Total Discount</td><td class='value'>₹{total_discount:,.2f}</td></tr>
+                <tr><td class='label' colspan='12'>Add: CGST/SGST</td><td class='value'>₹{cgst+sgst:,.2f}</td></tr>
+                <tr><td class='label' colspan='12'>Add: IGST</td><td class='value'>₹{igst:,.2f}</td></tr>
+                <tr><td class='label' colspan='12'>Total Tax Amount</td><td class='value'>₹{total_tax:,.2f}</td></tr>
+                <tr><td class='label' colspan='12'>Total Invoice After Tax</td><td class='value'>₹{grand_total:,.2f}</td></tr>
+            </table>
+            <div class='section-title'>GST SUMMARY</div>
+            <table class='gst-summary-table'>
+                <tr style='background:#f3f4f6;'><td>GST%</td><td>Taxable Amt</td><td>CGST Amt</td><td>SGST Amt</td><td>IGST Amt</td><td>Tax Amt</td></tr>
+                {gst_summary}
+            </table>
+            <div class='footer-box'>Net Amount<br><span style='font-size:22px;'>₹{grand_total:,.2f}</span></div>
+            <div class='footer-details'>In Words : {in_words}<br>GSTIN : 24AADPF6173E1ZT<br>Bank Details :<br>BANK OF INDIA, A/C NO: 230327100001287<br>IFSC CODE: BKID0002303<br>Terms & Conditions: Subject to Vadodara - 390001 jurisdiction E.&O.E.<br><br><b>For SUPER POWER BATTERIES (INDIA)</b></div>
+        </div>
+        </body>
+        </html>
+        """
+        return html
+
+    def preview_invoice_pdf(self):
+        # Generate PDF from HTML and open it
+        import tempfile, os, sys
+        from weasyprint import HTML
+        html = self.generate_invoice_html()
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as f:
+            pdf_path = f.name
+        HTML(string=html).write_pdf(pdf_path)
+        # Open the PDF with the default system viewer
+        if sys.platform.startswith('darwin'):
+            os.system(f'open "{pdf_path}"')
+        elif os.name == 'nt':
+            os.startfile(pdf_path)
+        elif os.name == 'posix':
+            os.system(f'xdg-open "{pdf_path}"')
+        else:
+            QMessageBox.information(self, "PDF Saved", f"PDF saved to: {pdf_path}")
     """Enhanced dialog for creating/editing invoices with modern UI"""
     def __init__(self, parent=None, invoice_data=None, invoice_number=None):
         super().__init__(parent)
@@ -1023,6 +1183,7 @@ class InvoiceDialog(QDialog):
         container = QVBoxLayout(dlg)
         view = QTextEdit()
         view.setReadOnly(True)
+        html = self.generate_invoice_html()
         view.setHtml(html)
         container.addWidget(view)
         actions = QHBoxLayout()
@@ -1045,7 +1206,24 @@ class InvoiceDialog(QDialog):
         """)
         print_btn.clicked.connect(lambda: self.print_invoice(html))
         actions.addWidget(print_btn)
-        
+        # PDF Preview button
+        pdf_btn = QPushButton("📄 Preview PDF")
+        pdf_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: #2563EB;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: 500;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{
+                background: #1e40af;
+            }}
+        """)
+        pdf_btn.clicked.connect(self.preview_invoice_pdf)
+        actions.addWidget(pdf_btn)
         close_btn = QPushButton("Close")
         close_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1064,7 +1242,6 @@ class InvoiceDialog(QDialog):
         close_btn.clicked.connect(dlg.reject)
         actions.addWidget(close_btn)
         container.addLayout(actions)
-
         dlg.exec_()
 
     def print_invoice(self, html_content):
