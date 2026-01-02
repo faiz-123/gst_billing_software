@@ -3,12 +3,13 @@ Standalone InvoiceDialog for creating/editing invoices.
 Extracted from screens/invoices.py to avoid a huge single file.
 """
 
+import os
 from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
     QFrame, QDialog, QMessageBox, QFormLayout, QLineEdit, QComboBox,
     QTextEdit, QCheckBox, QSpinBox, QDoubleSpinBox, QTableWidget,
     QTableWidgetItem, QHeaderView, QDateEdit, QScrollArea, QSplitter,
-    QAbstractItemView, QMenu, QAction, QShortcut, QListWidget
+    QAbstractItemView, QMenu, QAction, QShortcut, QListWidget, QFileDialog
 )
 from PyQt5.QtCore import Qt, QDate, pyqtSignal, QTimer
 from PyQt5.QtGui import QFont, QPixmap, QIcon, QColor, QKeySequence
@@ -574,166 +575,6 @@ class InvoiceItemWidget(QWidget):
 
 
 class InvoiceDialog(QDialog):
-    def generate_invoice_html(self):
-        # This method returns the HTML string for the invoice (same as used in preview_invoice)
-        party_name = getattr(self, 'party_search').text().strip() if hasattr(self, 'party_search') else ''
-        inv_date = self.invoice_date.date().toString('yyyy-MM-dd') if hasattr(self, 'invoice_date') else ''
-        invoice_no = self.invoice_number.text() if hasattr(self, 'invoice_number') else ''
-        bill_type = self.billtype_combo.currentText() if hasattr(self, 'billtype_combo') else ''
-        items = []
-        for i in range(self.items_layout.count() - 1):
-            w = self.items_layout.itemAt(i).widget()
-            if isinstance(w, InvoiceItemWidget):
-                d = w.get_item_data()
-                if d:
-                    items.append(d)
-        subtotal = sum((it['quantity'] * it['rate']) for it in items) if items else 0
-        total_discount = sum(it['discount_amount'] for it in items) if items else 0
-        total_tax = sum(it['tax_amount'] for it in items) if items else 0
-        grand_total = subtotal - total_discount + total_tax
-        cgst = sum(it['tax_amount']/2 for it in items if it['tax_amount'] > 0) if items else 0
-        sgst = cgst
-        igst = 0  # For now, assuming intra-state
-        gst_rate = items[0]['tax_percent'] if items else 0
-        gst_summary = f"""
-            <tr>
-                <td style='border:1px solid #bbb;padding:4px;'>GST%</td>
-                <td style='border:1px solid #bbb;padding:4px;text-align:right;'>{gst_rate:.2f}</td>
-                <td style='border:1px solid #bbb;padding:4px;text-align:right;'>{subtotal-total_discount:,.2f}</td>
-                <td style='border:1px solid #bbb;padding:4px;text-align:right;'>{cgst:,.2f}</td>
-                <td style='border:1px solid #bbb;padding:4px;text-align:right;'>{sgst:,.2f}</td>
-                <td style='border:1px solid #bbb;padding:4px;text-align:right;'>{igst:,.2f}</td>
-                <td style='border:1px solid #bbb;padding:4px;text-align:right;'>{total_tax:,.2f}</td>
-            </tr>
-        """
-        rows_html = "".join([
-            f"<tr>"
-            f"<td style='padding:6px;border:1px solid #bbb;text-align:center'>{i+1}</td>"
-            f"<td style='padding:6px;border:1px solid #bbb'>{it['product_name']}</td>"
-            f"<td style='padding:6px;border:1px solid #bbb'>{it.get('hsn_no','')}</td>"
-            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>{it['quantity']:.2f}</td>"
-            f"<td style='padding:6px;border:1px solid #bbb'>{it.get('unit','')}</td>"
-            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>₹{it['rate']:,.2f}</td>"
-            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>{it['discount_percent']:,.2f}%</td>"
-            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>{it['tax_percent']:,.2f}%</td>"
-            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>₹{it['amount']:,.2f}</td>"
-            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>₹{it['tax_amount']/2:,.2f}</td>"  # CGST
-            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>₹{it['tax_amount']/2:,.2f}</td>"  # SGST
-            f"<td style='padding:6px;border:1px solid #bbb;text-align:right'>₹0.00</td>"  # IGST
-            f"</tr>"
-            for i, it in enumerate(items)
-        ])
-        def num2words(n):
-            import math
-            units = ["", "Thousand", "Lakh", "Crore"]
-            s = ""
-            if n == 0:
-                return "Zero"
-            if n < 0:
-                return "Minus " + num2words(-n)
-            i = 0
-            while n > 0:
-                rem = n % 1000 if i == 0 else n % 100
-                if rem != 0:
-                    s = f"{rem} {units[i]} " + s
-                n = n // 1000 if i == 0 else n // 100
-                i += 1
-            return s.strip()
-        in_words = num2words(int(round(grand_total))) + " Only"
-        html = f"""
-        <html>
-        <head>
-        <meta charset='utf-8'>
-        <style>
-        body {{ font-family: Arial, sans-serif; color: #222; margin: 0; background: #fff; }}
-        .invoice-box {{ max-width: 900px; margin: 20px auto; border: 1px solid #bbb; padding: 24px 32px 32px 32px; background: #fff; }}
-        .header {{ text-align: center; border-bottom: 2px solid #222; padding-bottom: 8px; margin-bottom: 8px; }}
-        .header h1 {{ font-size: 24px; margin: 0; letter-spacing: 2px; }}
-        .header .subtitle {{ font-size: 13px; color: #444; margin-top: 2px; }}
-        .meta-table, .meta-table td {{ font-size: 13px; }}
-        .meta-table {{ width: 100%; margin-bottom: 8px; }}
-        .meta-table td {{ padding: 2px 6px; }}
-        .section-title {{ background: #e5e7eb; font-weight: bold; padding: 4px 8px; border: 1px solid #bbb; }}
-        .items-table {{ border-collapse: collapse; width: 100%; font-size: 12px; margin-bottom: 0; }}
-        .items-table th, .items-table td {{ border: 1px solid #bbb; padding: 5px 4px; }}
-        .items-table th {{ background: #f3f4f6; font-size: 13px; }}
-        .totals-table {{ border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 0; }}
-        .totals-table td {{ border: 1px solid #bbb; padding: 4px 6px; }}
-        .totals-table .label {{ text-align: right; font-weight: bold; background: #f9fafb; }}
-        .totals-table .value {{ text-align: right; font-weight: bold; background: #f9fafb; }}
-        .gst-summary-table {{ border-collapse: collapse; width: 100%; font-size: 12px; margin-top: 0; }}
-        .gst-summary-table td {{ border: 1px solid #bbb; padding: 4px 6px; }}
-        .footer-box {{ background: #e0f2fe; border: 1px solid #bbb; padding: 10px 16px; margin-top: 18px; font-size: 15px; font-weight: bold; text-align: right; }}
-        .footer-details {{ font-size: 12px; color: #444; margin-top: 8px; }}
-        </style>
-        </head>
-        <body>
-        <div class='invoice-box'>
-            <div class='header'>
-                <div style='font-size:11px; text-align:right; float:right;'>TAX INVOICE</div>
-                <h1>SUPER POWER BATTERIES (INDIA)</h1>
-                <div class='subtitle'>A-1/2, Gangotri Appartment, R. V. Desai Road, Vadodara - 390001 Gujarat<br>ph. (0265-2427631, 8815991781 | mail : )</div>
-                <div class='subtitle' style='font-weight:bold;'>Terms : {bill_type}</div>
-            </div>
-            <table class='meta-table'>
-                <tr>
-                    <td><b>Buyer's Name and Address</b><br>{party_name or '—'}<br>GSTIN: —</td>
-                    <td>
-                        <table style='width:100%; font-size:13px;'>
-                            <tr><td>Invoice No.:</td><td>{invoice_no}</td></tr>
-                            <tr><td>Date:</td><td>{inv_date}</td></tr>
-                            <tr><td>Ref No. & Dt.:</td><td> </td></tr>
-                            <tr><td>Vehicle No.:</td><td> </td></tr>
-                            <tr><td>Transport:</td><td> </td></tr>
-                        </table>
-                    </td>
-                </tr>
-            </table>
-            <div class='section-title'>Item Details</div>
-            <table class='items-table'>
-                <tr>
-                    <th>No</th><th>Description</th><th>HSN Code</th><th>MRP</th><th>Qty</th><th>Unit</th><th>Rate</th><th>Discount</th><th>Tax%</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th>
-                </tr>
-                {rows_html if rows_html else "<tr><td colspan='13' style='text-align:center;color:#6b7280'>No items added</td></tr>"}
-            </table>
-            <table class='totals-table'>
-                <tr><td class='label' colspan='12'>Total Amount Before Tax</td><td class='value'>₹{subtotal:,.2f}</td></tr>
-                <tr><td class='label' colspan='12'>Total Discount</td><td class='value'>₹{total_discount:,.2f}</td></tr>
-                <tr><td class='label' colspan='12'>Add: CGST/SGST</td><td class='value'>₹{cgst+sgst:,.2f}</td></tr>
-                <tr><td class='label' colspan='12'>Add: IGST</td><td class='value'>₹{igst:,.2f}</td></tr>
-                <tr><td class='label' colspan='12'>Total Tax Amount</td><td class='value'>₹{total_tax:,.2f}</td></tr>
-                <tr><td class='label' colspan='12'>Total Invoice After Tax</td><td class='value'>₹{grand_total:,.2f}</td></tr>
-            </table>
-            <div class='section-title'>GST SUMMARY</div>
-            <table class='gst-summary-table'>
-                <tr style='background:#f3f4f6;'><td>GST%</td><td>Taxable Amt</td><td>CGST Amt</td><td>SGST Amt</td><td>IGST Amt</td><td>Tax Amt</td></tr>
-                {gst_summary}
-            </table>
-            <div class='footer-box'>Net Amount<br><span style='font-size:22px;'>₹{grand_total:,.2f}</span></div>
-            <div class='footer-details'>In Words : {in_words}<br>GSTIN : 24AADPF6173E1ZT<br>Bank Details :<br>BANK OF INDIA, A/C NO: 230327100001287<br>IFSC CODE: BKID0002303<br>Terms & Conditions: Subject to Vadodara - 390001 jurisdiction E.&O.E.<br><br><b>For SUPER POWER BATTERIES (INDIA)</b></div>
-        </div>
-        </body>
-        </html>
-        """
-        return html
-
-    def preview_invoice_pdf(self):
-        # Generate PDF from HTML and open it
-        import tempfile, os, sys
-        from weasyprint import HTML
-        html = self.generate_invoice_html()
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as f:
-            pdf_path = f.name
-        HTML(string=html).write_pdf(pdf_path)
-        # Open the PDF with the default system viewer
-        if sys.platform.startswith('darwin'):
-            os.system(f'open "{pdf_path}"')
-        elif os.name == 'nt':
-            os.startfile(pdf_path)
-        elif os.name == 'posix':
-            os.system(f'xdg-open "{pdf_path}"')
-        else:
-            QMessageBox.information(self, "PDF Saved", f"PDF saved to: {pdf_path}")
     """Enhanced dialog for creating/editing invoices with modern UI"""
     def __init__(self, parent=None, invoice_data=None, invoice_number=None):
         super().__init__(parent)
@@ -946,17 +787,27 @@ class InvoiceDialog(QDialog):
         utility_layout.setSpacing(8)
         self.help_button = self.create_action_button("❓ Help", "help", WARNING, self.show_help, "Get help with invoice creation")
         utility_layout.addWidget(self.help_button)
-        self.preview_button = self.create_action_button("👁️ Preview", "preview", TEXT_SECONDARY, self.preview_invoice, "Preview how the invoice will look when printed")
-        utility_layout.addWidget(self.preview_button)
+        # self.preview_button = self.create_action_button("👁️ Preview", "preview", TEXT_SECONDARY, self.preview_invoice, "Preview how the invoice will look when printed")
+        # utility_layout.addWidget(self.preview_button)
         button_layout.addLayout(utility_layout)
         button_layout.addStretch()
         action_layout = QHBoxLayout()
         action_layout.setSpacing(8)
         self.cancel_button = self.create_action_button("❌ Cancel", "cancel", DANGER, self.reject, "Cancel and close without saving")
         action_layout.addWidget(self.cancel_button)
+        
+        # Reset button
+        self.reset_button = self.create_action_button("🔄 Reset", "reset", WARNING, self.reset_form, "Clear all values and reset to defaults")
+        action_layout.addWidget(self.reset_button)
+        
         save_text = "💾 Update Invoice" if self.invoice_data else "💾 Save Invoice"
         self.save_button = self.create_action_button(save_text, "save", SUCCESS, self.save_invoice, "Save the invoice with all current details")
         action_layout.addWidget(self.save_button)
+        
+        # Save & Print button
+        self.save_print_button = self.create_action_button("🖨️ Save & Print", "save_print", PRIMARY, self.save_and_print, "Save invoice as FINAL and open print preview")
+        action_layout.addWidget(self.save_print_button)
+        
         button_layout.addLayout(action_layout)
         self.main_layout.addWidget(button_container)
 
@@ -1183,7 +1034,6 @@ class InvoiceDialog(QDialog):
         container = QVBoxLayout(dlg)
         view = QTextEdit()
         view.setReadOnly(True)
-        html = self.generate_invoice_html()
         view.setHtml(html)
         container.addWidget(view)
         actions = QHBoxLayout()
@@ -1206,24 +1056,7 @@ class InvoiceDialog(QDialog):
         """)
         print_btn.clicked.connect(lambda: self.print_invoice(html))
         actions.addWidget(print_btn)
-        # PDF Preview button
-        pdf_btn = QPushButton("📄 Preview PDF")
-        pdf_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: #2563EB;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 6px;
-                font-weight: 500;
-                min-width: 80px;
-            }}
-            QPushButton:hover {{
-                background: #1e40af;
-            }}
-        """)
-        pdf_btn.clicked.connect(self.preview_invoice_pdf)
-        actions.addWidget(pdf_btn)
+        
         close_btn = QPushButton("Close")
         close_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1242,6 +1075,7 @@ class InvoiceDialog(QDialog):
         close_btn.clicked.connect(dlg.reject)
         actions.addWidget(close_btn)
         container.addLayout(actions)
+
         dlg.exec_()
 
     def print_invoice(self, html_content):
@@ -1277,6 +1111,913 @@ class InvoiceDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Print Error", 
                                f"An error occurred while printing:\n{str(e)}")
+
+    def save_and_print(self):
+        """Save invoice as FINAL and open print preview with exact GST invoice layout"""
+        try:
+            # Show confirmation dialog first
+            reply = QMessageBox.question(
+                self, 
+                "Confirm Save & Print", 
+                "Do you want to save this invoice and print it?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            
+            if reply != QMessageBox.Yes:
+                return  # User cancelled
+            
+            # Step 1: Validate invoice data
+            if not self.validate_invoice_for_final_save():
+                return
+            
+            # Step 2: Save invoice as FINAL
+            saved_invoice_id = self.save_final_invoice()
+            if not saved_invoice_id:
+                return
+                
+            # Step 3: Generate PDF and show print preview
+            self.show_print_preview(saved_invoice_id)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Save & Print Error", 
+                               f"An error occurred during save & print:\n{str(e)}")
+
+    def validate_invoice_for_final_save(self):
+        """Validate that invoice has all required data for final save"""
+        # Check invoice number
+        invoice_no = self.invoice_number.text().strip() if hasattr(self, 'invoice_number') else ''
+        if not invoice_no:
+            QMessageBox.warning(self, "Validation Error", "Invoice number is required!")
+            if hasattr(self, 'invoice_number'):
+                self.invoice_number.setFocus()
+            return False
+        
+        # Check date
+        if not hasattr(self, 'invoice_date') or not self.invoice_date.date():
+            QMessageBox.warning(self, "Validation Error", "Invoice date is required!")
+            return False
+        
+        # Check party selection
+        party_text = getattr(self, 'party_search').text().strip() if hasattr(self, 'party_search') else ''
+        party_data = getattr(self, 'party_data_map', {}).get(party_text)
+        if not party_data or not party_text:
+            QMessageBox.warning(self, "Validation Error", "Please select a valid customer!")
+            if hasattr(self, 'party_search'):
+                self.party_search.setFocus()
+            return False
+        
+        # Check at least one item
+        items = []
+        for i in range(self.items_layout.count() - 1):
+            item_widget = self.items_layout.itemAt(i).widget()
+            if isinstance(item_widget, InvoiceItemWidget):
+                item_data = item_widget.get_item_data()
+                if item_data:
+                    items.append(item_data)
+        
+        if not items:
+            QMessageBox.warning(self, "Validation Error", "Please add at least one item!")
+            return False
+        
+        # Check for duplicate invoice number if creating new invoice
+        if not self.invoice_data and hasattr(db, 'invoice_no_exists') and db.invoice_no_exists(invoice_no):
+            QMessageBox.warning(self, "Validation Error", 
+                              f"Invoice number '{invoice_no}' already exists. Please use a unique invoice number.")
+            if hasattr(self, 'invoice_number'):
+                self.invoice_number.setFocus()
+            return False
+        
+        return True
+
+    def save_final_invoice(self):
+        """Save invoice with FINAL status and return invoice ID"""
+        try:
+            # Collect all invoice data
+            party_text = getattr(self, 'party_search').text().strip()
+            party_data = getattr(self, 'party_data_map', {}).get(party_text)
+            
+            if not party_data or 'id' not in party_data:
+                raise Exception(f"Invalid party selected: {party_text}")
+            
+            items = []
+            for i in range(self.items_layout.count() - 1):
+                item_widget = self.items_layout.itemAt(i).widget()
+                if isinstance(item_widget, InvoiceItemWidget):
+                    item_data = item_widget.get_item_data()
+                    if item_data:
+                        items.append(item_data)
+            
+            # Calculate totals
+            subtotal = sum(item['quantity'] * item['rate'] for item in items)
+            total_discount = sum(item['discount_amount'] for item in items)
+            
+            # Calculate GST breakdown
+            total_cgst = 0
+            total_sgst = 0
+            total_igst = 0
+            is_interstate = False  # TODO: Implement state-based logic
+            
+            for item in items:
+                tax_amount = item['tax_amount']
+                if tax_amount > 0:
+                    if is_interstate:
+                        total_igst += tax_amount
+                    else:
+                        total_cgst += tax_amount / 2
+                        total_sgst += tax_amount / 2
+            
+            total_tax = sum(item['tax_amount'] for item in items)
+            grand_total = subtotal - total_discount + total_tax
+            
+            invoice_no = self.invoice_number.text().strip()
+            invoice_date = self.invoice_date.date().toString('yyyy-MM-dd')
+            
+            # Get or generate unique invoice number for final save
+            if not self.invoice_data:
+                # For new invoice, ensure unique number
+                original_no = invoice_no
+                counter = 1
+                while hasattr(db, 'invoice_no_exists') and db.invoice_no_exists(invoice_no):
+                    invoice_no = f"{original_no}-{counter}"
+                    counter += 1
+                
+                # Update the display with final invoice number
+                if hasattr(self, 'invoice_number'):
+                    self.invoice_number.setText(invoice_no)
+            
+            # Save invoice with FINAL status
+            if self.invoice_data:
+                # Update existing invoice
+                if 'id' not in self.invoice_data:
+                    raise Exception("Invalid invoice data - missing ID")
+                    
+                invoice_data = {
+                    'id': self.invoice_data['id'],
+                    'invoice_no': invoice_no,
+                    'date': invoice_date,
+                    'party_id': party_data['id'],
+                    'grand_total': grand_total,
+                    'status': 'FINAL'  # Mark as final
+                }
+                db.update_invoice(invoice_data)
+                invoice_id = self.invoice_data['id']
+                
+                # Update items
+                db.delete_invoice_items(invoice_id)
+                for item in items:
+                    db.add_invoice_item(
+                        invoice_id,
+                        item.get('product_id'),
+                        item['product_name'],
+                        item.get('hsn_no', ''),
+                        item['quantity'],
+                        item.get('unit', 'Piece'),
+                        item['rate'],
+                        item['discount_percent'],
+                        item['discount_amount'],
+                        item['tax_percent'],
+                        item['tax_amount'],
+                        item['amount']
+                    )
+            else:
+                # Create new invoice
+                invoice_id = db.add_invoice(
+                    invoice_no,
+                    invoice_date,
+                    party_data['id'],
+                    'GST',  # invoice type
+                    subtotal,
+                    total_cgst,
+                    total_sgst,
+                    total_igst,
+                    0,  # round_off
+                    grand_total,
+                    'FINAL'  # status - mark as final
+                )
+                
+                # Add items
+                for item in items:
+                    db.add_invoice_item(
+                        invoice_id,
+                        item.get('product_id'),
+                        item['product_name'],
+                        item.get('hsn_no', ''),
+                        item['quantity'],
+                        item.get('unit', 'Piece'),
+                        item['rate'],
+                        item['discount_percent'],
+                        item['discount_amount'],
+                        item['tax_percent'],
+                        item['tax_amount'],
+                        item['amount']
+                    )
+            
+            # Disable editing after final save
+            self.disable_editing_after_final_save()
+            
+            return invoice_id
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Failed to save invoice: {str(e)}")
+            return None
+
+    def disable_editing_after_final_save(self):
+        """Disable all editing controls after invoice is saved as FINAL"""
+        # Disable the Save & Print button itself
+        if hasattr(self, 'save_print_button'):
+            self.save_print_button.setEnabled(False)
+            self.save_print_button.setText("✓ Saved & Final")
+        
+        # Disable regular save button
+        if hasattr(self, 'save_button'):
+            self.save_button.setEnabled(False)
+            self.save_button.setText("✓ Finalized")
+        
+        # Show final status message
+        QMessageBox.information(self, "Invoice Finalized", 
+                              "Invoice has been saved as FINAL and cannot be edited further.")
+
+    def show_print_preview(self, invoice_id):
+        """Show HTML preview dialog with option to open in browser"""
+        try:
+            # Generate HTML content instead of PDF
+            html_content = self.generate_invoice_html(invoice_id)
+            if not html_content:
+                return
+            
+            # Show HTML preview dialog
+            self.show_html_preview_dialog(html_content, invoice_id)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Preview Error", f"Failed to show print preview: {str(e)}")
+
+    def generate_invoice_html(self, invoice_id):
+        """Generate HTML content for the invoice"""
+        try:
+            from pdf_generator import InvoicePDFGenerator
+            generator = InvoicePDFGenerator()
+            
+            # Get invoice data
+            invoice_data = generator.get_invoice_data(invoice_id)
+            if not invoice_data:
+                return None
+            
+            # Prepare template data and render HTML
+            template_data = generator.prepare_template_data(invoice_data)
+            html_content = generator.render_html_template(template_data)
+            
+            return html_content
+                
+        except Exception as e:
+            QMessageBox.critical(self, "HTML Generation Error", 
+                               f"Failed to generate HTML: {str(e)}")
+            return None
+
+    def show_html_preview_dialog(self, html_content, invoice_id):
+        """Show HTML preview directly in QWebEngineView - renders exactly like browser"""
+        import tempfile
+        import os
+        from PyQt5.QtCore import QUrl
+        
+        try:
+            from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
+        except ImportError:
+            QMessageBox.critical(self, "Error", "PyQtWebEngine not installed.\n\nRun: pip3 install PyQtWebEngine")
+            return
+        
+        try:
+            # Get invoice number for filename
+            from pdf_generator import InvoicePDFGenerator
+            generator = InvoicePDFGenerator()
+            invoice_data = generator.get_invoice_data(invoice_id)
+            
+            if not invoice_data:
+                QMessageBox.warning(self, "Error", "Could not load invoice data")
+                return
+            
+            invoice_no = invoice_data['invoice']['invoice_no']
+            
+            # Create preview dialog
+            preview_dialog = QDialog(self)
+            preview_dialog.setWindowTitle(f"📄 Invoice Preview - {invoice_no}")
+            preview_dialog.setModal(True)
+            preview_dialog.resize(900, 850)
+            preview_dialog.setMinimumSize(800, 600)
+            
+            # Main layout
+            layout = QVBoxLayout(preview_dialog)
+            layout.setContentsMargins(10, 10, 10, 10)
+            layout.setSpacing(10)
+            
+            # Header bar with title and buttons
+            header_frame = QFrame()
+            header_frame.setFixedHeight(60)
+            header_frame.setStyleSheet(f"""
+                QFrame {{ 
+                    background: {PRIMARY}; 
+                    border-radius: 8px; 
+                }}
+            """)
+            header_layout = QHBoxLayout(header_frame)
+            header_layout.setContentsMargins(15, 5, 15, 5)
+            
+            # Title
+            title_label = QLabel(f"📄 Invoice: {invoice_no}")
+            title_label.setStyleSheet(f"color: {WHITE}; font-size: 16px; font-weight: bold;")
+            header_layout.addWidget(title_label)
+            
+            header_layout.addStretch()
+            
+            # Button style
+            btn_style = f"""
+                QPushButton {{
+                    background: {WHITE};
+                    color: {PRIMARY};
+                    border: none;
+                    border-radius: 6px;
+                    font-size: 13px;
+                    font-weight: bold;
+                    padding: 8px 15px;
+                    min-width: 100px;
+                }}
+                QPushButton:hover {{ background: #e0e7ff; }}
+                QPushButton:pressed {{ background: #c7d2fe; }}
+            """
+            
+            # Create temp PDF path for later use
+            temp_dir = tempfile.gettempdir()
+            pdf_path = os.path.join(temp_dir, f"Invoice_{invoice_no}.pdf")
+            
+            # Store references in dialog for callbacks
+            preview_dialog.html_content = html_content
+            preview_dialog.pdf_path = pdf_path
+            preview_dialog.invoice_no = invoice_no
+            
+            # Save PDF button
+            save_btn = QPushButton("💾 Save PDF")
+            save_btn.setStyleSheet(btn_style)
+            save_btn.clicked.connect(lambda: self.save_invoice_as_pdf(preview_dialog))
+            header_layout.addWidget(save_btn)
+            
+            # Print button
+            print_btn = QPushButton("🖨️ Print")
+            print_btn.setStyleSheet(btn_style)
+            print_btn.clicked.connect(lambda: self.print_invoice_preview(preview_dialog))
+            header_layout.addWidget(print_btn)
+            
+            # Open in Browser button
+            browser_btn = QPushButton("🌐 Open in Browser")
+            browser_btn.setStyleSheet(btn_style)
+            browser_btn.clicked.connect(lambda: self.open_html_in_browser(html_content, invoice_no))
+            header_layout.addWidget(browser_btn)
+            
+            # Close button
+            close_btn = QPushButton("❌ Close")
+            close_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: #ef4444;
+                    color: {WHITE};
+                    border: none;
+                    border-radius: 6px;
+                    font-size: 13px;
+                    font-weight: bold;
+                    padding: 8px 15px;
+                    min-width: 80px;
+                }}
+                QPushButton:hover {{ background: #dc2626; }}
+                QPushButton:pressed {{ background: #b91c1c; }}
+            """)
+            close_btn.clicked.connect(preview_dialog.close)
+            header_layout.addWidget(close_btn)
+            
+            layout.addWidget(header_frame)
+            
+            # HTML Viewer using QWebEngineView - renders exactly like browser!
+            html_viewer = QWebEngineView()
+            html_viewer.setStyleSheet(f"""
+                QWebEngineView {{
+                    border: 1px solid {BORDER};
+                    border-radius: 8px;
+                    background: white;
+                }}
+            """)
+            
+            # Configure settings
+            settings = html_viewer.settings()
+            settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+            settings.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
+            
+            # Load HTML content directly - this renders exactly like in Chrome!
+            html_viewer.setHtml(html_content)
+            
+            layout.addWidget(html_viewer, 1)  # Stretch factor 1 to fill space
+            
+            # Store reference to prevent garbage collection
+            preview_dialog.html_viewer = html_viewer
+            
+            # Show dialog
+            preview_dialog.exec_()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Preview Error", f"Failed to show preview: {str(e)}")
+            print(f"❌ Preview failed: {e}")
+
+    def save_invoice_as_pdf(self, preview_dialog):
+        """Save the invoice as PDF using WebEngine's printToPdf"""
+        from PyQt5.QtCore import QMarginsF
+        from PyQt5.QtGui import QPageLayout, QPageSize
+        
+        # Get save path from user
+        default_filename = f"Invoice_{preview_dialog.invoice_no}.pdf"
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Invoice as PDF",
+            default_filename,
+            "PDF Files (*.pdf);;All Files (*)"
+        )
+        
+        if not save_path:
+            return
+        
+        # Store save path for callback
+        preview_dialog.save_path = save_path
+        
+        # Setup page layout for PDF (A4 size with margins)
+        page_layout = QPageLayout(
+            QPageSize(QPageSize.A4),
+            QPageLayout.Portrait,
+            QMarginsF(10, 10, 10, 10)
+        )
+        
+        # Generate PDF from the rendered HTML
+        def on_pdf_saved(file_path, success):
+            if success:
+                QMessageBox.information(self, "Saved", f"PDF saved successfully:\n{file_path}")
+                # Ask to open
+                reply = QMessageBox.question(self, "Open PDF?", "Would you like to open the saved PDF?",
+                                            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                if reply == QMessageBox.Yes:
+                    self.open_pdf_file(file_path)
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save PDF")
+        
+        preview_dialog.html_viewer.page().pdfPrintingFinished.connect(on_pdf_saved)
+        preview_dialog.html_viewer.page().printToPdf(save_path, page_layout)
+
+    def print_invoice_preview(self, preview_dialog):
+        """Print the invoice using system print dialog"""
+        from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
+        
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setPageSize(QPrinter.A4)
+        
+        print_dialog = QPrintDialog(printer, self)
+        if print_dialog.exec_() == QPrintDialog.Accepted:
+            preview_dialog.html_viewer.page().print(printer, lambda ok: None)
+
+    def open_html_in_browser(self, html_content, invoice_no):
+        """Open the HTML invoice in the default browser"""
+        import tempfile
+        import webbrowser
+        import os
+        
+        temp_dir = tempfile.gettempdir()
+        html_path = os.path.join(temp_dir, f"Invoice_{invoice_no}.html")
+        
+        with open(html_path, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        
+        webbrowser.open(f'file://{html_path}')
+
+    def generate_pdf_with_webengine(self, html_content, pdf_path, invoice_no, invoice_id):
+        """Use QWebEngineView to render HTML and export to PDF"""
+        try:
+            from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
+            from PyQt5.QtCore import QUrl, QMarginsF, QSizeF
+            from PyQt5.QtGui import QPageLayout, QPageSize
+            
+            # Create a hidden webview for rendering
+            webview = QWebEngineView()
+            webview.setMinimumSize(800, 600)
+            
+            # Configure settings for better rendering
+            settings = webview.settings()
+            settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+            settings.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
+            
+            # Store references for the callback
+            self._pdf_webview = webview
+            self._pdf_path = pdf_path
+            self._pdf_invoice_no = invoice_no
+            self._pdf_invoice_id = invoice_id
+            self._pdf_html_content = html_content
+            
+            # Connect to loadFinished signal
+            webview.loadFinished.connect(self._on_webview_load_finished)
+            
+            # Load HTML content
+            webview.setHtml(html_content)
+            
+            print(f"📄 Loading HTML into WebEngine for PDF generation...")
+            
+        except ImportError as e:
+            QMessageBox.critical(self, "WebEngine Error", 
+                f"PyQtWebEngine is not installed.\n\nPlease run:\npip3 install PyQtWebEngine\n\nError: {str(e)}")
+        except Exception as e:
+            QMessageBox.critical(self, "PDF Generation Error", f"Failed to initialize WebEngine: {str(e)}")
+            print(f"❌ WebEngine initialization failed: {e}")
+
+    def _on_webview_load_finished(self, ok):
+        """Called when HTML is loaded in WebEngine, now generate PDF"""
+        from PyQt5.QtCore import QMarginsF
+        from PyQt5.QtGui import QPageLayout, QPageSize
+        
+        if not ok:
+            QMessageBox.warning(self, "Load Error", "Failed to load HTML content")
+            return
+        
+        print(f"✅ HTML loaded, generating PDF...")
+        
+        # Setup page layout for PDF (A4 size with margins)
+        page_layout = QPageLayout(
+            QPageSize(QPageSize.A4),
+            QPageLayout.Portrait,
+            QMarginsF(10, 10, 10, 10)  # Small margins (left, top, right, bottom)
+        )
+        
+        # Generate PDF
+        self._pdf_webview.page().printToPdf(
+            self._pdf_path,
+            page_layout
+        )
+        
+        # Connect to pdfPrintingFinished signal
+        self._pdf_webview.page().pdfPrintingFinished.connect(self._on_pdf_generated)
+
+    def _on_pdf_generated(self, file_path, success):
+        """Called when PDF generation is complete"""
+        if success:
+            print(f"✅ PDF generated successfully: {file_path}")
+            # Show the PDF preview dialog
+            self.show_pdf_preview_dialog(
+                file_path, 
+                self._pdf_invoice_no, 
+                self._pdf_html_content, 
+                self._pdf_invoice_id
+            )
+        else:
+            QMessageBox.critical(self, "PDF Error", "Failed to generate PDF file")
+            print(f"❌ PDF generation failed")
+        
+        # Cleanup
+        if hasattr(self, '_pdf_webview'):
+            self._pdf_webview.deleteLater()
+            del self._pdf_webview
+
+    def show_pdf_preview_dialog(self, pdf_path, invoice_no, html_content, invoice_id):
+        """Show PDF preview inside PyQt dialog with embedded viewer"""
+        import os
+        import shutil
+        from PyQt5.QtCore import QUrl
+        
+        try:
+            from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
+        except ImportError:
+            QMessageBox.critical(self, "Error", "PyQtWebEngine not installed")
+            return
+        
+        # Create preview dialog - larger to show PDF properly
+        preview_dialog = QDialog(self)
+        preview_dialog.setWindowTitle(f"📄 Invoice Preview - {invoice_no}")
+        preview_dialog.setModal(True)
+        preview_dialog.resize(900, 800)
+        preview_dialog.setMinimumSize(800, 600)
+        
+        # Main layout
+        layout = QVBoxLayout(preview_dialog)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+        
+        # Header bar with title and buttons
+        header_frame = QFrame()
+        header_frame.setFixedHeight(60)
+        header_frame.setStyleSheet(f"""
+            QFrame {{ 
+                background: {PRIMARY}; 
+                border-radius: 8px; 
+            }}
+        """)
+        header_layout = QHBoxLayout(header_frame)
+        header_layout.setContentsMargins(15, 5, 15, 5)
+        
+        # Title
+        title_label = QLabel(f"📄 Invoice: {invoice_no}")
+        title_label.setStyleSheet(f"color: {WHITE}; font-size: 16px; font-weight: bold;")
+        header_layout.addWidget(title_label)
+        
+        header_layout.addStretch()
+        
+        # Button style
+        btn_style = f"""
+            QPushButton {{
+                background: {WHITE};
+                color: {PRIMARY};
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 8px 15px;
+                min-width: 100px;
+            }}
+            QPushButton:hover {{ background: #e0e7ff; }}
+            QPushButton:pressed {{ background: #c7d2fe; }}
+        """
+        
+        # Save As button
+        save_btn = QPushButton("💾 Save As")
+        save_btn.setStyleSheet(btn_style)
+        save_btn.clicked.connect(lambda: self.save_pdf_as(pdf_path, invoice_no))
+        header_layout.addWidget(save_btn)
+        
+        # Print button
+        print_btn = QPushButton("🖨️ Print")
+        print_btn.setStyleSheet(btn_style)
+        print_btn.clicked.connect(lambda: self.print_pdf(pdf_path))
+        header_layout.addWidget(print_btn)
+        
+        # Open External button
+        open_btn = QPushButton("📖 Open External")
+        open_btn.setStyleSheet(btn_style)
+        open_btn.clicked.connect(lambda: self.open_pdf_file(pdf_path))
+        header_layout.addWidget(open_btn)
+        
+        # Close button
+        close_btn = QPushButton("❌ Close")
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: #ef4444;
+                color: {WHITE};
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 8px 15px;
+                min-width: 80px;
+            }}
+            QPushButton:hover {{ background: #dc2626; }}
+            QPushButton:pressed {{ background: #b91c1c; }}
+        """)
+        close_btn.clicked.connect(preview_dialog.close)
+        header_layout.addWidget(close_btn)
+        
+        layout.addWidget(header_frame)
+        
+        # PDF Viewer using QWebEngineView
+        pdf_viewer = QWebEngineView()
+        pdf_viewer.setStyleSheet(f"""
+            QWebEngineView {{
+                border: 1px solid {BORDER};
+                border-radius: 8px;
+            }}
+        """)
+        
+        # Configure settings
+        settings = pdf_viewer.settings()
+        settings.setAttribute(QWebEngineSettings.PluginsEnabled, True)
+        settings.setAttribute(QWebEngineSettings.PdfViewerEnabled, True)
+        settings.setAttribute(QWebEngineSettings.LocalContentCanAccessFileUrls, True)
+        
+        # Load PDF file directly in WebEngineView (Chrome's built-in PDF viewer)
+        pdf_url = QUrl.fromLocalFile(pdf_path)
+        pdf_viewer.setUrl(pdf_url)
+        
+        layout.addWidget(pdf_viewer, 1)  # Stretch factor 1 to fill space
+        
+        # Store reference to prevent garbage collection
+        preview_dialog.pdf_viewer = pdf_viewer
+        
+        # Show dialog
+        preview_dialog.exec_() 
+
+    def open_pdf_file(self, pdf_path):
+        """Open PDF file with system default viewer"""
+        import subprocess
+        import os
+        
+        try:
+            if os.path.exists(pdf_path):
+                if os.name == 'nt':  # Windows
+                    os.startfile(pdf_path)
+                elif os.name == 'posix':
+                    if os.uname().sysname == 'Darwin':  # macOS
+                        subprocess.run(['open', pdf_path])
+                    else:  # Linux
+                        subprocess.run(['xdg-open', pdf_path])
+                print(f"📖 Opened PDF: {pdf_path}")
+            else:
+                QMessageBox.warning(self, "File Not Found", f"PDF file not found: {pdf_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not open PDF: {str(e)}")
+
+    def save_pdf_as(self, pdf_path, invoice_no):
+        """Save PDF to user-chosen location"""
+        import shutil
+        
+        try:
+            default_filename = f"Invoice_{invoice_no}.pdf"
+            save_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Invoice PDF",
+                default_filename,
+                "PDF Files (*.pdf);;All Files (*)"
+            )
+            
+            if save_path:
+                shutil.copy2(pdf_path, save_path)
+                QMessageBox.information(self, "Saved", f"PDF saved to:\n{save_path}")
+                
+                # Ask to open
+                reply = QMessageBox.question(self, "Open PDF?", "Would you like to open the saved PDF?",
+                                            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                if reply == QMessageBox.Yes:
+                    self.open_pdf_file(save_path)
+                    
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Failed to save PDF: {str(e)}")
+
+    def print_pdf(self, pdf_path):
+        """Print PDF using system print dialog"""
+        import subprocess
+        import os
+        
+        try:
+            if os.name == 'posix' and os.uname().sysname == 'Darwin':  # macOS
+                # Use lpr command for printing on macOS
+                subprocess.run(['lpr', pdf_path])
+                QMessageBox.information(self, "Print", "PDF sent to default printer!")
+            else:
+                # Open PDF and let user print from viewer
+                self.open_pdf_file(pdf_path)
+                QMessageBox.information(self, "Print", "PDF opened. Use Ctrl+P to print.")
+        except Exception as e:
+            # Fallback: open PDF for manual printing
+            self.open_pdf_file(pdf_path)
+            QMessageBox.information(self, "Print", f"PDF opened. Please print from the viewer.\n\nError: {str(e)}")
+
+    def open_invoice_in_browser(self, invoice_id, dialog):
+        """Open the invoice HTML in browser and close preview dialog"""
+        try:
+            from pdf_generator import InvoicePDFGenerator
+            import tempfile
+            import webbrowser
+            
+            generator = InvoicePDFGenerator()
+            
+            # Get invoice data
+            invoice_data = generator.get_invoice_data(invoice_id)
+            if not invoice_data:
+                QMessageBox.warning(self, "Error", "Could not load invoice data")
+                return
+            
+            # Generate HTML content
+            template_data = generator.prepare_template_data(invoice_data)
+            html_content = generator.render_html_template(template_data)
+            
+            # Create temporary HTML file
+            temp_dir = tempfile.gettempdir()
+            html_filename = f"invoice_{invoice_data['invoice']['invoice_no']}.html"
+            html_path = os.path.join(temp_dir, html_filename)
+            
+            # Save HTML file
+            with open(html_path, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            # Open in browser
+            webbrowser.open('file://' + html_path)
+            print(f"Invoice HTML opened in browser: {html_path}")
+            print("To save as PDF: Press Ctrl+P (or Cmd+P on Mac) and save as PDF")
+            
+            # Close the preview dialog
+            dialog.close()
+            
+            # Show success message
+            QMessageBox.information(self, "Success", 
+                                  f"Invoice opened in browser!\n\nTo save as PDF:\n• Press Ctrl+P (or Cmd+P on Mac)\n• Choose 'Save as PDF' option")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open invoice in browser: {str(e)}")
+
+    def download_invoice_pdf(self, invoice_id, html_content):
+        """Download invoice as PDF file using browser's print-to-PDF functionality"""
+        try:
+            import tempfile
+            import webbrowser
+            import os
+            
+            # Get invoice data for filename
+            from pdf_generator import InvoicePDFGenerator
+            generator = InvoicePDFGenerator()
+            invoice_data = generator.get_invoice_data(invoice_id)
+            
+            if not invoice_data:
+                QMessageBox.warning(self, "Error", "Could not load invoice data")
+                return
+            
+            invoice_no = invoice_data['invoice']['invoice_no']
+            
+            # Try native PDF generation using QPrinter
+            try:
+                from PyQt5.QtPrintSupport import QPrinter
+                from PyQt5.QtGui import QTextDocument
+                
+                # Get save location from user
+                default_filename = f"Invoice_{invoice_no}.pdf"
+                file_path, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "Save Invoice PDF",
+                    default_filename,
+                    "PDF Files (*.pdf);;All Files (*)"
+                )
+                
+                if not file_path:
+                    return  # User cancelled
+                
+                # Create QTextDocument and set HTML content
+                document = QTextDocument()
+                document.setHtml(html_content)
+                
+                # Set up printer for PDF output
+                printer = QPrinter(QPrinter.HighResolution)
+                printer.setOutputFormat(QPrinter.PdfFormat)
+                printer.setOutputFileName(file_path)
+                printer.setPageMargins(10, 10, 10, 10, QPrinter.Millimeter)
+                
+                # Print document to PDF
+                document.print(printer)
+                
+                # Show success message
+                QMessageBox.information(
+                    self, 
+                    "PDF Saved", 
+                    f"Invoice PDF saved successfully!\n\nLocation: {file_path}"
+                )
+                
+                # Ask if user wants to open the PDF
+                reply = QMessageBox.question(
+                    self,
+                    "Open PDF?",
+                    "Would you like to open the PDF file now?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+                
+                if reply == QMessageBox.Yes:
+                    # Open the PDF file with system default application
+                    if os.name == 'nt':  # Windows
+                        os.startfile(file_path)
+                    elif os.name == 'posix':  # macOS and Linux
+                        os.system(f'open "{file_path}"' if os.uname().sysname == 'Darwin' else f'xdg-open "{file_path}"')
+                
+            except ImportError as print_error:
+                print(f"QPrinter not available: {print_error}")
+                
+                # Fallback: Generate HTML file and give instructions
+                QMessageBox.information(
+                    self,
+                    "PDF Download Instructions",
+                    f"Direct PDF generation is not available.\n\n"
+                    f"Alternative method:\n"
+                    f"1. Click 'Open in Browser' button\n"
+                    f"2. Press Ctrl+P (or Cmd+P on Mac)\n"
+                    f"3. Choose 'Save as PDF' option\n"
+                    f"4. Save as '{invoice_no}.pdf'"
+                )
+                
+        except Exception as e:
+            QMessageBox.critical(self, "PDF Download Error", f"Failed to download PDF: {str(e)}")
+
+    def generate_invoice_pdf(self, invoice_id):
+        """Generate PDF for the invoice using the PDF generator module"""
+        try:
+            from pdf_generator import generate_invoice_pdf
+            pdf_path = generate_invoice_pdf(invoice_id)
+            
+            if pdf_path and os.path.exists(pdf_path):
+                return pdf_path
+            else:
+                QMessageBox.critical(self, "PDF Generation Error", 
+                                   "Failed to generate PDF. Please check your data and try again.")
+                return None
+                
+        except ImportError:
+            QMessageBox.critical(self, "PDF Generation Error", 
+                               "PDF generation requires ReportLab library.\nPlease install it using: pip install reportlab")
+            return None
+        except Exception as e:
+            QMessageBox.critical(self, "PDF Generation Error", 
+                               f"Failed to generate PDF: {str(e)}")
+            return None
 
     # The following helper sections mirror the original dialog
     def open_party_selector(self):
@@ -2049,8 +2790,21 @@ class InvoiceDialog(QDialog):
             print(f"Error updating totals: {e}")
 
     def save_invoice(self):
+        # Show confirmation dialog first
+        action_text = "update" if self.invoice_data else "save"
+        reply = QMessageBox.question(
+            self, 
+            "Confirm Save", 
+            f"Do you want to {action_text} this invoice?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        
+        if reply != QMessageBox.Yes:
+            return  # User cancelled
+        
         party_text = getattr(self, 'party_search').text().strip()
-        party_data = getattr(self, 'party_data_map').get(party_text)
+        party_data = getattr(self, 'party_data_map', {}).get(party_text)
         if not party_data or not party_text:
             QMessageBox.warning(self, "Error", "Please select a valid party from the search!")
             return
@@ -2146,5 +2900,85 @@ class InvoiceDialog(QDialog):
             self.accept()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save invoice: {str(e)}")
+
+    def reset_form(self):
+        """Reset all form fields to defaults and update date to today"""
+        try:
+            # Show confirmation dialog first
+            reply = QMessageBox.question(
+                self, 
+                "Confirm Reset", 
+                "Are you sure you want to reset all fields? This will clear all entered data.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No  # Default to No for safety
+            )
+            
+            if reply != QMessageBox.Yes:
+                return  # User cancelled
+            
+            # Reset date to today
+            if hasattr(self, 'invoice_date') and self.invoice_date is not None:
+                self.invoice_date.setDate(QDate.currentDate())
+            
+            # Reset invoice number to next available
+            if hasattr(self, 'invoice_number') and self.invoice_number is not None:
+                try:
+                    if hasattr(db, 'get_next_invoice_number'):
+                        next_inv_no = db.get_next_invoice_number()
+                    else:
+                        # Fallback logic matching create_header_section
+                        invoices = db.get_invoices() or []
+                        max_no = 0
+                        for inv in invoices:
+                            inv_no = str(inv.get('invoice_no', ''))
+                            if inv_no.startswith('INV-'):
+                                try:
+                                    num = int(inv_no.replace('INV-', '').split()[0])
+                                    max_no = max(max_no, num)
+                                except Exception:
+                                    pass
+                        next_inv_no = f"INV-{max_no+1:03d}"
+                    self.invoice_number.setText(next_inv_no)
+                except Exception as e:
+                    print(f"Error generating next invoice number: {e}")
+                    self.invoice_number.setText("INV-001")
+            
+            # Clear party search
+            if hasattr(self, 'party_search') and self.party_search is not None:
+                self.party_search.clear()
+                # Clear party data map
+                if hasattr(self, 'party_data_map'):
+                    self.party_data_map = {}
+            
+            # Clear notes if it exists
+            if hasattr(self, 'notes') and self.notes is not None:
+                self.notes.clear()
+            
+            # Reset paid amount
+            if hasattr(self, 'paid_amount_spin') and self.paid_amount_spin is not None:
+                self.paid_amount_spin.setValue(0.0)
+            
+            # Remove all item widgets except the stretch at the end
+            if hasattr(self, 'items_layout') and self.items_layout is not None:
+                # Remove all items in reverse order (preserve stretch at end)
+                for i in reversed(range(self.items_layout.count() - 1)):
+                    item = self.items_layout.itemAt(i)
+                    if item and item.widget():
+                        widget = item.widget()
+                        if isinstance(widget, InvoiceItemWidget):
+                            self.items_layout.removeWidget(widget)
+                            widget.deleteLater()
+                
+                # Add one new empty item
+                self.add_item()
+            
+            # Update totals display
+            self.update_totals()
+            
+            # Show success message
+            QMessageBox.information(self, "Reset Complete", "Invoice has been reset successfully!")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Reset Error", f"Failed to reset invoice: {str(e)}")
 
 

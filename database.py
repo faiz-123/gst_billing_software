@@ -227,6 +227,7 @@ class Database:
             ("date", "TEXT"),
             ("party_id", "INTEGER"),
             ("grand_total", "REAL DEFAULT 0"),
+            ("status", "TEXT DEFAULT 'Draft'"),
         ]:
             try:
                 self._ensure_column("invoices", col, decl)
@@ -395,10 +396,10 @@ class Database:
         self._execute("DELETE FROM products WHERE id = ?", (product_id,))
 
     # --- invoices (minimal) ---
-    def add_invoice(self, invoice_no, date, party_id, invoice_type='GST', subtotal=0, cgst=0, sgst=0, igst=0, round_off=0, grand_total=0):
+    def add_invoice(self, invoice_no, date, party_id, invoice_type='GST', subtotal=0, cgst=0, sgst=0, igst=0, round_off=0, grand_total=0, status='Draft'):
         cur = self._execute(
-            "INSERT INTO invoices(invoice_no, date, party_id, grand_total) VALUES(?,?,?,?)",
-            (invoice_no, date, party_id, float(grand_total or 0)),
+            "INSERT INTO invoices(invoice_no, date, party_id, grand_total, status) VALUES(?,?,?,?,?)",
+            (invoice_no, date, party_id, float(grand_total or 0), status),
         )
         return cur.lastrowid
 
@@ -410,12 +411,13 @@ class Database:
         if not iid:
             return False
         self._execute(
-            "UPDATE invoices SET invoice_no = ?, date = ?, party_id = ?, grand_total = ? WHERE id = ?",
+            "UPDATE invoices SET invoice_no = ?, date = ?, party_id = ?, grand_total = ?, status = ? WHERE id = ?",
             (
                 invoice_data.get('invoice_no'),
                 invoice_data.get('date'),
                 invoice_data.get('party_id'),
                 float(invoice_data.get('grand_total') or 0),
+                invoice_data.get('status', 'Draft'),
                 iid,
             ),
         )
@@ -499,7 +501,12 @@ class Database:
         return cur.lastrowid
 
     def get_payments(self):
-        return self._query("SELECT * FROM payments ORDER BY id DESC")
+        return self._query("""
+            SELECT p.*, pa.name as party_name
+            FROM payments p 
+            LEFT JOIN parties pa ON p.party_id = pa.id 
+            ORDER BY p.id DESC
+        """)
 
     def update_payment(self, payment_data: Dict):
         pid = payment_data.get('id')
