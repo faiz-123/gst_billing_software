@@ -134,7 +134,7 @@ class InvoicePrintPreview(QDialog):
         
         # Initialize viewer state
         self.pdf_viewer_created = False
-        
+
         if WEB_ENGINE_AVAILABLE and QWebEngineView:
             try:
                 # Try to use QWebEngineView for PDF display

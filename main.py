@@ -6,6 +6,10 @@ import sys
 from PyQt5.QtWidgets import QApplication, QMainWindow, QHBoxLayout, QWidget, QStackedWidget
 from PyQt5.QtCore import Qt
 
+# Enable WebEngine sharing BEFORE QApplication is created
+# This is required for QWebEngineView to work properly
+QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
+
 from theme import APP_STYLESHEET
 from widgets import Sidebar
 from config import config

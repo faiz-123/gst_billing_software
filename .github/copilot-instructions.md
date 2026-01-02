@@ -1,48 +1,75 @@
-This repository: GST Billing (PyQt5) — quick AI helper guide
+This repository: GST Billing (PyQt5) — AI coding agent guide
 
-Purpose
-- Desktop GST billing application built with PyQt5. UI screens under `screens/`, small shared widgets in `widgets.py`, theming in `theme.py`, and persistence via `database.py`.
+## Purpose
+Desktop GST billing application with PyQt5. Core structure: `screens/` for UI modules, `widgets.py` for reusable components, `theme.py` for styling, `database.py` for SQLite persistence.
 
-Big picture
-- Entry points: `run.py` / `main.py` and `app_with_auth.py` (app bootstrapping). The UI composes `BaseScreen` subclasses from `screens/` into a main window.
-- Screens folder contains per-feature screens: `parties.py`, `products.py`, `dashboard.py`, `invoices.py`, etc. Each screen builds its own layouts and uses `widgets.CustomTable` for tabular data.
-- Persistence: `database.db` module exposes `db` object with helpers like `get_parties()`, `add_party()`, etc. Code defensively checks for attributes before calling.
+## Architecture overview
+- **Entry points**: `main.py` (main app) and `app_with_auth.py` (with auth flow)
+- **Screen system**: `BaseScreen` subclasses in `screens/` compose into sidebar navigation via `MainWindow`
+- **Dialog pattern**: Separate dialog files (`*_dialogue.py`) handle complex forms (invoice, product, party creation)
+- **Data flow**: `database.py` exposes singleton `db` object with methods like `get_parties()`, `add_invoice()`, etc.
 
-Developer workflows
-- Run UI: `python3 main.py` (or `./run_ui.sh` if added) — starts the PyQt5 desktop app.
-- Run import checks: quick import test:
-  python3 - << 'PY'
-  try:
-      import importlib
-      m = importlib.import_module('screens.parties')
-      importlib.reload(m)
-      print('IMPORT OK')
-  except Exception:
-      import traceback; traceback.print_exc()
-  PY
-- Install dependencies: `pip install -r requirements.txt`.
+## Critical patterns
 
-Project-specific conventions
-- UI patterns: screens use layouts and helper styled widgets. Prefer `create_label/create_input` style where present for consistent look.
-- Use defensive db access: always check `hasattr(db, 'method')` before calling (database may be optional in dev environment).
-- Minimal external services: app is local; optional PDF/export features use `pandas`/`reportlab`.
+### Dialog structure (follow `ProductDialog` in `screens/product_dialogue.py`)
+```python
+def label(self, text):
+    # Standard label with theme colors
+def input(self):
+    # Styled QLineEdit with consistent appearance
+def input_style():
+    # Returns CSS string with theme colors
+```
+Use this pattern for all form dialogs - creates visual consistency.
 
-Key files and examples
-- `screens/parties.py`: Party management UI and `PartyDialog` (form fields: name, phone, email, gst, pan, company, state, address, opening_balance, balance_type). Use this as reference for form layouts and db calls.
-- `screens/products.py`: ProductDialog shows product-style form helpers `label()`, `input()`, and `input_style()` — mirror this when standardizing other dialogs.
-- `widgets.py`: shared helpers such as `CustomTable` and `CustomButton` (search here when building table rows or buttons).
-- `theme.py`: color and style tokens used across app — import values from here to maintain consistent styles.
-- `database.py`: db access object `db` — check function names and signatures before calling.
+### Uppercase input enforcement (common pattern)
+```python
+def force_upper(text):
+    cursor_pos = self.input_field.cursorPosition()
+    self.input_field.blockSignals(True)
+    self.input_field.setText(text.upper())
+    self.input_field.setCursorPosition(cursor_pos)
+    self.input_field.blockSignals(False)
+self.input_field.textChanged.connect(force_upper)
+```
+Applied to party names, product searches - maintains data consistency.
 
-When coding
-- Keep UI-only changes isolated to `screens/` and `widgets.py`.
-- Preserve `theme.py` tokens; reuse them in stylesheets.
-- For new dialogs prefer the `ProductDialog` pattern: label + input stacked via grid rows and `create_label/create_input` helpers.
+### Signal connections for reactive UI
+- Invoice type changes update all item tax rates via `currentTextChanged.connect()`
+- Product selection auto-populates HSN, rate, tax from product data
+- Always use `blockSignals()` to prevent recursive updates during programmatic changes
 
-If unsure
-- Run the import-check snippet above; if it fails, inspect the traceback for IndentationError or NameError from stray code fragments.
+## Key conventions
+- **Theme consistency**: Import colors from `theme.py` - use `PRIMARY`, `WHITE`, `BORDER`, etc. in stylesheets
+- **Database safety**: Check `hasattr(db, 'method_name')` before calling - db may be unavailable in dev
+- **Tax logic**: GST invoices use product tax rates; Non-GST invoices set tax to 0 automatically
+- **Read-only fields**: Use `setReadOnly(True)` + `BACKGROUND` color for calculated/auto-populated fields
 
-Deliverable
-- After editing, run `python3 main.py` to visually confirm UI changes.
+## Essential files
+- `screens/invoice_dialogue.py`: Complex dialog with item widgets, tax calculations, parent-child communication
+- `widgets.py`: `CustomTable`, `CustomButton`, `CustomInput` - reuse these for consistency  
+- `database.py`: SQLite wrapper with methods matching UI needs (`get_invoices_with_filters()`, etc.)
+- `config.py`: JSON-based settings management via singleton `config` object
 
-If you want, I can expand this doc with explicit edit guidelines, test commands, or additional examples from `screens/` files.
+## Developer workflow
+```bash
+python3 main.py  # Start application
+pip install -r requirements.txt  # Dependencies
+```
+
+### Quick validation
+```python
+# Test imports without full app startup
+import importlib
+m = importlib.import_module('screens.parties')
+importlib.reload(m)
+print('IMPORT OK')
+```
+
+## Common tasks
+- **New screen**: Inherit from `BaseScreen`, add to `main.py` imports and navigation
+- **Form validation**: Use Qt validators or custom `textChanged` handlers with visual feedback
+- **Database changes**: Update schema in `database.py` `create_tables()`, add methods as needed
+- **Styling**: Extend `theme.py` colors rather than hardcoding hex values in components
+
+Always run `python3 main.py` after changes to verify UI behavior and catch runtime errors.

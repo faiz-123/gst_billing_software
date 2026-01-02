@@ -214,6 +214,11 @@ class CompanyCreationScreen(QWidget):
         self.de_fy_start = QDateEdit()
         self.de_fy_start.setCalendarPopup(True)
         self.de_fy_start.setDate(QDate.currentDate())
+        
+        # Apply calendar styling
+        from theme import get_calendar_stylesheet
+        self.de_fy_start.setStyleSheet(get_calendar_stylesheet())
+        
         start_layout.addWidget(start_label)
         start_layout.addWidget(self.de_fy_start)
         
@@ -225,6 +230,10 @@ class CompanyCreationScreen(QWidget):
         self.de_fy_end.setCalendarPopup(True)
         # Set end date to one year from start date
         self.de_fy_end.setDate(QDate.currentDate().addYears(1))
+        
+        # Apply calendar styling
+        self.de_fy_end.setStyleSheet(get_calendar_stylesheet())
+        
         end_layout.addWidget(end_label)
         end_layout.addWidget(self.de_fy_end)
         

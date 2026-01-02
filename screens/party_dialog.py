@@ -22,7 +22,7 @@ class PartyDialog(QDialog):
         self.result_data = None
         self.setWindowTitle("Add Party" if not party_data else "Edit Party")
         self.setModal(True)
-        self.setMinimumSize(600, 480)
+        self.setMinimumSize(1200, 800)
 
         # try to size/center relative to parent
         try:

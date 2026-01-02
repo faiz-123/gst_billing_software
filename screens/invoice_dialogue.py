@@ -406,14 +406,43 @@ class InvoiceItemWidget(QWidget):
     # The following helper sections mirror the original dialog
     def open_product_selector(self):
         try:
-            selected = self._open_product_selector_dialog()
-            if selected:
+            # Check if typed text exactly matches a product name
+            typed_text = self.product_input.text().strip()
+            exact_match = None
+            
+            # Check for exact match (case-insensitive)
+            for product_name in self._product_map.keys():
+                if product_name.upper() == typed_text.upper():
+                    exact_match = product_name
+                    break
+            
+            if exact_match:
+                # Direct match found, no need to open selector
+                selected = exact_match
                 self.product_input.setText(selected)
                 # Apply selected product to update dependent fields
                 try:
                     self.on_product_selected(selected)
                 except Exception as _e:
                     print(f"on_product_selected failed: {_e}")
+                
+                # Focus on quantity field after product selection
+                self.quantity_spin.setFocus()
+                self.quantity_spin.selectAll()
+            else:
+                # No exact match, open selector
+                selected = self._open_product_selector_dialog()
+                if selected:
+                    self.product_input.setText(selected)
+                    # Apply selected product to update dependent fields
+                    try:
+                        self.on_product_selected(selected)
+                    except Exception as _e:
+                        print(f"on_product_selected failed: {_e}")
+                    
+                    # Focus on quantity field after product selection
+                    self.quantity_spin.setFocus()
+                    self.quantity_spin.selectAll()
         except Exception as e:
             print(f"Product selector failed: {e}")
 
@@ -682,6 +711,10 @@ class InvoiceDialog(QDialog):
                 # Update row numbers and totals
                 self.number_items()
                 self.update_totals()
+            
+            # Check if invoice is FINAL and disable editing if so
+            if invoice.get('status') == 'FINAL':
+                self.disable_editing_after_final_save(show_message=False)
             
         except Exception as e:
             QMessageBox.warning(self, "Warning", f"Error populating invoice data: {str(e)}")
@@ -1246,6 +1279,9 @@ class InvoiceDialog(QDialog):
                 if hasattr(self, 'invoice_number'):
                     self.invoice_number.setText(invoice_no)
             
+            # Get invoice type from combo box
+            invoice_type = self.gst_combo.currentText() if hasattr(self, 'gst_combo') else 'GST'
+            
             # Save invoice with FINAL status
             if self.invoice_data:
                 # Update existing invoice
@@ -1258,7 +1294,8 @@ class InvoiceDialog(QDialog):
                     'date': invoice_date,
                     'party_id': party_data['id'],
                     'grand_total': grand_total,
-                    'status': 'FINAL'  # Mark as final
+                    'status': 'FINAL',  # Mark as final
+                    'type': invoice_type  # Save invoice type (GST or Non-GST)
                 }
                 db.update_invoice(invoice_data)
                 invoice_id = self.invoice_data['id']
@@ -1286,7 +1323,7 @@ class InvoiceDialog(QDialog):
                     invoice_no,
                     invoice_date,
                     party_data['id'],
-                    'GST',  # invoice type
+                    invoice_type,  # Use selected invoice type (GST or Non-GST)
                     subtotal,
                     total_cgst,
                     total_sgst,
@@ -1322,7 +1359,7 @@ class InvoiceDialog(QDialog):
             QMessageBox.critical(self, "Save Error", f"Failed to save invoice: {str(e)}")
             return None
 
-    def disable_editing_after_final_save(self):
+    def disable_editing_after_final_save(self, show_message=True):
         """Disable all editing controls after invoice is saved as FINAL"""
         # Disable the Save & Print button itself
         if hasattr(self, 'save_print_button'):
@@ -1334,9 +1371,10 @@ class InvoiceDialog(QDialog):
             self.save_button.setEnabled(False)
             self.save_button.setText("✓ Finalized")
         
-        # Show final status message
-        QMessageBox.information(self, "Invoice Finalized", 
-                              "Invoice has been saved as FINAL and cannot be edited further.")
+        # Show final status message only if requested
+        if show_message:
+            QMessageBox.information(self, "Invoice Finalized", 
+                                  "Invoice has been saved as FINAL and cannot be edited further.")
 
     def show_print_preview(self, invoice_id):
         """Show HTML preview dialog with option to open in browser"""
@@ -1363,9 +1401,17 @@ class InvoiceDialog(QDialog):
             if not invoice_data:
                 return None
             
-            # Prepare template data and render HTML
-            template_data = generator.prepare_template_data(invoice_data)
-            html_content = generator.render_html_template(template_data)
+            # Get invoice type and set appropriate template
+            invoice_type = invoice_data['invoice'].get('type', 'GST')
+            generator.template_path = generator.get_template_path(invoice_type)
+            
+            # Prepare template data based on invoice type
+            if invoice_type and invoice_type.upper() in ['NON-GST', 'NON GST', 'NONGST']:
+                template_data = generator.prepare_non_gst_template_data(invoice_data)
+            else:
+                template_data = generator.prepare_template_data(invoice_data)
+            
+            html_content = generator.render_html_template(template_data, invoice_type)
             
             return html_content
                 
@@ -1880,9 +1926,17 @@ class InvoiceDialog(QDialog):
                 QMessageBox.warning(self, "Error", "Could not load invoice data")
                 return
             
-            # Generate HTML content
-            template_data = generator.prepare_template_data(invoice_data)
-            html_content = generator.render_html_template(template_data)
+            # Get invoice type and set appropriate template
+            invoice_type = invoice_data['invoice'].get('type', 'GST')
+            generator.template_path = generator.get_template_path(invoice_type)
+            
+            # Prepare template data based on invoice type
+            if invoice_type and invoice_type.upper() in ['NON-GST', 'NON GST', 'NONGST']:
+                template_data = generator.prepare_non_gst_template_data(invoice_data)
+            else:
+                template_data = generator.prepare_template_data(invoice_data)
+            
+            html_content = generator.render_html_template(template_data, invoice_type)
             
             # Create temporary HTML file
             temp_dir = tempfile.gettempdir()
@@ -2022,9 +2076,33 @@ class InvoiceDialog(QDialog):
     # The following helper sections mirror the original dialog
     def open_party_selector(self):
         try:
-            selected = self._open_party_selector_dialog()
-            if selected:
+            # Check if typed text exactly matches a party name
+            typed_text = self.party_search.text().strip()
+            exact_match = None
+            
+            # Check for exact match (case-insensitive)
+            for party_name in self.party_data_map.keys():
+                if party_name.upper() == typed_text.upper():
+                    exact_match = party_name
+                    break
+            
+            if exact_match:
+                # Direct match found, no need to open selector
+                selected = exact_match
                 self.party_search.setText(selected)
+                
+                # Focus on Invoice Type field after party selection
+                if hasattr(self, 'gst_combo'):
+                    self.gst_combo.setFocus()
+            else:
+                # No exact match, open selector
+                selected = self._open_party_selector_dialog()
+                if selected:
+                    self.party_search.setText(selected)
+                    
+                    # Focus on Invoice Type field after party selection
+                    if hasattr(self, 'gst_combo'):
+                        self.gst_combo.setFocus()
         except Exception as e:
             print(f"Party selector failed: {e}")
 
@@ -2264,14 +2342,52 @@ class InvoiceDialog(QDialog):
                         color: {WHITE};
                         border: 2px solid {BORDER};
                         border-radius: 8px;
-                        font-size: 16px bold;
+                        font-size: 16px;
+                        font-weight: bold;
                         padding: 6px 12px;
+                    }}
+                    QComboBox:hover {{
+                        border: 3px solid #22d3ee;
+                        background: #0ea5e9;
+                    }}
+                    QComboBox:focus {{
+                        border: 4px solid #06b6d4;
+                        background: #0284c7;
+                    }}
+                    QComboBox::drop-down {{
+                        border: none;
+                        width: 30px;
+                    }}
+                    QComboBox::drop-down:hover {{
+                        background: rgba(255, 255, 255, 0.2);
+                        border-radius: 4px;
+                    }}
+                    QComboBox::down-arrow {{
+                        width: 12px;
+                        height: 12px;
+                        color: white;
                     }}
                     QComboBox QAbstractItemView {{
                         color: {TEXT_PRIMARY};
-                        background:#5F9EA0;
-                        selection-background-color: #e5e7eb;
-                        border: 1px solid {BORDER};
+                        background: #0284c7;
+                        selection-background-color: #e0f2fe;
+                        selection-color: {PRIMARY};
+                        border: 2px solid {PRIMARY};
+                        border-radius: 6px;
+                        font-size: 14px;
+                        outline: none;
+                    }}
+                    QComboBox QAbstractItemView::item {{
+                        padding: 8px;
+                        border-bottom: 1px solid #e5e7eb;
+                    }}
+                    QComboBox QAbstractItemView::item:hover {{
+                        background: #f0f9ff;
+                        color: {PRIMARY};
+                    }}
+                    QComboBox QAbstractItemView::item:selected {{
+                        background: {PRIMARY};
+                        color: {WHITE};
                     }}
                 """)
         
@@ -2472,22 +2588,8 @@ class InvoiceDialog(QDialog):
     def on_bill_type_changed(self, bill_type: str):
         """Show/hide Balance Due based on bill type"""
         try:
-            if hasattr(self, 'totals_layout') and hasattr(self, 'balance_due_row'):
-                label_item = self.totals_layout.itemAt(self.balance_due_row, QFormLayout.LabelRole)
-                field_item = self.totals_layout.itemAt(self.balance_due_row, QFormLayout.FieldRole)
-                
-                if bill_type == "CASH":
-                    # Hide Balance Due for CASH transactions
-                    if label_item and label_item.widget():
-                        label_item.widget().setVisible(False)
-                    if field_item and field_item.widget():
-                        field_item.widget().setVisible(False)
-                else:
-                    # Show Balance Due for CREDIT transactions
-                    if label_item and label_item.widget():
-                        label_item.widget().setVisible(True)
-                    if field_item and field_item.widget():
-                        field_item.widget().setVisible(True)
+            # Update totals to reflect bill type visibility changes
+            self.update_totals()
         except Exception as e:
             print(f"Bill type change handler error: {e}")
 
@@ -2576,10 +2678,11 @@ class InvoiceDialog(QDialog):
 
         # Totals on the right
         self.totals_layout = QFormLayout()  # Store reference for show/hide functionality
-        # self.totals_layout.setSpacing(8)
+        self.totals_layout.setSpacing(8)  # Reduced spacing between rows
         self.subtotal_label = QLabel("₹0.00")
         self.subtotal_label.setStyleSheet("font-size: 18px; border: none; background: transparent;")
         self.totals_layout.addRow("Subtotal:", self.subtotal_label)
+        
         self.discount_label = QLabel("₹0.00")
         self.discount_label.setStyleSheet("font-size: 18px; color: red; border: none; background: transparent;")
         self.totals_layout.addRow("Total Discount:", self.discount_label)
@@ -2601,6 +2704,7 @@ class InvoiceDialog(QDialog):
         self.tax_label = QLabel("₹0.00")
         self.tax_label.setStyleSheet("font-size: 18px; font-weight: bold; border: none; background: transparent;")
         self.totals_layout.addRow("Total Tax:", self.tax_label)
+        
         self.grand_total_label = QLabel("₹0.00")
         self.grand_total_label.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {PRIMARY}; background: {BACKGROUND}; padding: 6px; border-radius: 4px;")
         self.grand_total_label.setFixedWidth(130)
@@ -2772,18 +2876,31 @@ class InvoiceDialog(QDialog):
                         label_text = label_item.widget().text()
                         field_widget = field_item.widget() if field_item else None
                         
+                        # Determine visibility based on interstate/intrastate logic and zero values
+                        should_show = True
+                        
                         if label_text == "CGST:":
-                            label_item.widget().setVisible(not is_interstate)
-                            if field_widget:
-                                field_widget.setVisible(not is_interstate)
+                            should_show = not is_interstate and total_cgst > 0
                         elif label_text == "SGST:":
-                            label_item.widget().setVisible(not is_interstate)
-                            if field_widget:
-                                field_widget.setVisible(not is_interstate)
+                            should_show = not is_interstate and total_sgst > 0
                         elif label_text == "IGST:":
-                            label_item.widget().setVisible(is_interstate)
-                            if field_widget:
-                                field_widget.setVisible(is_interstate)
+                            should_show = is_interstate and total_igst > 0
+                        elif label_text == "Total Discount:":
+                            should_show = total_discount > 0
+                        elif label_text == "Total Tax:":
+                            should_show = total_tax > 0
+                        elif label_text == "Balance Due:":
+                            # Show Balance Due only for CREDIT bill type
+                            bill_type = self.billtype_combo.currentText() if hasattr(self, 'billtype_combo') else 'CREDIT'
+                            should_show = bill_type == "CREDIT"
+                        # Always show Subtotal and Grand Total as they're essential
+                        elif label_text in ["Subtotal:", "Grand Total:"]:
+                            should_show = True
+                        
+                        # Apply visibility to both label and field
+                        label_item.widget().setVisible(should_show)
+                        if field_widget:
+                            field_widget.setVisible(should_show)
             
             self.update_balance_due()
         except Exception as e:
@@ -2974,6 +3091,18 @@ class InvoiceDialog(QDialog):
             
             # Update totals display
             self.update_totals()
+            
+            # Re-enable save buttons (in case they were disabled after a FINAL save)
+            if hasattr(self, 'save_button'):
+                self.save_button.setEnabled(True)
+                self.save_button.setText("💾 Save Invoice")
+            
+            if hasattr(self, 'save_print_button'):
+                self.save_print_button.setEnabled(True)
+                self.save_print_button.setText("🖨️ Save & Print")
+            
+            # Clear invoice_data so this is treated as a new invoice
+            self.invoice_data = None
             
             # Show success message
             QMessageBox.information(self, "Reset Complete", "Invoice has been reset successfully!")

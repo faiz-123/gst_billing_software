@@ -439,51 +439,52 @@ class InvoicesScreen(BaseScreen):
         
         
         # Enhanced table headers and setup
-        headers = ["Select", "Invoice No.", "Date", "Party", "Due Date", "Amount", "Status", "Actions", "Priority"]
+        headers = ["Invoice No.", "Date", "Party", "Due Date", "Amount", "Status", "Actions", "Priority"]
         self.invoices_table = CustomTable(0, len(headers), headers)
         
-        # Enhanced table styling
+        # Enhanced table styling - Cleaner appearance
         self.invoices_table.setStyleSheet(f"""
             QTableWidget {{
                 background: {WHITE};
                 border: 2px solid {BORDER};
                 border-radius: 12px;
-                gridline-color: {BORDER};
+                gridline-color: #E5E7EB;
                 font-size: 13px;
-                selection-background-color: rgba(59, 130, 246, 0.2);
-            }}
-            QTableWidget::hover {{
-                border: 2px solid {PRIMARY};
+                selection-background-color: rgba(59, 130, 246, 0.1);
+                alternate-background-color: #F9FAFB;
             }}
             QTableWidget::item {{
-                padding: 12px;
-                border-bottom: 1px solid {BORDER};
+                padding: 8px 12px;
+                border-bottom: 1px solid #F3F4F6;
                 color: {TEXT_PRIMARY};
+                min-height: 35px;
             }}
             QTableWidget::item:hover {{
-                background: #F8FAFC;
+                background: #EBF8FF;
             }}
             QTableWidget::item:selected {{
-                background: rgba(59, 130, 246, 0.3);
+                background: rgba(59, 130, 246, 0.2);
                 color: {TEXT_PRIMARY};
             }}
             QHeaderView::section {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                    stop:0 {PRIMARY}, stop:1 #2563EB);
+                    stop:0 {PRIMARY}, stop:1 #1E40AF);
                 color: white;
-                padding: 12px;
+                padding: 15px 8px;
                 border: none;
                 font-weight: 600;
-                font-size: 13px;
+                font-size: 12px;
+                text-align: center;
             }}
             QHeaderView::section:hover {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                    stop:0 #2563EB, stop:1 #1D4ED8);
+                    stop:0 #1D4ED8, stop:1 #1E3A8A);
             }}
             QScrollBar:vertical {{
-                background: {BACKGROUND};
+                background: #F3F4F6;
                 width: 12px;
                 border-radius: 6px;
+                margin: 2px;
             }}
             QScrollBar::handle:vertical {{
                 background: {BORDER};
@@ -503,16 +504,25 @@ class InvoicesScreen(BaseScreen):
         self.invoices_table.setSortingEnabled(True)
         self.invoices_table.setShowGrid(True)
         
-        # Enhanced column widths
-        self.invoices_table.setColumnWidth(0, 60)   # Select
-        self.invoices_table.setColumnWidth(1, 120)  # Invoice No
-        self.invoices_table.setColumnWidth(2, 100)  # Date
-        self.invoices_table.setColumnWidth(3, 200)  # Party
-        self.invoices_table.setColumnWidth(4, 100)  # Due Date
-        self.invoices_table.setColumnWidth(5, 120)  # Amount
-        self.invoices_table.setColumnWidth(6, 100)  # Status
-        self.invoices_table.setColumnWidth(7, 150)  # Actions
-        self.invoices_table.setColumnWidth(8, 80)   # Priority
+        # Override CustomTable stretch behavior first
+        self.invoices_table.horizontalHeader().setStretchLastSection(False)
+        self.invoices_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        
+        # Then set proper column widths for visibility
+        self.invoices_table.setColumnWidth(0, 130)  # Invoice No
+        self.invoices_table.setColumnWidth(1, 110)  # Date
+        self.invoices_table.setColumnWidth(2, 300)  # Party - Increased width
+        self.invoices_table.setColumnWidth(3, 110)  # Due Date
+        self.invoices_table.setColumnWidth(4, 130)  # Amount
+        self.invoices_table.setColumnWidth(5, 90)   # Status
+        self.invoices_table.setColumnWidth(6, 200)  # Actions
+        self.invoices_table.setColumnWidth(7, 80)   # Priority
+        
+        # Ensure table is wide enough
+        self.invoices_table.setMinimumWidth(1120)
+        
+        # Set row height for better appearance
+        self.invoices_table.verticalHeader().setDefaultSectionSize(50)
         
         # Enhanced context menu
         self.invoices_table.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -610,69 +620,81 @@ class InvoicesScreen(BaseScreen):
     def load_invoices_data(self):
         """Load invoices data into table"""
         try:
-            invoices = db.get_invoices()
+            # Get invoices with party details using a JOIN query
+            if hasattr(db, '_query'):
+                # Use a JOIN query to get party names
+                query = """
+                    SELECT 
+                        i.*,
+                        COALESCE(p.name, 'Unknown Party') as party_name,
+                        CASE 
+                            WHEN i.grand_total > 0 AND i.date < date('now', '-30 days') THEN 'Overdue'
+                            ELSE 'Sent'
+                        END as status
+                    FROM invoices i
+                    LEFT JOIN parties p ON i.party_id = p.id
+                    ORDER BY i.id DESC
+                """
+                invoices = db._query(query)
+            else:
+                # Fallback to basic method if _query not available
+                invoices = db.get_invoices()
+                
+                # Add party names and status manually
+                for invoice in invoices:
+                    if invoice.get('party_id'):
+                        try:
+                            party = db.get_party_by_id(invoice['party_id'])
+                            invoice['party_name'] = party.get('name', 'Unknown Party') if party else 'Unknown Party'
+                        except:
+                            invoice['party_name'] = 'Unknown Party'
+                    else:
+                        invoice['party_name'] = 'Unknown Party'
+                    
+                    # Add status based on business logic
+                    if invoice.get('grand_total', 0) > 0:
+                        invoice['status'] = 'Sent'  # Default status
+                    else:
+                        invoice['status'] = 'Draft'
+            
+            print(f"Loaded {len(invoices)} invoices from database")  # Debug info
+            
             self.all_invoices_data = invoices
             self.populate_table(invoices)
             self.update_stats(invoices)
+            
         except Exception as e:
-            # Show sample data if database not available
-            sample_data = [
-                {
-                    'id': 1, 'invoice_no': 'INV-001', 'date': '2024-01-01', 
-                    'party_name': 'ABC Corp', 'due_date': '2024-01-31',
-                    'grand_total': 54000, 'status': 'Paid'
-                },
-                {
-                    'id': 2, 'invoice_no': 'INV-002', 'date': '2024-01-02',
-                    'party_name': 'XYZ Ltd', 'due_date': '2024-02-01',
-                    'grand_total': 25000, 'status': 'Sent'
-                }
-            ]
-            self.all_invoices_data = sample_data
-            self.populate_table(sample_data)
-            self.update_stats(sample_data)
+            print(f"Error loading invoices: {e}")  # Debug info
+            # If there's an error, show empty table instead of sample data
+            self.all_invoices_data = []
+            self.populate_table([])
+            self.update_stats([])
+            
+            # Show a user-friendly message
+            QMessageBox.information(
+                self, 
+                "Database Info", 
+                f"Unable to load invoices from database.\n\nError: {str(e)}\n\nPlease check your database connection."
+            )
     
     def populate_table(self, invoices_data):
         """Populate table with invoices data with enhanced features"""
         self.invoices_table.setRowCount(len(invoices_data))
         
         for row, invoice in enumerate(invoices_data):
-            # Select checkbox
-            checkbox = QCheckBox()
-            checkbox.setStyleSheet(f"""
-                QCheckBox::indicator {{
-                    width: 18px;
-                    height: 18px;
-                    border: 2px solid {BORDER};
-                    border-radius: 3px;
-                    background: {WHITE};
-                }}
-                QCheckBox::indicator:checked {{
-                    background: {PRIMARY};
-                    border-color: {BORDER};
-                    image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOSIgdmlld0JveD0iMCAwIDEyIDkiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0xIDQuNUw0IDcuNUwxMSAxLjUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPgo=);
-                }}
-            """)
-            checkbox_widget = QWidget()
-            checkbox_layout = QHBoxLayout(checkbox_widget)
-            checkbox_layout.addWidget(checkbox)
-            checkbox_layout.setAlignment(Qt.AlignCenter)
-            checkbox_layout.setContentsMargins(0, 0, 0, 0)
-            self.invoices_table.setCellWidget(row, 0, checkbox_widget)
-            
             # Invoice number with enhanced styling
             invoice_item = QTableWidgetItem(str(invoice.get('invoice_no', f'INV-{invoice["id"]:03d}')))
             invoice_item.setFont(QFont("Arial", 11, QFont.Bold))
-            self.invoices_table.setItem(row, 1, invoice_item)
+            self.invoices_table.setItem(row, 0, invoice_item)
             
             # Date with color coding
             date_item = QTableWidgetItem(str(invoice.get('date', '2024-01-01')))
             date_item.setTextAlignment(Qt.AlignCenter)
-            self.invoices_table.setItem(row, 2, date_item)
+            self.invoices_table.setItem(row, 1, date_item)
             
             # Party name
             party_item = QTableWidgetItem(str(invoice.get('party_name', 'Sample Party')))
-            self.invoices_table.setItem(row, 3, party_item)
+            self.invoices_table.setItem(row, 2, party_item)
             
             # Due date with overdue indicator
             due_date_item = QTableWidgetItem(str(invoice.get('due_date', '2024-01-31')))
@@ -680,14 +702,14 @@ class InvoicesScreen(BaseScreen):
             # Add overdue styling if needed
             if invoice.get('status') == 'Overdue':
                 due_date_item.setBackground(QColor("#FEE2E2"))
-            self.invoices_table.setItem(row, 4, due_date_item)
+            self.invoices_table.setItem(row, 3, due_date_item)
             
             # Amount with currency formatting
             amount = invoice.get('grand_total', 0)
             amount_item = QTableWidgetItem(f"₹{amount:,.2f}")
             amount_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             amount_item.setFont(QFont("Arial", 11, QFont.Bold))
-            self.invoices_table.setItem(row, 5, amount_item)
+            self.invoices_table.setItem(row, 4, amount_item)
             
             # Enhanced status with color coding
             status = invoice.get('status', 'Draft')
@@ -708,11 +730,11 @@ class InvoicesScreen(BaseScreen):
                 status_item.setForeground(QColor(color))
                 status_item.setBackground(QColor(bg_color))
             
-            self.invoices_table.setItem(row, 6, status_item)
+            self.invoices_table.setItem(row, 5, status_item)
             
             # Enhanced action buttons
             actions_widget = self.create_action_buttons(invoice)
-            self.invoices_table.setCellWidget(row, 7, actions_widget)
+            self.invoices_table.setCellWidget(row, 6, actions_widget)
             
             # Priority indicator
             priority = self.get_invoice_priority(invoice)
@@ -728,40 +750,46 @@ class InvoicesScreen(BaseScreen):
             if priority in priority_colors:
                 priority_item.setForeground(QColor(priority_colors[priority]))
             
-            self.invoices_table.setItem(row, 8, priority_item)
+            self.invoices_table.setItem(row, 7, priority_item)
         
         self.update_pagination_info()
     
     def create_action_buttons(self, invoice):
         """Create enhanced action buttons for each invoice row"""
         widget = QWidget()
+        widget.setFixedHeight(45)  # Consistent height
         layout = QHBoxLayout(widget)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(3)
         
-        # Action buttons with enhanced styling
+        # Action buttons with enhanced styling and proper callbacks
         actions = [
-            ("👁️", "View", lambda: self.view_invoice(invoice['id'])),
-            ("✏️", "Edit", lambda: self.edit_invoice(invoice['id'])),
-            ("📤", "Send", lambda: self.send_invoice(invoice['id'])),
-            ("💰", "Payment", lambda: self.record_payment(invoice['id']))
+            ("👁️", "View", lambda inv=invoice: self.view_invoice(inv)),
+            ("✏️", "Edit", lambda inv=invoice: self.edit_invoice(inv)),
+            ("📤", "Send", lambda inv=invoice: self.send_invoice(inv)),
+            ("💰", "Payment", lambda inv=invoice: self.record_payment(inv))
         ]
         
         for icon, tooltip, callback in actions:
             btn = QPushButton(icon)
-            btn.setFixedSize(28, 28)
+            btn.setFixedSize(30, 30)
             btn.setToolTip(tooltip)
             btn.setStyleSheet(f"""
                 QPushButton {{
                     border: 1px solid {BORDER};
-                    border-radius: 14px;
+                    border-radius: 15px;
                     background: {WHITE};
-                    font-size: 12px;
+                    font-size: 14px;
+                    font-weight: bold;
+                    margin: 1px;
                 }}
                 QPushButton:hover {{
                     background: {PRIMARY};
                     color: white;
-                    border-color: {BORDER};
+                    border-color: {PRIMARY};
+                }}
+                QPushButton:pressed {{
+                    background: {PRIMARY_HOVER};
                 }}
             """)
             btn.clicked.connect(callback)
@@ -849,80 +877,23 @@ class InvoicesScreen(BaseScreen):
     def export_selected_invoices(self): pass
     def delete_selected_invoices(self): pass
     def show_bulk_actions_menu(self): pass
-    def view_invoice(self, invoice_id): pass
-    def send_invoice(self, invoice_id): pass
-    def record_payment(self, invoice_id): pass
     def show_context_menu(self, position): pass
     
-    def create_action_buttons(self, invoice):
-        """Create action buttons for each row"""
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
-        
-        # View button
-        view_btn = QPushButton("👁️")
-        view_btn.setFixedSize(25, 25)
-        view_btn.setStyleSheet(f"""
-            QPushButton {{
-                border: 1px solid {BORDER};
-                border-radius: 12px;
-                background: {WHITE};
-                color: {PRIMARY};
-            }}
-            QPushButton:hover {{
-                background: {PRIMARY};
-                color: {WHITE};
-            }}
-        """)
-        view_btn.clicked.connect(lambda: self.view_invoice(invoice))
-        layout.addWidget(view_btn)
-        
-        # Edit button
-        edit_btn = QPushButton("✏️")
-        edit_btn.setFixedSize(25, 25)
-        edit_btn.setStyleSheet(view_btn.styleSheet())
-        edit_btn.clicked.connect(lambda: self.edit_invoice(invoice))
-        layout.addWidget(edit_btn)
-        
-        # Print/PDF button
-        print_btn = QPushButton("🖨️")
-        print_btn.setFixedSize(25, 25)
-        print_btn.setStyleSheet(f"""
-            QPushButton {{
-                border: 1px solid {SUCCESS};
-                border-radius: 12px;
-                background: {WHITE};
-                color: {SUCCESS};
-            }}
-            QPushButton:hover {{
-                background: {SUCCESS};
-                color: {WHITE};
-            }}
-        """)
-        print_btn.clicked.connect(lambda: self.print_invoice(invoice))
-        layout.addWidget(print_btn)
-        
-        # Delete button
-        delete_btn = QPushButton("🗑️")
-        delete_btn.setFixedSize(25, 25)
-        delete_btn.setStyleSheet(f"""
-            QPushButton {{
-                border: 1px solid {DANGER};
-                border-radius: 12px;
-                background: {WHITE};
-                color: {DANGER};
-            }}
-            QPushButton:hover {{
-                background: {DANGER};
-                color: {WHITE};
-            }}
-        """)
-        delete_btn.clicked.connect(lambda: self.delete_invoice(invoice))
-        layout.addWidget(delete_btn)
-        
-        return widget
+    def send_invoice(self, invoice):
+        """Send invoice to customer"""
+        if isinstance(invoice, dict):
+            invoice_no = invoice.get('invoice_no', f"INV-{invoice['id']:03d}")
+        else:
+            invoice_no = f"Invoice ID: {invoice}"
+        QMessageBox.information(self, "Send Invoice", f"Sending invoice {invoice_no}")
+    
+    def record_payment(self, invoice):
+        """Record payment for invoice"""
+        if isinstance(invoice, dict):
+            invoice_no = invoice.get('invoice_no', f"INV-{invoice['id']:03d}")
+        else:
+            invoice_no = f"Invoice ID: {invoice}"
+        QMessageBox.information(self, "Record Payment", f"Recording payment for invoice {invoice_no}")
     
     def update_stats(self, invoices):
         """Update enhanced statistics with all metrics"""
@@ -996,7 +967,10 @@ class InvoicesScreen(BaseScreen):
     
     def view_invoice(self, invoice):
         """View invoice details"""
-        invoice_no = invoice.get('invoice_no', f"INV-{invoice['id']:03d}")
+        if isinstance(invoice, dict):
+            invoice_no = invoice.get('invoice_no', f"INV-{invoice['id']:03d}")
+        else:
+            invoice_no = f"Invoice ID: {invoice}"
         QMessageBox.information(self, "View Invoice", f"Viewing invoice {invoice_no}")
     
     def print_invoice(self, invoice):
@@ -1005,7 +979,13 @@ class InvoicesScreen(BaseScreen):
     
     def delete_invoice(self, invoice):
         """Delete invoice with confirmation"""
-        invoice_no = invoice.get('invoice_no', f"INV-{invoice['id']:03d}")
+        if isinstance(invoice, dict):
+            invoice_no = invoice.get('invoice_no', f"INV-{invoice['id']:03d}")
+            invoice_id = invoice['id']
+        else:
+            invoice_no = f"Invoice ID: {invoice}"
+            invoice_id = invoice
+            
         reply = QMessageBox.question(
             self, "Confirm Delete",
             f"Are you sure you want to delete invoice {invoice_no}?\n\nThis action cannot be undone.",
@@ -1015,7 +995,7 @@ class InvoicesScreen(BaseScreen):
         
         if reply == QMessageBox.Yes:
             try:
-                db.delete_invoice(invoice['id'])
+                db.delete_invoice(invoice_id)
                 QMessageBox.information(self, "Success", "Invoice deleted successfully!")
                 self.load_invoices_data()
             except Exception as e:

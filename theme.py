@@ -191,3 +191,102 @@ def get_header_font(size=FONT_SIZE_HEADER):
     font = QFont(FONT_FAMILY, size)
     font.setBold(True)
     return font
+
+def get_calendar_stylesheet():
+    """Get consistent calendar popup styling for QDateEdit widgets"""
+    return f"""
+        QCalendarWidget {{
+            background-color: {WHITE};
+            color: {TEXT_PRIMARY};
+            border: 2px solid {BORDER};
+            border-radius: 10px;
+            font-size: 14px;
+        }}
+        
+        /* Navigation bar styling */
+        QCalendarWidget QWidget#qt_calendar_navigationbar {{
+            background-color: {PRIMARY};
+            color: {WHITE};
+            border-radius: 8px;
+            height: 40px;
+        }}
+        
+        /* Navigation buttons */
+        QCalendarWidget QToolButton {{
+            background-color: {PRIMARY};
+            color: {WHITE};
+            border: none;
+            border-radius: 5px;
+            padding: 1px;
+            font-weight: bold;
+            font-size: 14px;
+            min-width: 50px;
+            height: 40px;
+        }}
+        QCalendarWidget QToolButton:hover {{
+            background-color: {PRIMARY_HOVER};
+        }}
+        
+        /* Month/Year spinboxes */
+        QCalendarWidget QSpinBox {{
+            background-color: {WHITE};
+            color: {TEXT_PRIMARY};
+            border: 1px solid {BORDER};
+            border-radius: 5px;
+            padding: 1px;
+            font-size: 14px;
+        }}
+        
+        /* Day header (Mon, Tue, etc.) */
+        QCalendarWidget QWidget {{ 
+            alternate-background-color: {BACKGROUND};
+            padding: 0px;
+        }}
+        
+        /* Main calendar grid */
+        QCalendarWidget QTableView {{
+            background-color: {WHITE};
+            alternate-background-color: {WHITE};
+            color: {TEXT_PRIMARY};
+            gridline-color: {BORDER};
+            selection-background-color: {PRIMARY};
+            selection-color: {WHITE};
+            font-size: 15px;
+            font-weight: bold;
+            outline: none;
+        }}
+        
+        /* Individual date cells */
+        QCalendarWidget QTableView::item {{
+            color: #111827;
+            background-color: #FFFFFF;
+            border: 1px solid #E5E7EB;
+            padding: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            text-align: center;
+        }}
+        
+        QCalendarWidget QTableView::item:selected {{
+            background-color: {PRIMARY};
+            color: {WHITE};
+            border: 2px solid {PRIMARY_HOVER};
+            font-weight: bold;
+        }}
+        
+        QCalendarWidget QTableView::item:hover {{
+            background-color: #F3F4F6;
+            color: #111827;
+            border: 2px solid {PRIMARY};
+        }}
+        
+        /* Header for days of week */
+        QCalendarWidget QHeaderView::section {{
+            background-color: {BACKGROUND};
+            color: {TEXT_PRIMARY};
+            border: 1px solid {BORDER};
+            padding: 8px;
+            font-weight: bold;
+            font-size: 14px;
+        }}
+    """
