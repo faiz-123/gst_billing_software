@@ -48,15 +48,25 @@ class CompanyCreationScreen(QWidget):
     company_saved = pyqtSignal(dict)  # Emitted when company data is saved successfully
 
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, company_data=None):
         super().__init__(parent)
-        self.setWindowTitle("New Company")
+        self.company_data = company_data  # If provided, we're in edit mode
+        self.is_edit_mode = company_data is not None
+        
+        if self.is_edit_mode:
+            self.setWindowTitle("Edit Company")
+        else:
+            self.setWindowTitle("New Company")
+            
         self.resize(1200, 900)
         self.logo_path = None
         self._setup_ui()
         self.setup_connections()
         self.apply_styles()
-        # self.setup_ui()
+        
+        # If editing, populate the form with existing data
+        if self.is_edit_mode:
+            self._populate_form_for_edit()
 
 
     def _setup_ui(self) -> None:
@@ -71,7 +81,10 @@ class CompanyCreationScreen(QWidget):
         main_layout.setContentsMargins(30, 30, 30, 30)
         
         # Title
-        title_label = QLabel("New Company Registration")
+        if self.is_edit_mode:
+            title_label = QLabel("Edit Company Details")
+        else:
+            title_label = QLabel("New Company Registration")
         title_label.setObjectName("lblTitle")
         main_layout.addWidget(title_label, alignment=Qt.AlignCenter)
         
@@ -310,6 +323,37 @@ class CompanyCreationScreen(QWidget):
         self.btn_save.clicked.connect(self.save_company_data)
         
         self.de_fy_start.dateChanged.connect(self.update_fy_end_date)
+        
+        # Connect all QLineEdit fields to force uppercase
+        self.setup_uppercase_connections()
+    
+    def setup_uppercase_connections(self):
+        """Set up connections to force uppercase text in all QLineEdit fields"""
+        line_edit_fields = [
+            self.le_company_name,
+            self.le_mobile,
+            self.le_email,
+            self.le_tax_type,
+            self.le_website,
+            self.le_gst_number,
+            self.le_other_license,
+            self.le_bank_name,
+            self.le_account_name,
+            self.le_account_number,
+            self.le_ifsc
+        ]
+        
+        for field in line_edit_fields:
+            field.textChanged.connect(lambda text, f=field: self.force_uppercase(f, text))
+    
+    def force_uppercase(self, line_edit, text):
+        """Force text to uppercase in a QLineEdit field"""
+        if text != text.upper():
+            cursor_pos = line_edit.cursorPosition()
+            line_edit.blockSignals(True)  # Prevent recursive calls
+            line_edit.setText(text.upper())
+            line_edit.setCursorPosition(cursor_pos)
+            line_edit.blockSignals(False)
 
     def update_fy_end_date(self, start_date: QDate) -> None:
         """
@@ -430,17 +474,47 @@ class CompanyCreationScreen(QWidget):
                 QMessageBox.warning(self, "Validation Error", error_message)
                 return
             
-            # Here you would typically save to a database
-            # Show success message first on company creation screen
-            QMessageBox.information(
-                self,
-                "Success",
-                f"Company '{data['company_name']}' has been registered successfully!"
-            )
+            # Import database here to avoid circular imports
+            from database import db
+            
+            if self.is_edit_mode:
+                # Update existing company
+                company_id = self.company_data['id']
+                db.update_company(
+                    company_id,
+                    data['company_name'],
+                    data.get('gst_number'),
+                    data.get('mobile'),
+                    data.get('email'),
+                    data.get('address')
+                )
+                
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Company '{data['company_name']}' has been updated successfully!"
+                )
+            else:
+                # Create new company
+                db.add_company(
+                    data['company_name'],
+                    data.get('gst_number'),
+                    data.get('mobile'),
+                    data.get('email'),
+                    data.get('address')
+                )
+                
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Company '{data['company_name']}' has been registered successfully!"
+                )
             
             # After user clicks OK on success message, emit signals for navigation
-            self.company_saved.emit(data)
-            self.company_created.emit(data)  # This will trigger navigation back to company selection
+            if self.is_edit_mode:
+                self.company_saved.emit(data)  # For edit mode, just emit saved signal
+            else:
+                self.company_created.emit(data)  # For create mode, emit created signal
             
             # The form will be reset when navigating back to company selection
             
@@ -603,4 +677,21 @@ class CompanyCreationScreen(QWidget):
             background: {self.WHITE};
         }}
         """)
+
+    def _populate_form_for_edit(self):
+        """Populate the form with existing company data for editing."""
+        if not self.company_data:
+            return
+            
+        # Basic company details
+        if 'name' in self.company_data:
+            self.le_company_name.setText(self.company_data['name'])
+        if 'mobile' in self.company_data and self.company_data['mobile']:
+            self.le_mobile.setText(str(self.company_data['mobile']))
+        if 'email' in self.company_data and self.company_data['email']:
+            self.le_email.setText(self.company_data['email'])
+        if 'address' in self.company_data and self.company_data['address']:
+            self.te_address.setText(self.company_data['address'])
+        if 'gstin' in self.company_data and self.company_data['gstin']:
+            self.le_gst_number.setText(self.company_data['gstin'])
 

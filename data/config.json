@@ -21,11 +21,86 @@
     "ui": {
         "theme": "default",
         "window_maximized": true,
-        "last_screen": "invoices"
+        "last_screen": "dashboard"
     },
     "database": {
         "path": "data/gst_billing.db",
         "backup_enabled": true,
         "backup_interval_days": 7
+    },
+    "invoice_draft": {
+        "party_name": "FARHAN MANIA",
+        "invoice_date": "2026-01-05",
+        "bill_type": "CASH",
+        "invoice_type": "GST",
+        "items": [
+            {
+                "product_id": 10,
+                "product_name": "IMOU WIFI CAMERA",
+                "hsn_no": "",
+                "quantity": 5.0,
+                "unit": null,
+                "rate": 1800.0,
+                "discount_percent": 0.0,
+                "discount_amount": 0.0,
+                "tax_percent": 18.0,
+                "tax_amount": 1620.0,
+                "amount": 10620.0
+            },
+            {
+                "product_id": 11,
+                "product_name": "DVR 16 CHANNE",
+                "hsn_no": "",
+                "quantity": 1.0,
+                "unit": "PCS",
+                "rate": 4500.0,
+                "discount_percent": 0.0,
+                "discount_amount": 0.0,
+                "tax_percent": 18.0,
+                "tax_amount": 810.0,
+                "amount": 5310.0
+            },
+            {
+                "product_id": 9,
+                "product_name": "CAT 6 CABEL",
+                "hsn_no": "",
+                "quantity": 1.0,
+                "unit": "PCS",
+                "rate": 20.0,
+                "discount_percent": 0.0,
+                "discount_amount": 0.0,
+                "tax_percent": 18.0,
+                "tax_amount": 3.5999999999999996,
+                "amount": 23.6
+            },
+            {
+                "product_id": 8,
+                "product_name": "CCTV CAMERA 2MP",
+                "hsn_no": "8525",
+                "quantity": 1.0,
+                "unit": "PCS",
+                "rate": 1800.0,
+                "discount_percent": 0.0,
+                "discount_amount": 0.0,
+                "tax_percent": 18.0,
+                "tax_amount": 324.0,
+                "amount": 2124.0
+            },
+            {
+                "product_id": 6,
+                "product_name": "BLUETOOTH EARPHONES",
+                "hsn_no": "8518",
+                "quantity": 1.0,
+                "unit": "PCS",
+                "rate": 1299.0,
+                "discount_percent": 0.0,
+                "discount_amount": 0.0,
+                "tax_percent": 18.0,
+                "tax_amount": 233.82,
+                "amount": 1532.82
+            }
+        ],
+        "notes": "",
+        "saved_at": "2026-01-05"
     }
 }

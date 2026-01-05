@@ -291,6 +291,19 @@ class InvoicePrintPreview(QDialog):
     
     def _load_html_preview(self):
         """Load HTML file in web view for preview"""
+        print("ℹ️ Loading HTML preview")
+        
+        # If we already have a web_view from create_pdf_viewer, just load the content
+        if self.web_view and WEB_ENGINE_AVAILABLE:
+            try:
+                file_url = QUrl.fromLocalFile(os.path.abspath(self.pdf_path))
+                self.web_view.load(file_url)
+                print(f"✅ HTML loaded in existing QWebEngineView: {self.pdf_path}")
+                return
+            except Exception as e:
+                print(f"❌ Failed to load in existing web view: {e}")
+        
+        # Otherwise create a new viewer
         if not self.pdf_viewer_created:
             print("ℹ️ Creating HTML preview viewer")
             self._create_html_viewer()

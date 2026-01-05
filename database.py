@@ -286,6 +286,24 @@ class Database:
 
     def get_companies(self):
         return self._query("SELECT * FROM companies ORDER BY id DESC")
+    
+    def get_company_by_id(self, company_id):
+        """Get a single company by ID"""
+        result = self._query("SELECT * FROM companies WHERE id = ?", (company_id,))
+        return result[0] if result else None
+    
+    def update_company(self, company_id, name, gstin=None, mobile=None, email=None, address=None):
+        """Update an existing company"""
+        self._execute(
+            "UPDATE companies SET name=?, gstin=?, mobile=?, email=?, address=? WHERE id=?",
+            (name, gstin, mobile, email, address, company_id),
+        )
+        return company_id
+    
+    def delete_company(self, company_id):
+        """Delete a company by ID"""
+        self._execute("DELETE FROM companies WHERE id = ?", (company_id,))
+        return True
 
     # --- parties ---
     def add_party(self, *args, **kwargs):
@@ -482,6 +500,27 @@ class Database:
         # Get party details
         party = None
         if invoice['party_id']:
+            parties = self._query("SELECT * FROM parties WHERE id = ?", (invoice['party_id'],))
+            party = parties[0] if parties else None
+        
+        # Get line items
+        items = self.get_invoice_items(invoice['id'])
+        
+        return {
+            'invoice': invoice,
+            'party': party,
+            'items': items
+        }
+
+    def get_invoice_with_items_by_id(self, invoice_id: int):
+        """Get complete invoice with line items by invoice ID"""
+        invoice = self.get_invoice_by_id(invoice_id)
+        if not invoice:
+            return None
+        
+        # Get party details
+        party = None
+        if invoice.get('party_id'):
             parties = self._query("SELECT * FROM parties WHERE id = ?", (invoice['party_id'],))
             party = parties[0] if parties else None
         

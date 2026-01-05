@@ -21,7 +21,6 @@ from screens.parties import PartiesScreen
 from screens.products import ProductsScreen
 from screens.invoices import InvoicesScreen
 from screens.payments import PaymentsScreen
-from screens.invoice_viewer import InvoiceViewerScreen
 
 class MainWindow(QMainWindow):
     def __init__(self, company_name="GST Billing"):
@@ -65,8 +64,7 @@ class MainWindow(QMainWindow):
             'parties': PartiesScreen(),
             'products': ProductsScreen(),
             'invoices': InvoicesScreen(),
-            'payments': PaymentsScreen(),
-            'invoice_viewer': InvoiceViewerScreen()
+            'payments': PaymentsScreen()
         }
         
         # Add screens to stack
@@ -77,15 +75,17 @@ class MainWindow(QMainWindow):
         """Setup sidebar menu items without sections"""
         # Main navigation items
         dashboard_btn = self.sidebar.add_menu_item("Dashboard", "🏠", lambda: self.navigate_to('dashboard'))
-        invoices_btn = self.sidebar.add_menu_item("Invoices", "🧾", lambda: self.navigate_to('invoices'))
-        self.sidebar.add_menu_item("Invoice Viewer", "👁️", lambda: self.navigate_to('invoice_viewer'))
+        invoices_btn = self.sidebar.add_menu_item("Invoices", "📄", lambda: self.navigate_to('invoices'))
         self.sidebar.add_menu_item("Products", "📦", lambda: self.navigate_to('products'))
         self.sidebar.add_menu_item("Parties", "👥", lambda: self.navigate_to('parties'))
         self.sidebar.add_menu_item("Payments", "💳", lambda: self.navigate_to('payments'))
-        self.sidebar.add_menu_item("Settings", "⚙", lambda: self.show_coming_soon("Settings"))
-        self.sidebar.add_menu_item("Backup", "💾", lambda: self.show_coming_soon("Backup"))
         
         self.sidebar.add_stretch()
+        
+        # Utility items with separator
+        self.sidebar.add_separator()
+        self.sidebar.add_menu_item("Settings", "🔧", lambda: self.show_coming_soon("Settings"))
+        self.sidebar.add_menu_item("Backup", "💾", lambda: self.show_coming_soon("Backup"))
         
         # Set dashboard as default active
         dashboard_btn.set_active(True)

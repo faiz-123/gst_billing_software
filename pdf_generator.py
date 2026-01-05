@@ -267,10 +267,10 @@ class InvoicePDFGenerator:
         
         return {
             # Company details
-            'company_name': company['name'],
-            'company_address': company['address'],
-            'company_contact': f"Ph. : {company['phone']} E mail : {company.get('email', '')}",
-            'company_gstin': company['gstin'],
+            'company_name': company.get('name', 'SUPER POWER BATTERIES (INDIA)'),
+            'company_address': company.get('address', 'A-12, Gangotri Appartment, R. V. Desai Road, Vadodara - 390001 Gujarat'),
+            'company_contact': f"Ph. : {company.get('phone', '0265-2423031, 8511597157')} E mail : {company.get('email', '')}",
+            'company_gstin': company.get('gstin', '24AADPP6173E1ZT'),
             
             # Invoice details
             'invoice_no': invoice.get('invoice_no', ''),
@@ -385,9 +385,9 @@ class InvoicePDFGenerator:
         
         return {
             # Company details
-            'company_name': company['name'],
-            'company_address': company['address'],
-            'company_contact': f"Ph. : {company['phone']} E mail : {company.get('email', '')}",
+            'company_name': company.get('name', 'SUPER POWER BATTERIES (INDIA)'),
+            'company_address': company.get('address', 'A-12, Gangotri Appartment, R. V. Desai Road, Vadodara - 390001 Gujarat'),
+            'company_contact': f"Ph. : {company.get('phone', '0265-2423031, 8511597157')} E mail : {company.get('email', '')}",
             
             # Invoice details
             'invoice_no': invoice.get('invoice_no', ''),

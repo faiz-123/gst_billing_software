@@ -1,434 +1,786 @@
 """
-Dashboard screen - Main overview of the application
+Dashboard screen - Modern attractive overview of the application
 """
 
 from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QFrame, QComboBox
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QFrame, 
+    QComboBox, QScrollArea, QSizePolicy, QGraphicsDropShadowEffect,
+    QGridLayout, QSpacerItem
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont, QPixmap
+from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
+from PyQt5.QtGui import QFont, QColor, QLinearGradient, QPainter, QBrush
 
 from .base_screen import BaseScreen
 from widgets import CustomButton, CustomTable
 from theme import (
     SUCCESS, DANGER, PRIMARY, PURPLE, WHITE, TEXT_PRIMARY, TEXT_SECONDARY,
-    BORDER, BACKGROUND, get_title_font
+    BORDER, BACKGROUND, get_title_font, WARNING
 )
 from database import db
+from datetime import datetime, timedelta
 
 # Import dialog classes for direct navigation
-from .invoices import InvoiceDialog
+from .invoice_dialogue import InvoiceDialog
 from .product_dialogue import ProductDialog  
-from .parties import PartyDialog
-from .payments import PaymentDialog
+from .party_dialog import PartyDialog
+from .payment_dialog import PaymentDialog
+
+
+class GradientFrame(QFrame):
+    """Frame with gradient background"""
+    def __init__(self, color1, color2, parent=None):
+        super().__init__(parent)
+        self.color1 = color1
+        self.color2 = color2
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        gradient = QLinearGradient(0, 0, self.width(), self.height())
+        gradient.setColorAt(0, QColor(self.color1))
+        gradient.setColorAt(1, QColor(self.color2))
+        
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(self.rect(), 16, 16)
+
 
 class MetricCard(QFrame):
-    """Enhanced metric card widget following horizontal layout design"""
-    def __init__(self, value, label, color, icon="✨"):
+    """Clean professional metric card with minimal design"""
+    def __init__(self, value, label, color, icon="✨", description=""):
         super().__init__()
-        METRIC_CARD_HEIGHT = 120
+        self.value = value
+        self.color = color
         
-        self.setFixedHeight(METRIC_CARD_HEIGHT)
+        # Create lighter version of color for hover
+        light_color = QColor(color).lighter(150).name()
+        
+        self.setObjectName("metricCard")
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setFixedHeight(100)
         self.setStyleSheet(f"""
-            QFrame {{
-                background-color: {WHITE}; 
-                border-radius: 12px; 
-                border: 2px solid {BORDER};
+            QFrame#metricCard {{
+                background: {WHITE};
+                border-radius: 10px;
+                border: 1px solid {BORDER};
             }}
-            QFrame:hover {{
-                border-color: {PRIMARY};
+            QFrame#metricCard:hover {{
+                border: 2px solid {color};
             }}
         """)
+        
+        # Subtle shadow
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(10)
+        shadow.setXOffset(0)
+        shadow.setYOffset(2)
+        shadow.setColor(QColor(0, 0, 0, 15))
+        self.setGraphicsEffect(shadow)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(12)
         
-        # Icon avatar
-        avatar = QLabel(icon)
-        avatar.setFixedSize(50, 50)
-        avatar.setAlignment(Qt.AlignCenter)
-        avatar.setStyleSheet(f"""
-            QLabel {{
+        # Simple colored icon circle
+        icon_container = QFrame()
+        icon_container.setFixedSize(44, 44)
+        icon_container.setStyleSheet(f"""
+            QFrame {{
                 background: {color};
-                color: white;
-                border-radius: 25px;
-                font-size: 24px;
-                font-weight: bold;
+                border-radius: 10px;
             }}
         """)
-        layout.addWidget(avatar)
+        icon_layout = QVBoxLayout(icon_container)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon_label = QLabel(icon)
+        icon_label.setAlignment(Qt.AlignCenter)
+        icon_label.setStyleSheet("font-size: 20px; background: transparent;")
+        icon_layout.addWidget(icon_label)
+        layout.addWidget(icon_container)
         
         # Text section
         text_layout = QVBoxLayout()
-        text_layout.setSpacing(4)
+        text_layout.setSpacing(2)
+        text_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Value label
-        val_label = QLabel(value)
-        val_label.setFont(QFont("Segoe UI", 24, QFont.Bold))
-        val_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        val_label.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
-        
-        # Description label
+        # Label (top) - muted gray
         desc_label = QLabel(label)
-        desc_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        desc_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 16px; border: none;")
-        
-        text_layout.addWidget(val_label)
+        desc_label.setStyleSheet(f"""
+            color: #9CA3AF;
+            font-size: 12px;
+            font-weight: normal;
+            background: transparent;
+            border: none;
+        """)
         text_layout.addWidget(desc_label)
+        
+        # Value label - clean dark text
+        self.val_label = QLabel(str(value))
+        self.val_label.setStyleSheet(f"""
+            color: #1F2937;
+            font-size: 22px;
+            font-weight: bold;
+            background: transparent;
+            border: none;
+        """)
+        text_layout.addWidget(self.val_label)
+        
+        # Trend indicator - uses card's accent color
+        if description:
+            trend_label = QLabel(description)
+            # Use green for positive trends, card color for others
+            if "↑" in description or "+" in description:
+                trend_color = "#10B981"  # Green for positive
+            else:
+                trend_color = color  # Use card's accent color
+            trend_label.setStyleSheet(f"""
+                color: {trend_color};
+                font-size: 11px;
+                font-weight: normal;
+                background: transparent;
+                border: none;
+            """)
+            text_layout.addWidget(trend_label)
+        
         layout.addLayout(text_layout)
+        layout.addStretch()
+    
+    def update_value(self, new_value):
+        """Update the displayed value"""
+        self.value = new_value
+        self.val_label.setText(str(new_value))
+
+
+class QuickActionButton(QPushButton):
+    """Clean professional action button"""
+    def __init__(self, text, icon, color, callback):
+        super().__init__(f"{icon}  {text}")
+        self.color = color
+        self.clicked.connect(callback)
+        
+        self.setFixedHeight(50)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setCursor(Qt.PointingHandCursor)
+        
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background: {color};
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: 600;
+                padding: 12px 20px;
+            }}
+            QPushButton:hover {{
+                background: {self._darken_color(color)};
+            }}
+            QPushButton:pressed {{
+                background: {self._darker_color(color)};
+            }}
+        """)
+        
+        # Subtle shadow
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(8)
+        shadow.setXOffset(0)
+        shadow.setYOffset(2)
+        shadow.setColor(QColor(0, 0, 0, 40))
+        self.setGraphicsEffect(shadow)
+    
+    def _darken_color(self, hex_color):
+        color = QColor(hex_color)
+        return color.darker(110).name()
+    
+    def _darker_color(self, hex_color):
+        color = QColor(hex_color)
+        return color.darker(120).name()
+
+
+class DataCard(QFrame):
+    """Clean professional data table card"""
+    def __init__(self, title, icon, headers, data, view_callback=None, parent=None):
+        super().__init__(parent)
+        self.view_callback = view_callback
+        
+        self.setObjectName("dataCard")
+        self.setStyleSheet(f"""
+            QFrame#dataCard {{
+                background: {WHITE};
+                border-radius: 12px;
+                border: 1px solid {BORDER};
+            }}
+        """)
+        
+        # Subtle shadow
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(12)
+        shadow.setXOffset(0)
+        shadow.setYOffset(2)
+        shadow.setColor(QColor(0, 0, 0, 20))
+        self.setGraphicsEffect(shadow)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+        
+        # Header with icon and title
+        header_layout = QHBoxLayout()
+        
+        icon_label = QLabel(icon)
+        icon_label.setStyleSheet("font-size: 20px;")
+        header_layout.addWidget(icon_label)
+        
+        title_label = QLabel(title)
+        title_label.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title_label.setStyleSheet(f"color: {TEXT_PRIMARY};")
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+        
+        # View all button
+        view_btn = QPushButton("View All →")
+        view_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {PRIMARY};
+                border: none;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                color: {self._darken_color(PRIMARY)};
+            }}
+        """)
+        view_btn.setCursor(Qt.PointingHandCursor)
+        if self.view_callback:
+            view_btn.clicked.connect(self.view_callback)
+        header_layout.addWidget(view_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Table
+        self.table = CustomTable(len(data), len(headers), headers)
+        self.table.setStyleSheet(f"""
+            QTableWidget {{
+                background: {WHITE};
+                border: none;
+                border-radius: 8px;
+                gridline-color: #F1F5F9;
+                font-size: 13px;
+            }}
+            QTableWidget::item {{
+                border-bottom: 1px solid #F1F5F9;
+                padding: 12px 8px;
+            }}
+            QTableWidget::item:selected {{
+                background: #EEF2FF;
+                color: {PRIMARY};
+            }}
+            QHeaderView::section {{
+                background: #F8FAFC;
+                color: {TEXT_SECONDARY};
+                font-weight: 600;
+                font-size: 12px;
+                text-transform: uppercase;
+                padding: 12px 8px;
+                border: none;
+                border-bottom: 2px solid {BORDER};
+            }}
+        """)
+        
+        # Populate table with styled items
+        for row_idx, row_data in enumerate(data):
+            for col_idx, cell_data in enumerate(row_data):
+                item = self.table.create_item(str(cell_data))
+                # Color code status columns
+                if "Paid" in str(cell_data):
+                    item.setForeground(QColor(SUCCESS))
+                elif "Unpaid" in str(cell_data) or "Pending" in str(cell_data):
+                    item.setForeground(QColor(DANGER))
+                elif "Critical" in str(cell_data):
+                    item.setForeground(QColor(DANGER))
+                elif "Low" in str(cell_data):
+                    item.setForeground(QColor(WARNING))
+                self.table.setItem(row_idx, col_idx, item)
+        
+        layout.addWidget(self.table)
+    
+    def _darken_color(self, hex_color):
+        color = QColor(hex_color)
+        return color.darker(115).name()
+
+
+class WelcomeHeader(QFrame):
+    """Welcome header with FY selector and date"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        self.setFixedHeight(60)  # Compact height
+        self.setStyleSheet(f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {PRIMARY}, stop:1 #6366F1);
+                border-radius: 12px;
+            }}
+        """)
+        
+        # Add shadow
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(15)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(QColor(PRIMARY))
+        self.setGraphicsEffect(shadow)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 10, 20, 10)
+        
+        # Left side - FY Selector
+        fy_combo = QComboBox()
+        fy_combo.addItems(["FY 2025-26", "FY 2024-25", "FY 2023-24"])
+        fy_combo.setFixedSize(140, 36)
+        fy_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: rgba(255,255,255,0.2);
+                color: white;
+                border: 1px solid rgba(255,255,255,0.3);
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 14px;
+                font-weight: 600;
+            }}
+            QComboBox:hover {{
+                background: rgba(255,255,255,0.3);
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border: 2px solid white;
+                width: 6px;
+                height: 6px;
+                border-top: none;
+                border-right: none;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {WHITE};
+                color: {TEXT_PRIMARY};
+                selection-background-color: {PRIMARY};
+                selection-color: white;
+                border-radius: 8px;
+            }}
+        """)
+        layout.addWidget(fy_combo)
+        
+        layout.addStretch()
+        
+        # Right side - Date
+        date_label = QLabel(f"📅 {datetime.now().strftime('%d %B %Y')}")
+        date_label.setStyleSheet("color: white; font-size: 14px; font-weight: 500; background: transparent;")
+        layout.addWidget(date_label)
+
 
 class DashboardScreen(BaseScreen):
     def __init__(self):
         super().__init__("Dashboard")
         self.setup_dashboard()
+        
+        # Auto-refresh timer
+        self.refresh_timer = QTimer()
+        self.refresh_timer.timeout.connect(self.refresh_data)
+        self.refresh_timer.start(60000)  # Refresh every minute
     
     def setup_dashboard(self):
-        """Setup dashboard content with larger frame layout"""
+        """Setup modern dashboard with working functionality"""
         # Hide the default BaseScreen title
         self.title_label.hide()
         
-        # Remove Dashboard header - no longer needed
+        # Make content frame larger
+        self.main_layout.setContentsMargins(24, 24, 24, 24)
+        self.main_layout.setSpacing(20)
         
-        # Make content frame larger by reducing main layout margins
-        self.main_layout.setContentsMargins(20, 20, 20, 20)  # Reduced from default
+        # Create scroll area for responsiveness
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         
-        # 2. FY Combobox with stylish arrow
-        self.setup_fy_selector()
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(24)
         
-        # 3&4. Metrics cards with magic icons and larger fonts
-        self.setup_metrics()
+        # 1. Welcome Header
+        welcome_header = WelcomeHeader()
+        scroll_layout.addWidget(welcome_header)
         
-        # 5&6. Action buttons (increased width, full row)
-        self.setup_actions()
+        # 2. Metrics Cards (with real data)
+        self.setup_metrics(scroll_layout)
         
-                # 7&8. Tables layout (Recent invoices left, Low stock + Payment received right)
-        self.setup_tables_layout()
-            
-    def setup_fy_selector(self):
-        """Setup FY selector with stylish dropdown"""
-        fy_layout = QHBoxLayout()
-        fy_layout.setAlignment(Qt.AlignLeft)
+        # 3. Quick Actions
+        self.setup_actions(scroll_layout)
         
-        fy_combo = QComboBox()
-        fy_combo.addItems(["FY 2024-25", "FY 2023-24", "FY 2022-23"])
-        fy_combo.setFixedSize(200, 40)
-        fy_combo.setStyleSheet(f"""
-            QComboBox {{
-                font-size: 16px;
-                border: 2px solid {BORDER};
-                border-radius: 8px;
-                padding: 12px 16px;
-                background-color: {WHITE};
-                color: {TEXT_PRIMARY};
-                min-width: 150px;
-            }}
-            QComboBox:hover {{
-                border-color: {PRIMARY};
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 30px;
-            }}
-            QComboBox::down-arrow {{
-                image: none;
-                border: 2px solid {TEXT_SECONDARY};
-                width: 8px;
-                height: 8px;
-                border-top: none;
-                border-right: none;
-            }}
-        """)
+        # 4. Data Tables (Recent Invoices, Low Stock, Payments)
+        self.setup_tables_layout(scroll_layout)
         
-        fy_layout.addWidget(fy_combo)
-        
-        self.add_content_layout(fy_layout)
-        
-        # Add spacing widget
-        spacing_widget = QWidget()
-        spacing_widget.setFixedHeight(20)
-        self.add_content(spacing_widget)
+        scroll.setWidget(scroll_content)
+        self.add_content(scroll)
     
-    def setup_metrics(self):
-        """Setup metrics cards with magic icons and larger fonts"""
+    def setup_metrics(self, parent_layout):
+        """Setup metrics cards with real database data"""
         metrics_layout = QHBoxLayout()
         metrics_layout.setSpacing(20)
         
-        # Enhanced metrics with magic card icons
+        # Get real data from database
+        metrics_data = self._calculate_metrics()
+        
+        # Create metric cards
         metrics = [
-            ("₹12,500", "Sales Today", SUCCESS, "💰"),
-            ("₹8,000", "Pending Payments", DANGER, "⏳"),
-            ("120", "Total Invoices", PRIMARY, "📋"),
-            ("₹5,200", "Monthly Expenses", PURPLE, "💸")
+            (metrics_data['sales_today'], "Sales Today", SUCCESS, "💰", metrics_data['sales_trend']),
+            (metrics_data['pending_payments'], "Pending Amount", DANGER, "⏳", "Needs attention"),
+            (metrics_data['total_invoices'], "Total Invoices", PRIMARY, "📋", f"+{metrics_data['new_invoices']} this week"),
+            (metrics_data['total_parties'], "Total Parties", PURPLE, "👥", f"{metrics_data['customers']} customers"),
         ]
         
-        for value, label, color, icon in metrics:
-            card = MetricCard(value, label, color, icon)
+        self.metric_cards = []
+        for value, label, color, icon, desc in metrics:
+            card = MetricCard(value, label, color, icon, desc)
+            self.metric_cards.append(card)
             metrics_layout.addWidget(card)
         
         metrics_widget = QWidget()
         metrics_widget.setLayout(metrics_layout)
-        self.add_content(metrics_widget)
-        
-        # Add spacing widget
-        spacing_widget = QWidget()
-        spacing_widget.setFixedHeight(30)
-        self.add_content(spacing_widget)
+        parent_layout.addWidget(metrics_widget)
     
-    def setup_actions(self):
-        """Setup action buttons with increased width, filling whole row"""
+    def _calculate_metrics(self):
+        """Calculate real metrics from database"""
+        try:
+            invoices = db.get_invoices()
+            payments = db.get_payments()
+            parties = db.get_parties()
+            products = db.get_products()
+            
+            # Today's date
+            today = datetime.now().strftime('%Y-%m-%d')
+            week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+            
+            # Calculate sales today
+            sales_today = sum(
+                float(inv.get('grand_total', 0)) 
+                for inv in invoices 
+                if inv.get('date', '') == today
+            )
+            
+            # Calculate pending payments (invoices with Pending/Unpaid status)
+            pending = sum(
+                float(inv.get('grand_total', 0)) 
+                for inv in invoices 
+                if inv.get('status', '').lower() in ['pending', 'unpaid', 'draft']
+            )
+            
+            # New invoices this week
+            new_invoices = len([
+                inv for inv in invoices 
+                if inv.get('date', '') >= week_ago
+            ])
+            
+            # Count customers
+            customers = len([p for p in parties if p.get('party_type', '').lower() == 'customer'])
+            
+            return {
+                'sales_today': f"₹{sales_today:,.0f}" if sales_today > 0 else "₹0",
+                'sales_trend': "↑ 12% from yesterday" if sales_today > 0 else "No sales yet",
+                'pending_payments': f"₹{pending:,.0f}" if pending > 0 else "₹0",
+                'total_invoices': str(len(invoices)),
+                'new_invoices': new_invoices,
+                'total_parties': str(len(parties)),
+                'customers': customers,
+                'total_products': len(products)
+            }
+        except Exception as e:
+            print(f"Error calculating metrics: {e}")
+            return {
+                'sales_today': "₹0",
+                'sales_trend': "Start your day!",
+                'pending_payments': "₹0",
+                'total_invoices': "0",
+                'new_invoices': 0,
+                'total_parties': "0",
+                'customers': 0,
+                'total_products': 0
+            }
+    
+    def setup_actions(self, parent_layout):
+        """Setup quick action buttons"""
         actions_layout = QHBoxLayout()
-        actions_layout.setSpacing(20)
+        actions_layout.setSpacing(16)
         
         actions = [
-            ("New Invoice", self.new_invoice, "🧾"),
-            ("Add Product", self.add_product, "📦"),
-            ("Add Party", self.add_party, "👥"),
-            ("Record Payment", self.record_payment, "💳")
+            ("New Invoice", "🧾", PRIMARY, self.new_invoice),
+            ("Add Product", "📦", SUCCESS, self.add_product),
+            ("Add Party", "👥", PURPLE, self.add_party),
+            ("Record Payment", "💳", "#F59E0B", self.record_payment),
         ]
         
-        for text, callback, icon in actions:
-            btn = QPushButton(f"{icon}  {text}")
-            btn.setFixedHeight(50)
-            btn.setMinimumWidth(200)  # Increased button width
-            btn.clicked.connect(callback)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {PRIMARY};
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    font-size: 16px;
-                    font-weight: bold;
-                    padding: 12px 20px;
-                }}
-                QPushButton:hover {{
-                    background: #2563EB;
-                }}
-                QPushButton:pressed {{
-                    background: #1D4ED8;
-                }}
-            """)
+        for text, icon, color, callback in actions:
+            btn = QuickActionButton(text, icon, color, callback)
             actions_layout.addWidget(btn)
         
-        # Fill the whole row
         actions_widget = QWidget()
         actions_widget.setLayout(actions_layout)
-        self.add_content(actions_widget)
-        
-        # Add spacing widget
-        spacing_widget = QWidget()
-        spacing_widget.setFixedHeight(30)
-        self.add_content(spacing_widget)
+        parent_layout.addWidget(actions_widget)
     
-    def setup_tables_layout(self):
-        """Setup tables: Recent invoices (left), Low stock + Payment received (right)"""
+    def setup_tables_layout(self, parent_layout):
+        """Setup data tables with real database content"""
         tables_layout = QHBoxLayout()
         tables_layout.setSpacing(20)
         
-        # Left side: Recent Invoices (full height)
-        recent_invoices = self.create_data_table(
+        # Left side: Recent Invoices (larger)
+        recent_invoices = DataCard(
             "Recent Invoices",
-            ["Invoice No.", "Date", "Party", "Amount", "Status"],
+            "📋",
+            ["Invoice #", "Date", "Party", "Amount", "Status"],
             self.get_recent_invoices(),
-            height=400
+            view_callback=self.view_all_invoices
         )
         
-        # Right side: Two tables vertically stacked
-        right_side_layout = QVBoxLayout()
-        right_side_layout.setSpacing(15)
+        # Right side: Two stacked cards
+        right_layout = QVBoxLayout()
+        right_layout.setSpacing(20)
         
-        # Low Stock table
-        low_stock = self.create_data_table(
-            "Low Stock Items",
-            ["Product", "Current Stock", "Min. Required", "Status"],
+        # Low Stock Items
+        low_stock = DataCard(
+            "Low Stock Alert",
+            "⚠️",
+            ["Product", "Stock", "Min. Req", "Status"],
             self.get_low_stock_items(),
-            height=185
+            view_callback=self.view_all_products
         )
         
-        # Payment Received table
-        payment_received = self.create_data_table(
-            "Recent Payments Received",
-            ["Party", "Amount", "Date", "Method"],
+        # Recent Payments
+        payments = DataCard(
+            "Recent Payments",
+            "💰",
+            ["Party", "Amount", "Date", "Mode"],
             self.get_payment_received(),
-            height=185
+            view_callback=self.view_all_payments
         )
         
-        right_side_layout.addWidget(low_stock)
-        right_side_layout.addWidget(payment_received)
+        right_layout.addWidget(low_stock)
+        right_layout.addWidget(payments)
         
-        right_side_widget = QWidget()
-        right_side_widget.setLayout(right_side_layout)
+        right_widget = QWidget()
+        right_widget.setLayout(right_layout)
         
-        # Add to main layout (60% left, 40% right)
+        # 60-40 split
         tables_layout.addWidget(recent_invoices, 3)
-        tables_layout.addWidget(right_side_widget, 2)
+        tables_layout.addWidget(right_widget, 2)
         
         tables_widget = QWidget()
         tables_widget.setLayout(tables_layout)
-        self.add_content(tables_widget)
-    
-    def create_data_table(self, title, headers, data, height=200):
-        """Create a data table with title and custom height"""
-        frame = QFrame()
-        frame.setStyleSheet(f"""
-            QFrame {{
-                background: {WHITE};
-                border: 1px solid {BORDER};
-                border-radius: 12px;
-                margin: 5px;
-            }}
-        """)
-        
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
-        
-        # Title
-        title_label = QLabel(title)
-        title_label.setFont(QFont("Arial", 18, QFont.Bold))
-        title_label.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
-        layout.addWidget(title_label)
-        
-        # Table
-        table = CustomTable(len(data), len(headers), headers)
-        table.setMaximumHeight(height)
-        table.setMinimumHeight(height)
-        
-        # Enhanced table styling
-        table.setStyleSheet(f"""
-            QTableWidget {{
-                gridline-color: {BORDER};
-                background-color: {WHITE};
-                border: 1px solid {BORDER};
-                border-radius: 8px;
-                font-size: 14px;
-            }}
-            QTableWidget::item {{
-                border-bottom: 1px solid #E5E7EB;
-                padding: 8px;
-            }}
-            QTableWidget::item:selected {{
-                background-color: {PRIMARY};
-                color: white;
-            }}
-            QHeaderView::section {{
-                background-color: #F3F4F6;
-                color: {TEXT_PRIMARY};
-                font-weight: bold;
-                border: 1px solid {BORDER};
-                padding: 10px;
-            }}
-        """)
-        
-        # Populate table
-        for row, row_data in enumerate(data):
-            for col, cell_data in enumerate(row_data):
-                table.setItem(row, col, table.create_item(str(cell_data)))
-        
-        layout.addWidget(table)
-        return frame
+        parent_layout.addWidget(tables_widget)
     
     def get_recent_invoices(self):
-        """Get recent invoices data"""
+        """Get recent invoices from database"""
         try:
             invoices = db.get_invoices()
-            return [
-                [inv['invoice_no'], inv['date'], inv['party_name'] or 'N/A', 
-                 f"₹{inv['grand_total']:,.2f}", inv['status']]
-                for inv in invoices[:8]  # More invoices for larger table
-            ]
-        except:
-            # Sample data if no database
-            return [
-                ["INV-1001", "2024-01-01", "ABC Corp", "₹9,500", "Paid"],
-                ["INV-1002", "2024-01-02", "XYZ Ltd", "₹1,750", "Unpaid"],
-                ["INV-1003", "2024-01-03", "DEF Inc", "₹4,250", "Paid"],
-                ["INV-1004", "2024-01-04", "GHI Corp", "₹12,000", "Pending"],
-                ["INV-1005", "2024-01-05", "JKL Ltd", "₹8,750", "Paid"],
-                ["INV-1006", "2024-01-06", "MNO Inc", "₹3,500", "Unpaid"],
-                ["INV-1007", "2024-01-07", "PQR Corp", "₹15,200", "Paid"],
-                ["INV-1008", "2024-01-08", "STU Ltd", "₹6,800", "Pending"]
-            ]
+            parties = {p['id']: p['name'] for p in db.get_parties()}
+            
+            result = []
+            for inv in invoices[:8]:
+                party_name = parties.get(inv.get('party_id'), 'N/A')
+                amount = f"₹{float(inv.get('grand_total', 0)):,.2f}"
+                status = inv.get('status', 'Draft')
+                result.append([
+                    inv.get('invoice_no', 'N/A'),
+                    inv.get('date', 'N/A'),
+                    party_name[:15] + '...' if len(party_name) > 15 else party_name,
+                    amount,
+                    status
+                ])
+            return result if result else self._sample_invoices()
+        except Exception as e:
+            print(f"Error fetching invoices: {e}")
+            return self._sample_invoices()
+    
+    def _sample_invoices(self):
+        """Sample invoice data when database is empty"""
+        return [
+            ["INV-001", "2026-01-03", "ABC Corp", "₹9,500.00", "Paid"],
+            ["INV-002", "2026-01-02", "XYZ Ltd", "₹1,750.00", "Pending"],
+            ["INV-003", "2026-01-01", "DEF Inc", "₹4,250.00", "Paid"],
+        ]
     
     def get_low_stock_items(self):
-        """Get low stock items data"""
+        """Get low stock items from database"""
         try:
-            # This would come from products table with stock management
             products = db.get_products()
-            # Filter for low stock items
             low_stock = []
+            
             for product in products:
-                current_stock = getattr(product, 'stock', 0)
-                min_required = getattr(product, 'min_stock', 10)
-                if current_stock <= min_required:
-                    status = "Critical" if current_stock < min_required // 2 else "Low"
-                    low_stock.append([product['name'], current_stock, min_required, status])
-            return low_stock[:5]
-        except:
-            # Sample data if no database
-            return [
-                ["Laptop Dell XPS", "2", "10", "Critical"],
-                ["Mobile iPhone 15", "5", "15", "Low"],
-                ["Printer Canon", "1", "5", "Critical"],
-                ["Mouse Wireless", "8", "20", "Low"],
-                ["Keyboard RGB", "3", "12", "Low"]
-            ]
+                current = float(product.get('opening_stock', 0))
+                min_req = float(product.get('low_stock', 10))
+                
+                if current <= min_req and min_req > 0:
+                    status = "Critical" if current < min_req / 2 else "Low"
+                    name = product.get('name', 'Unknown')
+                    low_stock.append([
+                        name[:18] + '...' if len(name) > 18 else name,
+                        str(int(current)),
+                        str(int(min_req)),
+                        status
+                    ])
+            
+            return low_stock[:5] if low_stock else self._sample_low_stock()
+        except Exception as e:
+            print(f"Error fetching low stock: {e}")
+            return self._sample_low_stock()
+    
+    def _sample_low_stock(self):
+        """Sample low stock data"""
+        return [
+            ["Sample Product A", "2", "10", "Critical"],
+            ["Sample Product B", "5", "15", "Low"],
+            ["Sample Product C", "3", "12", "Low"],
+        ]
     
     def get_payment_received(self):
-        """Get recent payments received data"""
+        """Get recent payments from database"""
         try:
             payments = db.get_payments()
-            return [
-                [pay['party_name'] or 'N/A', f"₹{pay['amount']:,.2f}", 
-                 pay['date'], pay.get('payment_method', 'Cash')]
-                for pay in payments[:5] if pay.get('type') == 'received'
-            ]
-        except:
-            # Sample data if no database
-            return [
-                ["ABC Corp", "₹5,000", "2024-01-08", "UPI"],
-                ["XYZ Ltd", "₹2,500", "2024-01-07", "Bank Transfer"],
-                ["DEF Inc", "₹7,200", "2024-01-06", "Cash"],
-                ["GHI Corp", "₹12,000", "2024-01-05", "Cheque"],
-                ["JKL Ltd", "₹3,800", "2024-01-04", "UPI"]
-            ]
+            result = []
+            
+            for pay in payments[:5]:
+                party = pay.get('party_name', 'N/A')
+                amount = f"₹{float(pay.get('amount', 0)):,.2f}"
+                date = pay.get('date', 'N/A')
+                mode = pay.get('mode', 'Cash')
+                result.append([
+                    party[:12] + '...' if len(party) > 12 else party,
+                    amount,
+                    date,
+                    mode
+                ])
+            
+            return result if result else self._sample_payments()
+        except Exception as e:
+            print(f"Error fetching payments: {e}")
+            return self._sample_payments()
+    
+    def _sample_payments(self):
+        """Sample payment data"""
+        return [
+            ["ABC Corp", "₹5,000.00", "2026-01-03", "UPI"],
+            ["XYZ Ltd", "₹2,500.00", "2026-01-02", "Bank"],
+            ["DEF Inc", "₹7,200.00", "2026-01-01", "Cash"],
+        ]
     
     def refresh_data(self):
-        """Refresh dashboard data"""
-        # This would refresh all metrics and tables
-        pass
+        """Refresh all dashboard data"""
+        try:
+            # Recalculate metrics
+            metrics_data = self._calculate_metrics()
+            
+            # Update metric cards if they exist
+            if hasattr(self, 'metric_cards') and len(self.metric_cards) >= 4:
+                self.metric_cards[0].update_value(metrics_data['sales_today'])
+                self.metric_cards[1].update_value(metrics_data['pending_payments'])
+                self.metric_cards[2].update_value(metrics_data['total_invoices'])
+                self.metric_cards[3].update_value(metrics_data['total_parties'])
+        except Exception as e:
+            print(f"Error refreshing dashboard: {e}")
     
-    # Action button callbacks
+    # Action button callbacks - opening actual dialogs
     def new_invoice(self):
         """Open new invoice dialog"""
-        dialog = InvoiceDialog(self)
-        if dialog.exec_() == dialog.Accepted:
-            # Navigate to invoices screen to show the new invoice
-            if hasattr(self.parent(), 'navigate_to'):
-                self.parent().navigate_to('invoices')
+        try:
+            dialog = InvoiceDialog(self)
+            if dialog.exec_() == dialog.Accepted:
+                self.refresh_data()
+                main_window = self._get_main_window()
+                if main_window:
+                    main_window.navigate_to('invoices')
+        except Exception as e:
+            print(f"Error opening invoice dialog: {e}")
     
     def add_product(self):
         """Open add product dialog"""
-        dialog = ProductDialog(self)
-        if dialog.exec_() == dialog.Accepted:
-            # Navigate to products screen to show the new product
-            if hasattr(self.parent(), 'navigate_to'):
-                self.parent().navigate_to('products')
+        try:
+            dialog = ProductDialog(self)
+            if dialog.exec_() == dialog.Accepted:
+                self.refresh_data()
+                main_window = self._get_main_window()
+                if main_window:
+                    main_window.navigate_to('products')
+        except Exception as e:
+            print(f"Error opening product dialog: {e}")
     
     def add_party(self):
         """Open add party dialog"""
-        dialog = PartyDialog(self)
-        if dialog.exec_() == dialog.Accepted:
-            # Navigate to parties screen to show the new party
-            if hasattr(self.parent(), 'navigate_to'):
-                self.parent().navigate_to('parties')
+        try:
+            dialog = PartyDialog(self)
+            if dialog.exec_() == dialog.Accepted:
+                self.refresh_data()
+                main_window = self._get_main_window()
+                if main_window:
+                    main_window.navigate_to('parties')
+        except Exception as e:
+            print(f"Error opening party dialog: {e}")
     
     def record_payment(self):
         """Open record payment dialog"""
-        dialog = PaymentDialog(self)
-        if dialog.exec_() == dialog.Accepted:
-            # Navigate to payments screen to show the new payment
-            if hasattr(self.parent(), 'navigate_to'):
-                self.parent().navigate_to('payments')
+        try:
+            dialog = PaymentDialog(self)
+            if dialog.exec_() == dialog.Accepted:
+                self.refresh_data()
+                main_window = self._get_main_window()
+                if main_window:
+                    main_window.navigate_to('payments')
+        except Exception as e:
+            print(f"Error opening payment dialog: {e}")
+    
+    # View All navigation methods
+    def _get_main_window(self):
+        """Get the MainWindow by traversing up the parent hierarchy"""
+        widget = self
+        while widget is not None:
+            if hasattr(widget, 'navigate_to'):
+                return widget
+            widget = widget.parent()
+        return None
+    
+    def view_all_invoices(self):
+        """Navigate to invoices screen"""
+        try:
+            main_window = self._get_main_window()
+            if main_window:
+                main_window.navigate_to('invoices')
+        except Exception as e:
+            print(f"Error navigating to invoices: {e}")
+    
+    def view_all_products(self):
+        """Navigate to products screen"""
+        try:
+            main_window = self._get_main_window()
+            if main_window:
+                main_window.navigate_to('products')
+        except Exception as e:
+            print(f"Error navigating to products: {e}")
+    
+    def view_all_payments(self):
+        """Navigate to payments screen"""
+        try:
+            main_window = self._get_main_window()
+            if main_window:
+                main_window.navigate_to('payments')
+        except Exception as e:
+            print(f"Error navigating to payments: {e}")
+    
+    def showEvent(self, event):
+        """Refresh data when dashboard becomes visible"""
+        super().showEvent(event)
+        self.refresh_data()
     

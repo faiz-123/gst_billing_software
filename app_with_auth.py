@@ -62,6 +62,12 @@ class AuthenticatedApp(QMainWindow):
         # Company Selection -> New Company Creation
         self.company_selection_screen.new_company_requested.connect(self.show_company_creation)
         
+        # Company Selection -> Edit Company
+        self.company_selection_screen.edit_company_requested.connect(self.show_company_edit)
+        
+        # Company Selection -> Delete Company
+        self.company_selection_screen.delete_company_requested.connect(self.delete_company)
+        
         # Company Selection -> Company Selected (go to main app)
         self.company_selection_screen.company_selected.connect(self.company_selected)
         
@@ -90,6 +96,25 @@ class AuthenticatedApp(QMainWindow):
         # Reset form for new company
         self.company_creation_screen.reset_form()
 
+    @pyqtSlot(dict)
+    def show_company_edit(self, company_data):
+        """Show company edit screen"""
+        print(f"Showing company edit screen for: {company_data.get('name', 'Unknown')}")
+        
+        # Create or reuse company creation screen for editing
+        # Create new instance for editing with company data
+        edit_screen = CompanyCreationScreen(parent=self, company_data=company_data)
+        
+        # Connect edit screen signals
+        edit_screen.company_saved.connect(self.company_updated)  # Edit mode emits company_saved
+        edit_screen.company_created.connect(self.company_updated)  # Just in case, handle both
+        edit_screen.cancelled.connect(self.show_company_selection)
+        
+        # Add to stack and show
+        self.stacked_widget.addWidget(edit_screen)
+        self.stacked_widget.setCurrentWidget(edit_screen)
+        self.showMaximized()
+
     @pyqtSlot(str)
     def company_selected(self, company_name):
         """Handle company selection - Navigate to main application"""
@@ -104,12 +129,58 @@ class AuthenticatedApp(QMainWindow):
 
     @pyqtSlot(dict)
     def company_created(self, company_data):
-        """Handle company creation"""
+        """Handle company creation - just navigate back and refresh"""
         print(f"Company created: {company_data['company_name']}")
-        # Add the new company to the company selection screen
-        self.company_selection_screen.add_company(company_data)
-        # Go back to company selection to show the new company
+        # Don't add to database here - it's already added in save_company_data()
+        # Just go back to company selection and refresh
         self.show_company_selection()
+
+    @pyqtSlot(dict)
+    def company_updated(self, company_data):
+        """Handle company update"""
+        print(f"Company updated: {company_data['company_name']}")
+        # Refresh the company selection screen to show updated data
+        self.show_company_selection()
+
+    @pyqtSlot(dict)
+    def delete_company(self, company_data):
+        """Handle company deletion with confirmation"""
+        from PyQt5.QtWidgets import QMessageBox
+        
+        # Show confirmation dialog
+        company_name = company_data.get('name', 'Unknown Company')
+        reply = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            f"Are you sure you want to delete '{company_name}'?\n\nThis action cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            try:
+                # Import database here to avoid circular imports
+                from database import db
+                
+                # Delete company from database
+                db.delete_company(company_data['id'])
+                
+                # Show success message
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Company '{company_name}' has been deleted successfully."
+                )
+                
+                # Refresh company selection screen
+                self.show_company_selection()
+                
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"Failed to delete company:\n{str(e)}"
+                )
 
     def show_main_application(self):
         """Show the main GST billing application"""

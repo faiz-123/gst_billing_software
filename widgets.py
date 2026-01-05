@@ -4,7 +4,8 @@ Custom widgets and reusable UI components
 
 from PyQt5.QtWidgets import (
     QPushButton, QLineEdit, QLabel, QComboBox, QTableWidget, 
-    QVBoxLayout, QHBoxLayout, QFrame, QHeaderView, QAbstractItemView
+    QVBoxLayout, QHBoxLayout, QFrame, QHeaderView, QAbstractItemView,
+    QScrollArea, QWidget
 )
 from PyQt5.QtWidgets import QTableWidgetItem
 from PyQt5.QtCore import Qt
@@ -182,15 +183,17 @@ class FormField(QVBoxLayout):
             self.input_widget.setCurrentText(str(value))
 
 class SidebarButton(QPushButton):
-    """Enhanced sidebar button with active state"""
+    """Enhanced sidebar button with active state and modern design"""
     def __init__(self, text, icon="", parent=None):
         super().__init__(parent)
         self.text = text
         self.icon = icon
         self.is_active = False
         self.is_collapsed = False
+        self.is_separator_before = False  # For visual grouping
         self.update_text()
         self.setObjectName("sidebarButton")
+        self.setCursor(Qt.PointingHandCursor)
         
     def update_text(self):
         """Update button text with icon"""
@@ -224,7 +227,7 @@ class Sidebar(QFrame):
     def __init__(self, parent=None, company_name="GST Billing"):
         super().__init__(parent)
         self.is_collapsed = False
-        self.expanded_width = 300  # Increased from 280
+        self.expanded_width = 260  # Slightly reduced for cleaner look
         self.collapsed_width = 70
         self.active_button = None
         self.menu_buttons = []
@@ -250,58 +253,104 @@ class Sidebar(QFrame):
         self.create_footer()
         
     def create_header(self):
-        """Create header with company name and toggle button"""
+        """Create header with company logo/name and toggle button"""
         header_frame = QFrame()
         header_frame.setObjectName("sidebarHeader")
-        header_frame.setFixedHeight(80)
+        header_frame.setFixedHeight(70)
         
         header_layout = QHBoxLayout(header_frame)
-        header_layout.setContentsMargins(20, 15, 15, 15)
+        header_layout.setContentsMargins(16, 12, 12, 12)
         
-        # Company name section
-        self.company_section = QHBoxLayout()
+        # Logo circle with initials (clickable to toggle when collapsed)
+        self.logo_circle = QPushButton()
+        self.logo_circle.setObjectName("logoCircle")
+        self.logo_circle.setFixedSize(40, 40)
+        self.logo_circle.setCursor(Qt.PointingHandCursor)
+        # Get initials from company name
+        initials = "".join([word[0].upper() for word in self.company_name.split()[:2]])
+        self.logo_circle.setText(initials)
+        self.logo_circle.clicked.connect(self.on_logo_click)
         
         # Company name title
         self.title_label = QLabel(self.company_name)
         self.title_label.setObjectName("sidebarTitle")
-        self.title_label.setWordWrap(True)  # Allow text wrapping for long company names
-        
-        self.company_section.addWidget(self.title_label, 1)
+        self.title_label.setWordWrap(True)
         
         # Toggle button
-        self.toggle_btn = QPushButton("≡")
+        self.toggle_btn = QPushButton("☰")
         self.toggle_btn.setObjectName("toggleButton")
-        self.toggle_btn.setFixedSize(30, 30)
+        self.toggle_btn.setFixedSize(32, 32)
+        self.toggle_btn.setCursor(Qt.PointingHandCursor)
         self.toggle_btn.clicked.connect(self.toggle_sidebar)
         
-        header_layout.addLayout(self.company_section, 1)
+        header_layout.addWidget(self.logo_circle)
+        header_layout.addSpacing(10)
+        header_layout.addWidget(self.title_label, 1)
         header_layout.addWidget(self.toggle_btn)
         
         self.main_layout.addWidget(header_frame)
         
     def create_menu_section(self):
         """Create scrollable menu section"""
-        # Menu container
-        self.menu_frame = QFrame()
+        # Scroll area for menu items
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setObjectName("menuScrollArea")
+        self.scroll_area.setStyleSheet("""
+            QScrollArea#menuScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollArea#menuScrollArea > QWidget > QWidget {
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                background: rgba(255, 255, 255, 0.05);
+                width: 6px;
+                border-radius: 3px;
+                margin: 2px;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: 3px;
+                min-height: 30px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: rgba(255, 255, 255, 0.3);
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+        
+        # Menu container inside scroll area
+        self.menu_frame = QWidget()
         self.menu_frame.setObjectName("menuFrame")
         
         self.menu_layout = QVBoxLayout(self.menu_frame)
-        self.menu_layout.setContentsMargins(15, 20, 15, 10)
-        self.menu_layout.setSpacing(8)
+        self.menu_layout.setContentsMargins(12, 16, 12, 10)
+        self.menu_layout.setSpacing(4)
         
-        self.main_layout.addWidget(self.menu_frame, 1)
+        self.scroll_area.setWidget(self.menu_frame)
+        self.main_layout.addWidget(self.scroll_area, 1)
         
     def create_footer(self):
-        """Create footer section (now empty/minimal)"""
+        """Create footer section with version info"""
         footer_frame = QFrame()
         footer_frame.setObjectName("sidebarFooter")
-        footer_frame.setFixedHeight(20)  # Reduced height since no content
+        footer_frame.setFixedHeight(50)
         
         footer_layout = QVBoxLayout(footer_frame)
-        footer_layout.setContentsMargins(20, 5, 20, 5)
+        footer_layout.setContentsMargins(16, 8, 16, 12)
+        footer_layout.setAlignment(Qt.AlignCenter)
         
-        # Empty footer or just spacing
-        footer_layout.addStretch()
+        # Version label
+        self.version_label = QLabel("v1.0.0")
+        self.version_label.setObjectName("versionLabel")
+        self.version_label.setAlignment(Qt.AlignCenter)
+        footer_layout.addWidget(self.version_label)
         
         self.main_layout.addWidget(footer_frame)
         
@@ -314,11 +363,20 @@ class Sidebar(QFrame):
             
         # Add some spacing
         self.menu_layout.addSpacing(5)
+    
+    def add_separator(self):
+        """Add a visual separator line"""
+        separator = QFrame()
+        separator.setObjectName("menuSeparator")
+        separator.setFixedHeight(1)
+        self.menu_layout.addSpacing(8)
+        self.menu_layout.addWidget(separator)
+        self.menu_layout.addSpacing(8)
         
     def add_menu_item(self, text, icon="", callback=None):
         """Add a menu item to sidebar"""
         btn = SidebarButton(text, icon)
-        btn.setMinimumHeight(50)  # Increased from 45
+        btn.setMinimumHeight(44)
         
         if callback:
             btn.clicked.connect(callback)
@@ -346,6 +404,14 @@ class Sidebar(QFrame):
         """Update the company name displayed in the sidebar"""
         self.company_name = company_name
         self.title_label.setText(company_name)
+        # Update logo initials
+        initials = "".join([word[0].upper() for word in company_name.split()[:2]])
+        self.logo_circle.setText(initials)
+    
+    def on_logo_click(self):
+        """Handle logo click - expand sidebar if collapsed"""
+        if self.is_collapsed:
+            self.toggle_sidebar()
         
     def toggle_sidebar(self):
         """Toggle sidebar between expanded and collapsed"""
@@ -354,41 +420,48 @@ class Sidebar(QFrame):
         if self.is_collapsed:
             self.setFixedWidth(self.collapsed_width)
             self.title_label.hide()
+            self.toggle_btn.hide()  # Hide toggle button when collapsed
+            self.logo_circle.show()  # Keep logo visible - clicking it will expand
+            self.version_label.hide()
             # Update all buttons to collapsed mode
             for button in self.menu_buttons:
                 button.set_collapsed(True)
-            # Hide section headers
+            # Hide section headers and separators
             for i in range(self.menu_layout.count()):
                 item = self.menu_layout.itemAt(i)
                 if item and item.widget():
                     widget = item.widget()
-                    if hasattr(widget, 'objectName') and widget.objectName() == "sectionHeader":
-                        widget.hide()
+                    if hasattr(widget, 'objectName'):
+                        if widget.objectName() in ["sectionHeader", "menuSeparator"]:
+                            widget.hide()
         else:
             self.setFixedWidth(self.expanded_width)
             self.title_label.show()
+            self.toggle_btn.show()  # Show toggle button when expanded
+            self.version_label.show()
             # Update all buttons to expanded mode
             for button in self.menu_buttons:
                 button.set_collapsed(False)
-            # Show section headers
+            # Show section headers and separators
             for i in range(self.menu_layout.count()):
                 item = self.menu_layout.itemAt(i)
                 if item and item.widget():
                     widget = item.widget()
-                    if hasattr(widget, 'objectName') and widget.objectName() == "sectionHeader":
-                        widget.show()
+                    if hasattr(widget, 'objectName'):
+                        if widget.objectName() in ["sectionHeader", "menuSeparator"]:
+                            widget.show()
                         
     def apply_styles(self):
-        """Apply professional styling to sidebar with official colors"""
+        """Apply modern professional styling to sidebar"""
         self.setStyleSheet("""
             QFrame {
-                background-color: #1E293B;
+                background-color: #0F172A;
                 border: none;
             }
             
             QFrame#sidebarHeader {
-                background-color: rgba(30, 41, 59, 0.95);
-                border-bottom: 1px solid #334155;
+                background-color: #0F172A;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 0px;
             }
             
@@ -397,82 +470,109 @@ class Sidebar(QFrame):
             }
             
             QFrame#sidebarFooter {
-                background-color: rgba(20, 25, 35, 0.8);
-                border-top: 1px solid #334155;
+                background-color: rgba(15, 23, 42, 0.95);
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 0px;
             }
             
-            QLabel#sidebarTitle {
-                color: #E2E8F0;
-                font-weight: bold;
-                font-size: 18px;
-                padding: 8px 0px;
-                margin: 0px;
+            QFrame#menuSeparator {
+                background-color: rgba(255, 255, 255, 0.08);
+                border: none;
             }
             
-            QLabel#userInfo, QLabel#companyInfo {
-                color: #E2E8F0;
-                font-size: 12px;
-                font-weight: 500;
-                padding: 6px 4px;
-                border-radius: 4px;
-                background-color: rgba(51, 65, 85, 0.6);
-                margin: 2px 0px;
+            QPushButton#logoCircle {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #3B82F6, stop:1 #8B5CF6);
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                border-radius: 20px;
+                border: none;
+            }
+            
+            QPushButton#logoCircle:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #60A5FA, stop:1 #A78BFA);
+            }
+            
+            QLabel#sidebarTitle {
+                color: #F1F5F9;
+                font-weight: 600;
+                font-size: 15px;
+                padding: 0px;
+                margin: 0px;
+                border: none;
+            }
+            
+            QLabel#versionLabel {
+                color: rgba(148, 163, 184, 0.6);
+                font-size: 11px;
+                border: none;
+            }
+            
+            QLabel#sectionHeader {
+                color: #64748B;
+                font-size: 11px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                padding: 8px 12px 4px 12px;
+                border: none;
             }
             
             QPushButton#toggleButton {
-                background-color: #3B82F6;
-                border: 1px solid #0EA5E9;
-                border-radius: 15px;
-                color: white;
-                font-size: 14px;
-                font-weight: bold;
+                background-color: transparent;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 8px;
+                color: #94A3B8;
+                font-size: 16px;
             }
             
             QPushButton#toggleButton:hover {
-                background-color: #0EA5E9;
-                border: 1px solid #3B82F6;
-            }
-            
-            QPushButton#toggleButton:pressed {
-                background-color: #1D4ED8;
+                background-color: rgba(255, 255, 255, 0.08);
+                color: #F1F5F9;
+                border: 1px solid rgba(255, 255, 255, 0.15);
             }
             
             QPushButton#sidebarButton {
                 text-align: left;
-                padding: 15px 18px;
+                padding: 12px 14px;
                 border: none;
-                color: #F8FAFC;
+                color: #94A3B8;
                 background: transparent;
-                border-radius: 8px;
-                font-size: 16px;
+                border-radius: 10px;
+                font-size: 14px;
                 font-weight: 500;
-                margin: 3px 6px;
-                border-left: 3px solid transparent;
+                margin: 2px 4px;
             }
             
             /* Collapsed sidebar buttons - center the icons */
             QPushButton#sidebarButton[collapsed="true"] {
                 text-align: center;
-                padding: 15px 5px;
+                padding: 12px 8px;
                 font-size: 18px;
             }
             
             QPushButton#sidebarButton:hover {
-                background-color: #334155;
-                color: #FFFFFF;
-                border-left: 3px solid #0EA5E9;
+                background-color: rgba(255, 255, 255, 0.06);
+                color: #F1F5F9;
             }
             
             QPushButton#sidebarButton[active="true"] {
-                background-color: #3B82F6;
-                color: #FFFFFF;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(59, 130, 246, 0.2), stop:1 rgba(59, 130, 246, 0.05));
+                color: #60A5FA;
                 font-weight: 600;
-                border-left: 3px solid #0EA5E9;
+                border-left: 3px solid #3B82F6;
+                padding-left: 11px;
+            }
+            
+            QPushButton#sidebarButton[active="true"]:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(59, 130, 246, 0.25), stop:1 rgba(59, 130, 246, 0.08));
             }
             
             QPushButton#sidebarButton:pressed {
-                background-color: #1E40AF;
-                color: white;
+                background-color: rgba(59, 130, 246, 0.15);
             }
         """)

@@ -24,27 +24,27 @@ class PartyDialog(QDialog):
         self.setModal(True)
         self.setMinimumSize(1200, 800)
 
-        # try to size/center relative to parent
-        try:
-            if parent is not None:
-                container = getattr(parent, 'content_frame', parent)
-                pw = container.width() or container.size().width()
-                ph = container.height() or container.size().height()
-                target_w = max(600, int(pw * 0.9))
-                target_h = max(480, int(ph * 0.9))
-                self.resize(target_w, target_h)
-                try:
-                    top = parent.window() if hasattr(parent, 'window') else parent
-                    px = top.x(); py = top.y(); pw_total = top.width(); ph_total = top.height()
-                    dx = px + max(0, (pw_total - self.width()) // 2)
-                    dy = py + max(0, (ph_total - self.height()) // 2)
-                    self.move(dx, dy)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
+        # Size and center relative to parent window
+        self._center_on_parent(parent)
         self.setup_ui()
+    
+    def _center_on_parent(self, parent):
+        """Center dialog on parent window."""
+        if parent is None:
+            return
+        container = getattr(parent, 'content_frame', parent)
+        pw = container.width() or container.size().width()
+        ph = container.height() or container.size().height()
+        target_w = max(600, int(pw * 0.9))
+        target_h = max(480, int(ph * 0.9))
+        self.resize(target_w, target_h)
+        
+        top = parent.window() if hasattr(parent, 'window') else parent
+        px, py = top.x(), top.y()
+        pw_total, ph_total = top.width(), top.height()
+        dx = px + max(0, (pw_total - self.width()) // 2)
+        dy = py + max(0, (ph_total - self.height()) // 2)
+        self.move(dx, dy)
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -113,14 +113,13 @@ class PartyDialog(QDialog):
         def force_upper(text):
             if text != text.upper():
                 cursor_pos = self.name_input.cursorPosition()
+                self.name_input.blockSignals(True)
                 self.name_input.setText(text.upper())
                 self.name_input.setCursorPosition(cursor_pos)
+                self.name_input.blockSignals(False)
         self.name_input.textChanged.connect(force_upper)
         # Clear error highlight as soon as user types
-        try:
-            self.name_input.textChanged.connect(self._clear_name_error)
-        except Exception:
-            pass
+        self.name_input.textChanged.connect(self._clear_name_error)
         self.phone_input = create_input(self.party_data.get('phone', ''), "Enter mobile number")
         self.email_input = create_input(self.party_data.get('email', ''), "Enter email address")
         general_grid.addWidget(create_label("Party Name"), 0, 0)
@@ -133,14 +132,15 @@ class PartyDialog(QDialog):
         # GSTIN, PAN, Party Type
         self.gst_number_input = create_input(self.party_data.get('gstin', self.party_data.get('gst_number', '')), "Enter GSTIN")
         self.pan_input = create_input(self.party_data.get('pan', ''), "Enter PAN number")
-        self.type_combo = QComboBox(); self.type_combo.addItems(["", "Customer", "Supplier", "Both"])
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(["", "Customer", "Supplier", "Both"])
+        self.type_combo.setMinimumHeight(40)
+        self.type_combo.setStyleSheet(f"border: 1px solid {BORDER}; border-radius: 6px; padding: 8px; color: {TEXT_PRIMARY}; background: {WHITE}; font-size: 14px;")
         # Default to Customer on new party
-        try:
+        if not self.party_data:
             idx = self.type_combo.findText("Customer")
             if idx >= 0:
                 self.type_combo.setCurrentIndex(idx)
-        except Exception:
-            pass
         general_grid.addWidget(create_label("GSTIN"), 2, 0)
         general_grid.addWidget(create_label("PAN Number"), 2, 1)
         general_grid.addWidget(create_label("Party Type"), 2, 2)
@@ -150,7 +150,10 @@ class PartyDialog(QDialog):
 
         # Opening Balance, Balance Type
         self.opening_balance = create_input(str(self.party_data.get('opening_balance', '0.00')), "Enter opening balance")
-        self.balance_type = QComboBox(); self.balance_type.addItems(["Receivable (Dr)", "Payable (Cr)"])
+        self.balance_type = QComboBox()
+        self.balance_type.addItems(["Receivable (Dr)", "Payable (Cr)"])
+        self.balance_type.setMinimumHeight(40)
+        self.balance_type.setStyleSheet(f"border: 1px solid {BORDER}; border-radius: 6px; padding: 8px; color: {TEXT_PRIMARY}; background: {WHITE}; font-size: 14px;")
         general_grid.addWidget(create_label("Opening Balance"), 4, 0)
         general_grid.addWidget(create_label("Balance Type"), 4, 1)
         general_grid.addWidget(self.opening_balance, 5, 0)
@@ -242,12 +245,12 @@ class PartyDialog(QDialog):
         form_layout.addLayout(btn_row, 3, 0, 1, 3)
 
         main_layout.addWidget(form_frame)
-        try:
-            QShortcut(QKeySequence('Return'), self, activated=self.save_party)
-            QShortcut(QKeySequence('Enter'), self, activated=self.save_party)
-            QShortcut(QKeySequence('Escape'), self, activated=self.reject)
-        except Exception:
-            pass
+        
+        # Keyboard shortcuts
+        QShortcut(QKeySequence('Return'), self, activated=self.save_party)
+        QShortcut(QKeySequence('Enter'), self, activated=self.save_party)
+        QShortcut(QKeySequence('Escape'), self, activated=self.reject)
+        
         if self.party_data:
             self.populate_form()
 
@@ -269,13 +272,18 @@ class PartyDialog(QDialog):
             self.balance_type.setCurrentIndex(bi)
         self.state_input.setText(d.get('state', ''))
         self.city_input.setText(d.get('city', ''))
+        self.pincode_input.setText(d.get('pincode', ''))
 
     def save_party(self):
         name = self.name_input.text().strip()
-        # Check for duplicate party name (case-insensitive)
+        # Check for duplicate party name (case-insensitive), excluding current party in edit mode
         if hasattr(db, 'get_parties'):
             existing_parties = db.get_parties()
+            current_party_id = self.party_data.get('id') if self.party_data else None
             for p in existing_parties:
+                # Skip the current party being edited
+                if current_party_id and p.get('id') == current_party_id:
+                    continue
                 if p.get('name', '').strip().upper() == name.upper():
                     QMessageBox.warning(self, "Duplicate Name", f"A party with the name '{name}' already exists.")
                     self.name_input.setFocus()
@@ -296,6 +304,20 @@ class PartyDialog(QDialog):
             )
             self.name_input.setFocus()
             return
+        
+        # Validate party type is selected
+        party_type = self.type_combo.currentText().strip()
+        if not party_type:
+            QMessageBox.warning(self, "Validation", "Please select a Party Type")
+            self.type_combo.setFocus()
+            return
+        
+        # Validate phone number (10 digits for Indian mobile)
+        if phone and not re.match(r"^\d{10}$", phone):
+            QMessageBox.warning(self, "Validation", "Please enter a valid 10-digit mobile number")
+            self.phone_input.setFocus()
+            return
+        
         if email and not re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", email):
             QMessageBox.warning(self, "Validation", "Please enter a valid email address"); return
         try:
@@ -312,6 +334,7 @@ class PartyDialog(QDialog):
             'address': address,
             'state': state,
             'city': city,
+            'pincode': self.pincode_input.text().strip(),
             'opening_balance': opening,
             'balance_type': 'dr' if 'Receivable' in self.balance_type.currentText() else 'cr',
             'is_gst_registered': 1 if gst else 0,

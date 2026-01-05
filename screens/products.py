@@ -1,15 +1,15 @@
 """
-Products screen - Manage inventory and services
+Products screen - Modern responsive design for inventory management
 """
 import sys
 from PyQt5.QtWidgets import (
     QApplication, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, 
     QFrame, QDialog, QMessageBox, QFormLayout, QLineEdit, QComboBox,
     QTextEdit, QCheckBox, QSpinBox, QDoubleSpinBox, QTabWidget, QTableWidgetItem,
-    QToolButton, QSizePolicy
+    QToolButton, QSizePolicy, QScrollArea, QGridLayout, QSpacerItem
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtGui import QFont, QColor
 
 from .base_screen import BaseScreen
 from .product_dialogue import ProductDialog
@@ -20,147 +20,97 @@ from theme import (
 )
 from database import db
 
+
 class ProductsScreen(BaseScreen):
     def __init__(self):
         super().__init__("Products & Services")
+        self.all_products_data = []
+        self.filter_combos = {}
         self.setup_products_screen()
         self.load_products_data()
     
     def setup_products_screen(self):
-        """Setup polished products screen content"""
-        # Enhanced action bar with modern styling
-        self.setup_action_bar()
+        """Setup modern responsive products screen"""
+        # Main container with scroll support
+        main_container = QWidget()
+        main_layout = QVBoxLayout(main_container)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(20)
         
-        # Modern header with statistics cards
-        self.setup_header_stats()
+        # Action bar (search + buttons)
+        self.setup_action_bar(main_layout)
         
-        # Enhanced filters section
-        self.setup_filters()
+        # Statistics cards row
+        self.setup_stats_section(main_layout)
         
-        # Modern products table
-        self.setup_products_table()
+        # Filters section
+        self.setup_filters_section(main_layout)
+        
+        # Products table
+        self.setup_products_table(main_layout)
+        
+        self.add_content(main_container)
     
-    def setup_header_stats(self):
-        """Setup modern header with statistics"""
-        stats_layout = QHBoxLayout()
-        stats_layout.setObjectName("stats_layout")
-
-        # Create stat cards and store label references
-        # self.total_products_label, card1 = self.create_stat_card("📦", "Total Products", "0", PRIMARY)
-        # self.in_stock_label, card2 = self.create_stat_card("📈", "In Stock", "0", SUCCESS)
-        # self.low_stock_label, card3 = self.create_stat_card("⚠️", "Low Stock", "0", WARNING)
-        # self.out_stock_label, card4 = self.create_stat_card("❌", "Out of Stock", "0", DANGER)
-        
-        # stats_layout.addWidget(card1)
-        # stats_layout.addWidget(card2)
-        # stats_layout.addWidget(card3)
-        # stats_layout.addWidget(card4)
-        
-        stats_widget = QWidget()
-        stats_widget.setLayout(stats_layout)
-        self.add_content(stats_widget)
-    
-    def create_stat_card(self, icon, label, value, color):
-        """Create a statistics card and return the value label for updates"""
-        card = QFrame()
-        card.setFixedHeight(100)
-        card.setFixedWidth(250)
-        card.setStyleSheet(f"""
-            QFrame {{
-                background: {WHITE};
-                border: 2px solid {BORDER};
-                border-radius: 12px;
-                margin: 5px;
-            }}
-            QFrame:hover {{
-                border-color: {color};
-                background: #f8f9fa;
-            }}
-        """)
-        
-        layout = QHBoxLayout(card)
-        layout.setContentsMargins(20, 15, 20, 15)
-        layout.setSpacing(15)
-        
-        # Icon
-        icon_label = QLabel(icon)
-        icon_label.setFixedSize(50, 50)
-        icon_label.setAlignment(Qt.AlignCenter)
-        icon_label.setStyleSheet(f"""
-            QLabel {{
-                background: {color};
-                color: white;
-                border-radius: 25px;
-                font-size: 24px;
-                font-weight: bold;
-            }}
-        """)
-        layout.addWidget(icon_label)
-        
-        # Text section
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(2)
-        
-        value_label = QLabel(value)
-        value_label.setFont(QFont("Arial", 20, QFont.Bold))
-        value_label.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
-        
-        label_widget = QLabel(label)
-        label_widget.setStyleSheet(f"color: #6B7280; font-size: 14px; border: none;")
-        
-        text_layout.addWidget(value_label)
-        text_layout.addWidget(label_widget)
-        layout.addLayout(text_layout)
-        
-        return value_label, card
-    
-    def setup_action_bar(self):
-        """Setup enhanced top action bar"""
+    def setup_action_bar(self, parent_layout):
+        """Setup top action bar with search and buttons"""
         action_frame = QFrame()
+        action_frame.setObjectName("actionFrame")
         action_frame.setStyleSheet(f"""
-            QFrame {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 {WHITE}, stop:1 #F8FAFC);
-                border: 2px solid {BORDER};
-                border-radius: 15px;
+            QFrame#actionFrame {{
+                background: {WHITE};
+                border: 1px solid {BORDER};
+                border-radius: 12px;
+                padding: 8px;
             }}
         """)
         
         action_layout = QHBoxLayout(action_frame)
+        action_layout.setContentsMargins(20, 15, 20, 15)
         action_layout.setSpacing(15)
         
-        # Enhanced search with icon
+        # Search container
         search_container = QFrame()
-        search_container.setFixedWidth(350)
-        search_container.setFixedHeight(55)
+        search_container.setObjectName("searchContainer")
+        search_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        search_container.setMinimumWidth(250)
+        search_container.setMaximumWidth(450)
+        search_container.setFixedHeight(48)
         search_container.setStyleSheet(f"""
-            QFrame {{
+            QFrame#searchContainer {{
                 border: 2px solid {BORDER};
-                border-radius: 8px;
+                border-radius: 10px;
                 background: {WHITE};
             }}
-            QFrame:focus-within {{
+            QFrame#searchContainer:hover {{
                 border-color: {PRIMARY};
             }}
         """)
         
         search_layout = QHBoxLayout(search_container)
-        search_layout.setContentsMargins(12, 0, 0, 0)
+        search_layout.setContentsMargins(15, 0, 10, 0)
+        search_layout.setSpacing(10)
         
+        # Search icon
         search_icon = QLabel("🔍")
-        search_icon.setStyleSheet("border: none;")
+        search_icon.setStyleSheet("border: none; font-size: 16px;")
         search_layout.addWidget(search_icon)
-
+        
+        # Search input
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search products by name, SKU, or category...")
-        self.search_input.setAlignment(Qt.AlignLeft)
-        self.search_input.setStyleSheet("""
-            QLineEdit {
+        self.search_input.setPlaceholderText("Search products...")
+        self.search_input.setStyleSheet(f"""
+            QLineEdit {{
                 border: none;
                 font-size: 14px;
                 background: transparent;
-            }
+                color: {TEXT_PRIMARY};
+                padding: 8px 0;
+            }}
+            QLineEdit::placeholder {{
+                color: {TEXT_SECONDARY};
+            }}
         """)
+        
         # Force uppercase as user types
         def force_upper(text):
             cursor_pos = self.search_input.cursorPosition()
@@ -175,60 +125,168 @@ class ProductsScreen(BaseScreen):
         action_layout.addWidget(search_container)
         action_layout.addStretch()
         
-        # Enhanced buttons with icons
-        buttons_data = [
+        # Action buttons
+        buttons_config = [
             ("📊 Export", "secondary", self.export_products),
             ("📄 Import", "secondary", self.import_products),
             ("➕ Add Product", "primary", self.add_product)
         ]
         
-        for text, style, callback in buttons_data:
-            btn = QPushButton(text)
-            btn.setFixedHeight(45)
-            btn.setMinimumWidth(120)
+        for text, style, callback in buttons_config:
+            btn = self.create_action_button(text, style)
             btn.clicked.connect(callback)
-            
-            if style == "primary":
-                btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background: {PRIMARY};
-                        color: white;
-                        border: none;
-                        border-radius: 8px;
-                        font-size: 14px;
-                        font-weight: bold;
-                        padding: 8px 16px;
-                    }}
-                    QPushButton:hover {{
-                        background: #2563EB;
-                    }}
-                    QPushButton:pressed {{
-                        background: #1D4ED8;
-                    }}
-                """)
-            else:
-                btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background: {WHITE};
-                        color: {TEXT_PRIMARY};
-                        border: 2px solid {BORDER};
-                        border-radius: 8px;
-                        font-size: 14px;
-                        font-weight: 500;
-                        padding: 8px 16px;
-                    }}
-                    QPushButton:hover {{
-                        border-color: {PRIMARY};
-                        background: #f8f9fa;
-                    }}
-                """)
-            
             action_layout.addWidget(btn)
         
-        self.add_content(action_frame)
+        parent_layout.addWidget(action_frame)
     
-    def setup_filters(self):
-        """Setup enhanced filter controls"""
+    def create_action_button(self, text, style):
+        """Create styled action button"""
+        btn = QPushButton(text)
+        btn.setFixedHeight(44)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        
+        if style == "primary":
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 {PRIMARY}, stop:1 #1D4ED8);
+                    color: white;
+                    border: none;
+                    border-radius: 10px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    padding: 10px 24px;
+                    min-width: 140px;
+                }}
+                QPushButton:hover {{
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 #3B82F6, stop:1 #1E40AF);
+                }}
+                QPushButton:pressed {{
+                    background: #1D4ED8;
+                }}
+            """)
+        else:
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {WHITE};
+                    color: {TEXT_PRIMARY};
+                    border: 2px solid {BORDER};
+                    border-radius: 10px;
+                    font-size: 14px;
+                    font-weight: 500;
+                    padding: 10px 20px;
+                    min-width: 110px;
+                }}
+                QPushButton:hover {{
+                    border-color: {PRIMARY};
+                    background: #F8FAFC;
+                    color: {PRIMARY};
+                }}
+                QPushButton:pressed {{
+                    background: #EEF2FF;
+                }}
+            """)
+        
+        return btn
+    
+    def setup_stats_section(self, parent_layout):
+        """Setup statistics cards with responsive grid - matching invoice/payments style"""
+        stats_frame = QFrame()
+        stats_frame.setStyleSheet("background: transparent; border: none;")
+        stats_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        
+        stats_layout = QHBoxLayout(stats_frame)
+        stats_layout.setContentsMargins(0, 0, 0, 0)
+        stats_layout.setSpacing(12)
+        
+        # Stats data with colors and icons
+        self.stat_labels = {}
+        stats_config = [
+            ("total", "📦", "Total Products", "0", PRIMARY),
+            ("in_stock", "✅", "In Stock", "0", SUCCESS),
+            ("low_stock", "⚠️", "Low Stock", "0", WARNING),
+            ("out_stock", "❌", "Out of Stock", "0", DANGER),
+        ]
+        
+        for key, icon, label_text, value, color in stats_config:
+            card, value_label = self.create_stat_card(icon, label_text, value, color)
+            self.stat_labels[key] = value_label
+            stats_layout.addWidget(card)
+        
+        parent_layout.addWidget(stats_frame)
+    
+    def create_stat_card(self, icon, label_text, value, color):
+        """Create modern statistics card - matching invoice/payments design"""
+        card = QFrame()
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        card.setMinimumHeight(80)
+        card.setStyleSheet(f"""
+            QFrame {{
+                background: {WHITE};
+                border: 1px solid {BORDER};
+                border-radius: 12px;
+                border-left: 4px solid {color};
+            }}
+            QFrame:hover {{
+                border-color: {color};
+                background: #FAFBFC;
+            }}
+        """)
+        
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(12)
+        
+        # Icon container
+        icon_container = QFrame()
+        icon_container.setFixedSize(44, 44)
+        icon_container.setStyleSheet(f"""
+            QFrame {{
+                background: {color}20;
+                border-radius: 10px;
+                border: none;
+            }}
+        """)
+        icon_layout = QVBoxLayout(icon_container)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        
+        icon_label = QLabel(icon)
+        icon_label.setAlignment(Qt.AlignCenter)
+        icon_label.setStyleSheet("font-size: 20px; border: none;")
+        icon_layout.addWidget(icon_label)
+        layout.addWidget(icon_container)
+        
+        # Text container
+        text_container = QVBoxLayout()
+        text_container.setSpacing(4)
+        
+        label_widget = QLabel(label_text)
+        label_widget.setStyleSheet(f"""
+            color: {TEXT_SECONDARY};
+            font-size: 12px;
+            font-weight: 500;
+            border: none;
+        """)
+        text_container.addWidget(label_widget)
+        
+        value_label = QLabel(value)
+        value_label.setStyleSheet(f"""
+            color: {TEXT_PRIMARY};
+            font-size: 22px;
+            font-weight: 700;
+            border: none;
+        """)
+        text_container.addWidget(value_label)
+        
+        layout.addLayout(text_container)
+        layout.addStretch()
+        
+        return card, value_label
+    
+    def setup_filters_section(self, parent_layout):
+        """Setup filter controls - same design as invoices.py"""
         filter_frame = QFrame()
         filter_frame.setStyleSheet(f"""
             QFrame {{
@@ -237,171 +295,211 @@ class ProductsScreen(BaseScreen):
                 border-radius: 12px;
             }}
         """)
+        filter_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         
         filter_layout = QHBoxLayout(filter_frame)
-        filter_layout.setSpacing(25)
+        filter_layout.setContentsMargins(16, 12, 16, 12)
+        filter_layout.setSpacing(16)
         
-        # Filter title
-        filter_title = QLabel("🎯 Filters")
-        filter_title.setFont(QFont("Arial", 14, QFont.Bold))
-        filter_title.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
-        filter_layout.addWidget(filter_title)
+        # Filter label
+        filter_label = QLabel("🎯 Filters")
+        filter_label.setStyleSheet(f"""
+            color: {TEXT_PRIMARY};
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+        """)
+        filter_layout.addWidget(filter_label)
         
-        # Modern filter dropdowns
-        filters_data = [
-            ("Type:", ["All", "Goods", "Service"]),
-            ("Category:", ["All Categories"]),
-            ("Stock Status:", ["All", "In Stock", "Low Stock", "Out of Stock"]),
-            ("Price Range:", ["All", "Under ₹1000", "₹1000-₹10000", "Above ₹10000"])
+        # Separator
+        separator = QFrame()
+        separator.setFixedWidth(1)
+        separator.setFixedHeight(30)
+        separator.setStyleSheet(f"background: {BORDER};")
+        filter_layout.addWidget(separator)
+        
+        # Filter controls - same structure as invoices.py
+        filter_controls = [
+            ("Type", ["All", "Goods", "Service"], "type_filter"),
+            ("Category", ["All Categories"], "category_filter"),
+            ("Stock", ["All", "In Stock", "Low Stock", "Out of Stock"], "stock_filter"),
         ]
         
-        self.filter_combos = {}
+        combo_style = f"""
+            QComboBox {{
+                border: 1px solid {BORDER};
+                border-radius: 6px;
+                padding: 6px 12px;
+                padding-right: 30px;
+                background: {BACKGROUND};
+                font-size: 13px;
+                color: {TEXT_PRIMARY};
+                min-width: 100px;
+            }}
+            QComboBox:hover {{
+                border-color: {PRIMARY};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid {TEXT_SECONDARY};
+                margin-right: 8px;
+            }}
+            QComboBox QAbstractItemView {{
+                border: 1px solid {BORDER};
+                background: {WHITE};
+                selection-background-color: {PRIMARY};
+                selection-color: white;
+                outline: none;
+            }}
+        """
         
-        for label_text, items in filters_data:
-            # Label
-            label = QLabel(label_text)
-            label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-weight: 500; border: none;")
-            filter_layout.addWidget(label)
+        for label_text, items, attr_name in filter_controls:
+            # Container for label + combo (vertical layout like invoices.py)
+            filter_container = QVBoxLayout()
+            filter_container.setSpacing(4)
             
-            # Combo
+            label = QLabel(label_text)
+            label.setStyleSheet(f"""
+                color: {TEXT_SECONDARY};
+                font-size: 11px;
+                font-weight: 500;
+                border: none;
+            """)
+            filter_container.addWidget(label)
+            
             combo = QComboBox()
             combo.addItems(items)
-            combo.setFixedHeight(35)
-            combo.setFixedWidth(140)
-            combo.setStyleSheet(f"""
-                QComboBox {{
-                    border: 2px solid {BORDER};
-                    border-radius: 8px;
-                    padding: 6px 12px;
-                    background: {WHITE};
-                    font-size: 14px;
-                    color: {TEXT_PRIMARY};
-                }}
-                QComboBox:hover {{
-                    border-color: {PRIMARY};
-                }}
-                QComboBox:focus {{
-                    border-color: {PRIMARY};
-                }}
-                QComboBox::drop-down {{
-                    border: none;
-                    width: 30px;
-                }}
-                QComboBox::down-arrow {{
-                    image: none;
-                    border-left: 5px solid transparent;
-                    border-right: 5px solid transparent;
-                    border-top: 6px solid {TEXT_PRIMARY};
-                    margin-right: 8px;
-                }}
-                QComboBox QAbstractItemView {{
-                    border: 2px solid {PRIMARY};
-                    background: {WHITE};
-                    selection-background-color: {PRIMARY};
-                    selection-color: white;
-                    border-radius: 8px;
-                }}
-            """)
+            combo.setFixedHeight(32)
+            combo.setStyleSheet(combo_style)
             combo.currentTextChanged.connect(self.filter_products)
+            setattr(self, attr_name, combo)
+            self.filter_combos[attr_name] = combo
+            filter_container.addWidget(combo)
             
-            # Store reference for filtering
-            filter_key = label_text.lower().replace(":", "").replace(" ", "_")
-            self.filter_combos[filter_key] = combo
-            
-            filter_layout.addWidget(combo)
-            filter_layout.addSpacing(10)
+            filter_layout.addLayout(filter_container)
         
         filter_layout.addStretch()
         
-        # Enhanced action buttons
-        action_buttons = [
-            ("🔄", "Refresh", self.load_products_data),
-            ("🗑️", "Clear Filters", self.clear_filters)
-        ]
+        # Refresh button
+        refresh_btn = QPushButton("🔄")
+        refresh_btn.setFixedSize(32, 32)
+        refresh_btn.setToolTip("Refresh Data")
+        refresh_btn.setCursor(Qt.PointingHandCursor)
+        refresh_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {BACKGROUND};
+                border: 1px solid {BORDER};
+                border-radius: 6px;
+                font-size: 14px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background: {PRIMARY};
+                color: white;
+                border-color: {PRIMARY};
+            }}
+        """)
+        refresh_btn.clicked.connect(self.load_products_data)
+        filter_layout.addWidget(refresh_btn)
         
-        for icon, tooltip, callback in action_buttons:
-            btn = QPushButton(icon)
-            # btn.setFixedSize(35, 35)
-            btn.setToolTip(tooltip)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    border: 2px solid {BORDER};
-                    border-radius: 17px;
-                    background: {WHITE};
-                    font-size: 16px;
-                    color: {TEXT_PRIMARY};
-                }}
-                QPushButton:hover {{
-                    background: {PRIMARY};
-                    color: white;
-                    border-color: {PRIMARY};
-                }}
-                QPushButton:pressed {{
-                    background: #1D4ED8;
-                }}
-            """)
-            btn.clicked.connect(callback)
-            filter_layout.addWidget(btn)
+        # Clear filters button
+        clear_btn = QPushButton("Clear")
+        clear_btn.setFixedHeight(32)
+        clear_btn.setToolTip("Clear All Filters")
+        clear_btn.setCursor(Qt.PointingHandCursor)
+        clear_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {TEXT_SECONDARY};
+                border: none;
+                font-size: 13px;
+                padding: 0 8px;
+            }}
+            QPushButton:hover {{
+                color: {DANGER};
+            }}
+        """)
+        clear_btn.clicked.connect(self.clear_filters)
+        filter_layout.addWidget(clear_btn)
         
-        self.add_content(filter_frame)
+        parent_layout.addWidget(filter_frame)
     
-    def clear_filters(self):
-        """Clear all filters"""
-        for combo in self.filter_combos.values():
-            combo.setCurrentIndex(0)
-        self.search_input.clear()
-        self.filter_products()
-    
-    def setup_products_table(self):
+    def setup_products_table(self, parent_layout):
         """Setup enhanced products data table"""
-        # Modern table container
         table_frame = QFrame()
+        table_frame.setObjectName("tableFrame")
+        table_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         table_frame.setStyleSheet(f"""
-            QFrame {{
+            QFrame#tableFrame {{
                 background: {WHITE};
                 border: 1px solid {BORDER};
                 border-radius: 12px;
-                margin: 5px;
             }}
         """)
         
         table_layout = QVBoxLayout(table_frame)
-        table_layout.setContentsMargins(25, 25, 25, 25)
-        table_layout.setSpacing(15)
+        table_layout.setContentsMargins(24, 20, 24, 20)
+        table_layout.setSpacing(16)
         
-        # Table header with count
+        # Table header with title and count
         header_layout = QHBoxLayout()
         
-        table_title = QLabel("📦 Products Inventory")
+        # Title with icon
+        title_container = QHBoxLayout()
+        title_container.setSpacing(10)
+        
+        title_icon = QLabel("📦")
+        title_icon.setStyleSheet("border: none; font-size: 20px;")
+        title_container.addWidget(title_icon)
+        
+        table_title = QLabel("Products Inventory")
         table_title.setFont(QFont("Arial", 16, QFont.Bold))
         table_title.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
-        header_layout.addWidget(table_title)
+        title_container.addWidget(table_title)
+        title_container.addStretch()
         
-        self.count_label = QLabel("Total: 0 products")
-        self.count_label.setStyleSheet(f"color: #6B7280; font-size: 14px; border: none;")
+        header_layout.addLayout(title_container)
+        
+        # Count badge
+        self.count_label = QLabel("0 products")
+        self.count_label.setStyleSheet(f"""
+            QLabel {{
+                color: {TEXT_SECONDARY};
+                font-size: 13px;
+                background: {BACKGROUND};
+                padding: 6px 14px;
+                border-radius: 16px;
+                border: none;
+            }}
+        """)
         header_layout.addWidget(self.count_label)
-        
         header_layout.addStretch()
         
-        # View toggle buttons removed
         table_layout.addLayout(header_layout)
         
-        # Enhanced table
-        headers = ["No", "Product Name", "Price", "Stock", "Status", "Actions"]
+        # Products table
+        headers = ["#", "Product Name", "Type", "Price", "Stock", "Status", "Actions"]
         self.products_table = CustomTable(0, len(headers), headers)
-
+        self.products_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
         # Enhanced table styling
         self.products_table.setStyleSheet(f"""
             QTableWidget {{
-                gridline-color: #E5E7EB;
+                gridline-color: #F3F4F6;
                 background-color: {WHITE};
                 border: none;
                 font-size: 14px;
                 selection-background-color: #EEF2FF;
+                alternate-background-color: #FAFBFC;
             }}
             QTableWidget::item {{
                 border-bottom: 1px solid #F3F4F6;
-                padding: 12px 8px;
             }}
             QTableWidget::item:selected {{
                 background-color: #EEF2FF;
@@ -409,43 +507,49 @@ class ProductsScreen(BaseScreen):
             }}
             QHeaderView::section {{
                 background-color: #F8FAFC;
-                color: {TEXT_PRIMARY};
-                font-weight: bold;
+                color: {TEXT_SECONDARY};
+                font-weight: 600;
                 border: none;
                 border-bottom: 2px solid #E5E7EB;
-                padding: 12px 8px;
-                font-size: 14px;
+                font-size: 13px;
+                text-transform: uppercase;
             }}
             QHeaderView::section:hover {{
                 background-color: #F1F5F9;
             }}
         """)
         
-        # Set optimal column widths for 7 columns
-        column_widths = [30, 700, 100, 100, 100, 120]
-        for i, width in enumerate(column_widths):
-            self.products_table.setColumnWidth(i, width)
-
-        # Set minimum height for better appearance and row size for actions
-        self.products_table.setMinimumHeight(400)
-        try:
-            vh = self.products_table.verticalHeader()
-            vh.setDefaultSectionSize(52)
-        except Exception:
-            pass
-
-        table_layout.addWidget(self.products_table)
-        self.add_content(table_frame)
+        # Enable alternating row colors
+        self.products_table.setAlternatingRowColors(True)
         
-        # Store original data for filtering
-        self.all_products_data = []
+        # Column widths - responsive
+        column_ratios = [0.05, 0.30, 0.10, 0.12, 0.12, 0.13, 0.18]
+        for i, ratio in enumerate(column_ratios):
+            self.products_table.setColumnWidth(i, int(800 * ratio))
+        
+        # Row height
+        self.products_table.verticalHeader().setDefaultSectionSize(56)
+        self.products_table.setMinimumHeight(400)
+        
+        table_layout.addWidget(self.products_table)
+        parent_layout.addWidget(table_frame)
+    
+    def clear_filters(self):
+        """Clear all filters"""
+        if hasattr(self, 'type_filter'):
+            self.type_filter.setCurrentIndex(0)
+        if hasattr(self, 'category_filter'):
+            self.category_filter.setCurrentIndex(0)
+        if hasattr(self, 'stock_filter'):
+            self.stock_filter.setCurrentIndex(0)
+        self.search_input.clear()
+        self.filter_products()
     
     def load_products_data(self):
         """Load products data into table"""
         try:
             products = db.get_products()
             
-            # Convert database rows to dictionaries if needed
             if products:
                 products_list = []
                 for product in products:
@@ -456,47 +560,45 @@ class ProductsScreen(BaseScreen):
                 self.populate_table(products_list)
                 self.update_stats(products_list)
             else:
-                # Database is empty, load sample data
                 print("Database is empty, loading sample data...")
                 self.load_sample_data()
                 
         except Exception as e:
-            # Show enhanced sample data if database not available
             print(f"Database error, using sample data: {e}")
             self.load_sample_data()
     
     def load_sample_data(self):
-        """Load enhanced sample data"""
+        """Load sample data for demonstration"""
         sample_data = [
             {
                 'id': 1, 'name': 'Dell Laptop XPS 13', 'type': 'Goods', 'category': 'Electronics',
-                'sku': 'LAP001', 'selling_price': 75000, 'stock_quantity': 25,
-                'low_stock_alert': 5, 'brand': 'Dell', 'unit': 'Piece'
+                'sku': 'LAP001', 'sales_rate': 75000, 'stock_quantity': 25,
+                'low_stock_alert': 5, 'unit': 'Piece'
             },
             {
                 'id': 2, 'name': 'iPhone 14 Pro', 'type': 'Goods', 'category': 'Electronics',
-                'sku': 'PHN001', 'selling_price': 120000, 'stock_quantity': 15,
-                'low_stock_alert': 3, 'brand': 'Apple', 'unit': 'Piece'
+                'sku': 'PHN001', 'sales_rate': 120000, 'stock_quantity': 15,
+                'low_stock_alert': 3, 'unit': 'Piece'
             },
             {
                 'id': 3, 'name': 'Web Development Service', 'type': 'Service', 'category': 'Professional',
-                'sku': 'SRV001', 'selling_price': 50000, 'stock_quantity': 0,
-                'low_stock_alert': 0, 'brand': '', 'unit': 'Hour'
+                'sku': 'SRV001', 'sales_rate': 50000, 'stock_quantity': 0,
+                'low_stock_alert': 0, 'unit': 'Hour'
             },
             {
                 'id': 4, 'name': 'Office Chair', 'type': 'Goods', 'category': 'Furniture',
-                'sku': 'FUR001', 'selling_price': 8500, 'stock_quantity': 2,
-                'low_stock_alert': 5, 'brand': 'Herman Miller', 'unit': 'Piece'
+                'sku': 'FUR001', 'sales_rate': 8500, 'stock_quantity': 2,
+                'low_stock_alert': 5, 'unit': 'Piece'
             },
             {
                 'id': 5, 'name': 'Wireless Mouse', 'type': 'Goods', 'category': 'Electronics',
-                'sku': 'ACC001', 'selling_price': 2500, 'stock_quantity': 50,
-                'low_stock_alert': 10, 'brand': 'Logitech', 'unit': 'Piece'
+                'sku': 'ACC001', 'sales_rate': 2500, 'stock_quantity': 50,
+                'low_stock_alert': 10, 'unit': 'Piece'
             },
             {
-                'id': 6, 'name': 'Digital Marketing Service', 'type': 'Service', 'category': 'Marketing',
-                'sku': 'SRV002', 'selling_price': 25000, 'stock_quantity': 0,
-                'low_stock_alert': 0, 'brand': '', 'unit': 'Project'
+                'id': 6, 'name': 'Digital Marketing', 'type': 'Service', 'category': 'Marketing',
+                'sku': 'SRV002', 'sales_rate': 25000, 'stock_quantity': 0,
+                'low_stock_alert': 0, 'unit': 'Project'
             }
         ]
         self.all_products_data = sample_data
@@ -511,79 +613,113 @@ class ProductsScreen(BaseScreen):
             if product.get('category'):
                 categories.add(product['category'])
         
-        if 'category' in self.filter_combos:
-            combo = self.filter_combos['category']
+        if hasattr(self, 'category_filter'):
+            combo = self.category_filter
+            combo.blockSignals(True)
             combo.clear()
             combo.addItem("All Categories")
             for category in sorted(categories):
                 combo.addItem(category)
+            combo.blockSignals(False)
     
     def populate_table(self, products_data):
-        """Populate table with enhanced products data"""
+        """Populate table with products data"""
         self.products_table.setRowCount(len(products_data))
+        
         for row, product in enumerate(products_data):
-            self.products_table.setRowHeight(row, 38)
+            self.products_table.setRowHeight(row, 56)
+            
             # Column 0: Row number
-            self.products_table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
+            num_item = QTableWidgetItem(str(row + 1))
+            num_item.setTextAlignment(Qt.AlignCenter)
+            num_item.setForeground(QColor(TEXT_SECONDARY))
+            self.products_table.setItem(row, 0, num_item)
+            
             # Column 1: Product name with icon
             product_type = product.get('type', '')
             type_icon = "📦" if product_type == "Goods" else "🔧"
-            name_display = f"{type_icon} {product.get('name', '')}"
-            self.products_table.setItem(row, 1, QTableWidgetItem(name_display))
-            # Column 2: Price with currency
-            price_display = f"₹{product.get('sales_rate', 0):,.2f}"
-            self.products_table.setItem(row, 2, QTableWidgetItem(price_display))
-            # Column 3: Stock display with units
-            stock = product.get('opening_stock', 0)
+            name_display = f"{type_icon}  {product.get('name', '')}"
+            name_item = QTableWidgetItem(name_display)
+            name_item.setFont(QFont("Arial", 12, QFont.DemiBold))
+            self.products_table.setItem(row, 1, name_item)
+            
+            # Column 2: Type badge
+            type_item = QTableWidgetItem(product_type)
+            type_item.setTextAlignment(Qt.AlignCenter)
+            self.products_table.setItem(row, 2, type_item)
+            
+            # Column 3: Price
+            price = product.get('sales_rate', 0) or 0
+            price_display = f"₹{price:,.2f}"
+            price_item = QTableWidgetItem(price_display)
+            price_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            price_item.setFont(QFont("Arial", 12, QFont.DemiBold))
+            self.products_table.setItem(row, 3, price_item)
+            
+            # Column 4: Stock
+            stock = product.get('opening_stock', product.get('stock_quantity', 0)) or 0
             unit = product.get('unit', 'Piece')
-            if product.get('type', '') == 'Service':
+            if product_type == 'Service':
                 stock_text = "∞"
             else:
                 stock_text = f"{stock} {unit}"
-            self.products_table.setItem(row, 3, QTableWidgetItem(stock_text))
-            # Column 4: Status with color coding
+            stock_item = QTableWidgetItem(stock_text)
+            stock_item.setTextAlignment(Qt.AlignCenter)
+            self.products_table.setItem(row, 4, stock_item)
+            
+            # Column 5: Status with color
             status = self.get_stock_status(product)
-            status_item = QTableWidgetItem(status)
-            if status == "In Stock":
-                status_item.setBackground(Qt.green)
-                status_item.setForeground(Qt.black)
-            elif status == "Low Stock":
-                status_item.setBackground(Qt.yellow)
-                status_item.setForeground(Qt.black)
-            elif status == "Out of Stock":
-                status_item.setBackground(Qt.red)
-                status_item.setForeground(Qt.black)
-            self.products_table.setItem(row, 4, status_item)
-            # Column 5: Action buttons
+            status_widget = self.create_status_badge(status)
+            self.products_table.setCellWidget(row, 5, status_widget)
+            
+            # Column 6: Action buttons
             actions_widget = self.create_action_buttons(product)
-            self.products_table.setCellWidget(row, 5, actions_widget)
+            self.products_table.setCellWidget(row, 6, actions_widget)
     
-    def update_stats(self, products_data):
-        """Update statistics with real data"""
-        try:
-            total_products = len(products_data)
-            in_stock = len([p for p in products_data if self.get_stock_status(p) == "In Stock"])
-            low_stock = len([p for p in products_data if self.get_stock_status(p) == "Low Stock"])
-            out_of_stock = len([p for p in products_data if self.get_stock_status(p) == "Out of Stock"])
-            
-            # Update count label
-            if hasattr(self, 'count_label'):
-                self.count_label.setText(f"📊 Total: {total_products} products")
-            
-            # Print stats for debugging
-            print(f"Product Stats - Total: {total_products}, In Stock: {in_stock}, "
-                  f"Low Stock: {low_stock}, Out of Stock: {out_of_stock}")
-                  
-        except Exception as e:
-            print(f"Error updating product stats: {e}")
+    def create_status_badge(self, status):
+        """Create a colored status badge"""
+        badge = QLabel(status)
+        badge.setAlignment(Qt.AlignCenter)
+        
+        if status == "In Stock":
+            color = SUCCESS
+            bg = "#ECFDF5"
+        elif status == "Low Stock":
+            color = WARNING
+            bg = "#FFFBEB"
+        elif status == "Out of Stock":
+            color = DANGER
+            bg = "#FEF2F2"
+        else:  # Service
+            color = PRIMARY
+            bg = "#EEF2FF"
+        
+        badge.setStyleSheet(f"""
+            QLabel {{
+                color: {color};
+                background: {bg};
+                padding: 6px 12px;
+                border-radius: 12px;
+                font-size: 11px;
+                font-weight: 600;
+            }}
+        """)
+        
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.addWidget(badge)
+        
+        return container
     
     def get_stock_status(self, product):
         """Get stock status for a product"""
         if product.get('type', '').lower() == 'service':
             return "Service"
         
-        stock = product.get('stock_quantity', 0)
-        low_stock_alert = product.get('low_stock_alert', 0)
+        stock = product.get('opening_stock', product.get('stock_quantity', 0)) or 0
+        low_stock_alert = product.get('low_stock_alert', 5) or 5
         
         if stock <= 0:
             return "Out of Stock"
@@ -593,78 +729,82 @@ class ProductsScreen(BaseScreen):
             return "In Stock"
     
     def create_action_buttons(self, product):
-        """Create action buttons for each row (styled like Parties)"""
+        """Create modern action buttons for each row"""
         widget = QWidget()
-        widget.setFixedHeight(25)
-        widget.setContentsMargins(0, 0, 0, 0)
-        widget.setStyleSheet("background: transparent;")
-        widget.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-
+        widget.setStyleSheet("background: transparent; border: none;")
+        widget.setFixedHeight(40)
+        
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(25)
+        layout.setSpacing(8)
         layout.setAlignment(Qt.AlignCenter)
-
-        # Edit tool button (emoji text for consistent rendering)
-        edit_btn = QToolButton()
-        edit_btn.setText("✎")
-        edit_btn.setToolTip("Edit")
-        edit_btn.setFixedSize(22, 22)
-        edit_btn.setAutoRaise(True)
-        edit_btn.setStyleSheet(f"""
-            QToolButton {{
-                border: 1px solid {PRIMARY};
-                border-radius: 11px;
-                padding: 0px;
-                background: transparent;
-            }}
-            QToolButton:hover {{
-                background: {PRIMARY};
-                color: white;
-            }}
-        """)
-        edit_btn.clicked.connect(lambda: self.edit_product(product))
-        layout.addWidget(edit_btn)
-
-        # Delete tool button (emoji text)
-        delete_btn = QToolButton()
-        delete_btn.setText("🗑️")
-        delete_btn.setToolTip("Delete")
-        delete_btn.setFixedSize(22, 22)
-        delete_btn.setAutoRaise(True)
-        delete_btn.setStyleSheet(f"""
-            QToolButton {{
-                border: 1px solid {DANGER};
-                border-radius: 11px;
-                padding: 0px;
-                background: transparent;
-            }}
-            QToolButton:hover {{
-                background: {DANGER};
-                color: white;
-            }}
-        """)
-        delete_btn.clicked.connect(lambda: self.delete_product(product))
-        layout.addWidget(delete_btn)
-
+        
+        # Action buttons - same style as parties
+        actions = [
+            ("Edit", "Edit Product", lambda _, p=product: self.edit_product(p), "#EEF2FF", PRIMARY),
+            ("Del", "Delete Product", lambda _, p=product: self.delete_product(p), "#FEE2E2", DANGER)
+        ]
+        
+        for text, tooltip, callback, bg_color, hover_color in actions:
+            btn = QPushButton(text)
+            btn.setFixedSize(42, 26)
+            btn.setToolTip(tooltip)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    border: 1px solid {BORDER};
+                    border-radius: 4px;
+                    background: {bg_color};
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: {TEXT_PRIMARY};
+                    padding: 0px;
+                }}
+                QPushButton:hover {{
+                    background: {hover_color};
+                    border-color: {hover_color};
+                    color: white;
+                }}
+            """)
+            btn.clicked.connect(callback)
+            layout.addWidget(btn)
+        
         return widget
-
+    
+    def update_stats(self, products):
+        """Update statistics with real data"""
+        total = len(products)
+        in_stock = sum(1 for p in products if self.get_stock_status(p) == "In Stock")
+        low_stock = sum(1 for p in products if self.get_stock_status(p) == "Low Stock")
+        out_stock = sum(1 for p in products if self.get_stock_status(p) == "Out of Stock")
+        
+        # Update stat cards
+        if hasattr(self, 'stat_labels'):
+            if 'total' in self.stat_labels:
+                self.stat_labels['total'].setText(str(total))
+            if 'in_stock' in self.stat_labels:
+                self.stat_labels['in_stock'].setText(str(in_stock))
+            if 'low_stock' in self.stat_labels:
+                self.stat_labels['low_stock'].setText(str(low_stock))
+            if 'out_stock' in self.stat_labels:
+                self.stat_labels['out_stock'].setText(str(out_stock))
+        
+        # Update count label
+        if hasattr(self, 'count_label'):
+            self.count_label.setText(f"{total} products")
+    
     def filter_products(self):
-        """Enhanced filter products based on search and multiple filters"""
+        """Filter products based on search and dropdown filters"""
         search_text = self.search_input.text().lower()
         
-        # Get filter values safely
-        type_filter = self.filter_combos.get('type', type('', (), {'currentText': lambda: 'All'}))
-        category_filter = self.filter_combos.get('category', type('', (), {'currentText': lambda: 'All Categories'}))
-        stock_filter = self.filter_combos.get('stock_status', type('', (), {'currentText': lambda: 'All'}))
-        
-        type_text = type_filter.currentText() if hasattr(type_filter, 'currentText') else 'All'
-        category_text = category_filter.currentText() if hasattr(category_filter, 'currentText') else 'All Categories'
-        stock_text = stock_filter.currentText() if hasattr(stock_filter, 'currentText') else 'All'
+        # Get filter values using new attribute names
+        type_text = self.type_filter.currentText() if hasattr(self, 'type_filter') else 'All'
+        category_text = self.category_filter.currentText() if hasattr(self, 'category_filter') else 'All Categories'
+        stock_text = self.stock_filter.currentText() if hasattr(self, 'stock_filter') else 'All'
         
         filtered_data = []
         for product in self.all_products_data:
-            # Search filter (name, SKU, category)
+            # Search filter
             if search_text:
                 search_fields = [
                     (product.get('name') or '').lower(),
@@ -690,41 +830,13 @@ class ProductsScreen(BaseScreen):
             filtered_data.append(product)
         
         self.populate_table(filtered_data)
-        self.update_stats(filtered_data)
         
-        # Update count
+        # Update count label with filter info
         if hasattr(self, 'count_label'):
             if len(filtered_data) == len(self.all_products_data):
-                self.count_label.setText(f"📊 Total: {len(self.all_products_data)} products")
+                self.count_label.setText(f"{len(self.all_products_data)} products")
             else:
-                self.count_label.setText(f"🔍 Showing: {len(filtered_data)} of {len(self.all_products_data)} products")
-    
-    def get_stock_status(self, product):
-        """Get stock status for product"""
-        if product.get('type', '').lower() == 'service':
-            return "Service"
-        
-        stock = product.get('stock_quantity', 0)
-        low_stock_alert = product.get('low_stock_alert', 0)
-        
-        if stock <= 0:
-            return "Out of Stock"
-        elif stock <= low_stock_alert:
-            return "Low Stock"
-        else:
-            return "In Stock"
-    
-    def update_stats(self, products):
-        """Update quick stats labels"""
-        total = len(products)
-        in_stock_count = sum(1 for p in products if self.get_stock_status(p) == "In Stock")
-        low_stock_count = sum(1 for p in products if self.get_stock_status(p) == "Low Stock")
-        out_stock_count = sum(1 for p in products if self.get_stock_status(p) == "Out of Stock")
-        
-        # self.total_products_label.setText(str(total))
-        # self.in_stock_label.setText(str(in_stock_count))
-        # self.low_stock_label.setText(str(low_stock_count))
-        # self.out_stock_label.setText(str(out_stock_count))
+                self.count_label.setText(f"Showing {len(filtered_data)} of {len(self.all_products_data)}")
     
     def add_product(self):
         """Open add product dialog"""
@@ -740,14 +852,25 @@ class ProductsScreen(BaseScreen):
     
     def delete_product(self, product):
         """Delete product with confirmation"""
-        reply = QMessageBox.question(
-            self, "Confirm Delete",
-            f"Are you sure you want to delete '{product['name']}'?\n\nThis action cannot be undone.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Confirm Delete")
+        msg_box.setText(f"Are you sure you want to delete '{product.get('name', '')}'?")
+        msg_box.setInformativeText("This action cannot be undone.")
+        msg_box.setIcon(QMessageBox.Warning)
+        msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg_box.setDefaultButton(QMessageBox.No)
+        msg_box.setStyleSheet(f"""
+            QMessageBox {{
+                background: {WHITE};
+            }}
+            QPushButton {{
+                padding: 8px 20px;
+                border-radius: 6px;
+                font-weight: 500;
+            }}
+        """)
         
-        if reply == QMessageBox.Yes:
+        if msg_box.exec_() == QMessageBox.Yes:
             try:
                 db.delete_product(product['id'])
                 QMessageBox.information(self, "Success", "Product deleted successfully!")
@@ -762,7 +885,3 @@ class ProductsScreen(BaseScreen):
     def import_products(self):
         """Import products data"""
         QMessageBox.information(self, "Import", "Import functionality will be implemented soon!")
-    
-    def refresh_data(self):
-        """Refresh products data"""
-        self.load_products_data()

@@ -30,7 +30,8 @@ class ProductDialog(QDialog):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(40, 40, 40, 40)
         main_layout.setSpacing(16)
-        title = QLabel("Add Product")
+        title_text = "Edit Product" if self.product_data else "Add Product"
+        title = QLabel(title_text)
         title.setFont(QFont("Arial", 28, QFont.Bold))
         title.setStyleSheet(f"color: {TEXT_PRIMARY}; padding: 2px 0px 2px 0px;")
         main_layout.addWidget(title, alignment=Qt.AlignLeft)
@@ -90,12 +91,13 @@ class ProductDialog(QDialog):
         row_sales_purchase = QHBoxLayout()
         row_sales_purchase.setSpacing(16)
         sales_col = QVBoxLayout()
-        sales_col.addWidget(self.label("Sales Rate"))
+        sales_col.addWidget(self.label("Sales Rate <span style=\"color:#d32f2f\">*</span>"))
         self.selling_price = QDoubleSpinBox()
         self.selling_price.setRange(0, 999999.99)
         self.selling_price.setDecimals(2)
         self.selling_price.setMinimumHeight(40)
         self.selling_price.setStyleSheet(self.input_style())
+        self.selling_price.valueChanged.connect(self._on_selling_price_changed)
         sales_col.addWidget(self.selling_price)
         purchase_col = QVBoxLayout()
         purchase_col.addWidget(self.label("Purchase Rate"))
@@ -147,27 +149,33 @@ class ProductDialog(QDialog):
         self.tax_rate.valueChanged.connect(self._on_gst_changed)
         tax_col.addWidget(self.tax_rate)
 
-        # Remove Tax Options, move SGST/CGST to right side
-        sgst_cgst_col = QHBoxLayout()
-        sgst_cgst_col.addWidget(self.label("SGST %"))
+        # SGST column
+        sgst_col = QVBoxLayout()
+        sgst_col.addWidget(self.label("SGST %"))
         self.sgst_input = QDoubleSpinBox()
         self.sgst_input.setRange(0, 100)
         self.sgst_input.setDecimals(2)
         self.sgst_input.setValue(9.0)
         self.sgst_input.setMinimumHeight(40)
         self.sgst_input.setStyleSheet(self.input_style())
-        sgst_cgst_col.addWidget(self.sgst_input)
-        sgst_cgst_col.addWidget(self.label("CGST %"))
+        sgst_col.addWidget(self.sgst_input)
+
+        # CGST column
+        cgst_col = QVBoxLayout()
+        cgst_col.addWidget(self.label("CGST %"))
         self.cgst_input = QDoubleSpinBox()
         self.cgst_input.setRange(0, 100)
         self.cgst_input.setDecimals(2)
         self.cgst_input.setValue(9.0)
         self.cgst_input.setMinimumHeight(40)
         self.cgst_input.setStyleSheet(self.input_style())
-        sgst_cgst_col.addWidget(self.cgst_input)
+        cgst_col.addWidget(self.cgst_input)
+
         row_tax.addLayout(tax_col)
         row_tax.addSpacing(16)
-        row_tax.addLayout(sgst_cgst_col)
+        row_tax.addLayout(sgst_col)
+        row_tax.addSpacing(16)
+        row_tax.addLayout(cgst_col)
         form_layout.addLayout(row_tax)
 
         # Opening & Low Stock
@@ -313,6 +321,7 @@ class ProductDialog(QDialog):
 
     def label(self, text):
         lbl = QLabel(text)
+        lbl.setTextFormat(Qt.RichText)  # Support HTML for required field indicators
         lbl.setFont(QFont("Arial", 16))
         lbl.setStyleSheet(f"color: {TEXT_PRIMARY}; font-weight: bold; border: none;")
         return lbl
@@ -375,7 +384,6 @@ class ProductDialog(QDialog):
         self.sgst_input.setValue(data.get('sgst', 9))
         self.cgst_input.setValue(data.get('cgst', 9))
         self.hsn_code.setText(data.get('hsn_code', ''))
-        self.tax_inclusive.setChecked(data.get('tax_inclusive', False))
         
         # Stock
         unit_index = self.unit_combo.findText(data.get('unit', 'Piece'))
@@ -399,7 +407,8 @@ class ProductDialog(QDialog):
         
         selling_price = self.selling_price.value()
         if selling_price <= 0:
-            QMessageBox.warning(self, "Error", "Selling price must be greater than 0!")
+            self._set_selling_price_error_state(True)
+            self.selling_price.setFocus()
             return
         
         # Compute DB-aligned fields
@@ -462,3 +471,32 @@ class ProductDialog(QDialog):
             # Restore the standard input style
             self.name_input.setStyleSheet(self.input_style())
             self.name_input.setToolTip("")
+
+    def _on_selling_price_changed(self, value: float):
+        """Clear error state when user enters a valid selling price."""
+        if value > 0:
+            self._set_selling_price_error_state(False)
+
+    def _set_selling_price_error_state(self, is_error: bool):
+        """Apply or clear red error styling on the Selling Price input."""
+        if is_error:
+            self.selling_price.setStyleSheet(
+                f"border: 2px solid {DANGER}; border-radius: 6px; padding: 12px; background-color: #fff5f5; color: {TEXT_PRIMARY}; font-size: 16px;"
+            )
+            self.selling_price.setToolTip("Selling price must be greater than 0")
+        else:
+            # Restore the standard input style
+            self.selling_price.setStyleSheet(self.input_style())
+            self.selling_price.setToolTip("")
+
+    def keyPressEvent(self, event):
+        """Handle keyboard shortcuts: Enter to save, Escape to cancel."""
+        if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            # Don't trigger save if focus is on multiline text edit
+            if not isinstance(self.focusWidget(), QTextEdit):
+                self.save_product()
+                return
+        elif event.key() == Qt.Key_Escape:
+            self.reject()
+            return
+        super().keyPressEvent(event)
