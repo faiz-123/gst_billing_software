@@ -1,6 +1,6 @@
 """
-Payments Screen - Supplier Payments (Money OUT)
-Records payments made to suppliers against purchase invoices
+Receipts Screen - Customer Receipts (Money IN)
+Records receipts received from customers against sales invoices
 """
 
 from PyQt5.QtWidgets import (
@@ -13,7 +13,7 @@ from PyQt5.QtCore import Qt, QDate
 from PyQt5.QtGui import QFont, QColor
 
 from .base_screen import BaseScreen
-from .payment_dialog import SupplierPaymentDialog
+from .receipt_dialog import ReceiptDialog
 from theme import (
     SUCCESS, DANGER, PRIMARY, WARNING, WHITE, TEXT_PRIMARY, TEXT_SECONDARY,
     BORDER, BACKGROUND, PRIMARY_HOVER
@@ -21,12 +21,12 @@ from theme import (
 from database import db
 
 
-class PaymentsScreen(BaseScreen):
-    """Screen for managing supplier payments (money going out)"""
+class ReceiptsScreen(BaseScreen):
+    """Screen for managing customer receipts (money coming in)"""
     
     def __init__(self):
-        super().__init__("💸 Payments (Money Out)")
-        self.all_payments_data = []
+        super().__init__("💰 Receipts (Money In)")
+        self.all_receipts_data = []
         self.current_page = 1
         self._setup_screen()
         self._load_data()
@@ -106,7 +106,7 @@ class PaymentsScreen(BaseScreen):
         search_layout.addWidget(search_icon)
         
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search supplier payments...")
+        self.search_input.setPlaceholderText("Search customer receipts...")
         self.search_input.setStyleSheet(f"""
             QLineEdit {{
                 border: none;
@@ -116,7 +116,7 @@ class PaymentsScreen(BaseScreen):
                 padding: 4px 0;
             }}
         """)
-        self.search_input.textChanged.connect(self._filter_payments)
+        self.search_input.textChanged.connect(self._filter_receipts)
         search_layout.addWidget(self.search_input)
         
         header_layout.addWidget(search_frame)
@@ -124,8 +124,8 @@ class PaymentsScreen(BaseScreen):
         
         # Action buttons
         buttons_data = [
-            ("📤 Export", "secondary", self._export_payments),
-            ("� Record Payment", "primary", self._record_payment)
+            ("📤 Export", "secondary", self._export_receipts),
+            ("💵 Record Receipt", "primary", self._record_receipt)
         ]
         
         for text, style, callback in buttons_data:
@@ -138,7 +138,7 @@ class PaymentsScreen(BaseScreen):
             if style == "primary":
                 btn.setStyleSheet(f"""
                     QPushButton {{
-                        background: {PRIMARY};
+                        background: {SUCCESS};
                         color: white;
                         border: none;
                         border-radius: 8px;
@@ -147,10 +147,10 @@ class PaymentsScreen(BaseScreen):
                         padding: 8px 20px;
                     }}
                     QPushButton:hover {{
-                        background: {PRIMARY_HOVER};
+                        background: #059669;
                     }}
                     QPushButton:pressed {{
-                        background: #1D4ED8;
+                        background: #047857;
                     }}
                 """)
             else:
@@ -185,12 +185,12 @@ class PaymentsScreen(BaseScreen):
         stats_layout.setContentsMargins(0, 0, 0, 0)
         stats_layout.setSpacing(12)
         
-        # Statistics cards data - for supplier payments (money OUT)
+        # Statistics cards data - for customer receipts (money IN)
         stats_data = [
-            ("💸", "Total Paid", "₹0", DANGER, "total_paid_label"),
-            ("📋", "Total Payments", "0", PRIMARY, "total_count_label"),
+            ("💰", "Total Received", "₹0", SUCCESS, "total_received_label"),
+            ("📋", "Total Receipts", "0", PRIMARY, "total_count_label"),
             ("📅", "This Month", "₹0", WARNING, "month_total_label"),
-            ("🏢", "Suppliers Paid", "0", SUCCESS, "suppliers_count_label")
+            ("👥", "Customers Paid", "0", SUCCESS, "customers_count_label")
         ]
         
         for icon, label_text, value, color, attr_name in stats_data:
@@ -362,7 +362,7 @@ class PaymentsScreen(BaseScreen):
             combo.addItems(items)
             combo.setFixedHeight(32)
             combo.setStyleSheet(combo_style)
-            combo.currentTextChanged.connect(self._filter_payments)
+            combo.currentTextChanged.connect(self._filter_receipts)
             setattr(self, attr_name, combo)
             filter_container.addWidget(combo)
             
@@ -443,7 +443,7 @@ class PaymentsScreen(BaseScreen):
         header_layout = QHBoxLayout(table_header)
         header_layout.setContentsMargins(16, 12, 16, 12)
         
-        table_title = QLabel("� Supplier Payments")
+        table_title = QLabel("💰 Customer Receipts")
         table_title.setStyleSheet(f"""
             color: {TEXT_PRIMARY};
             font-size: 15px;
@@ -482,12 +482,12 @@ class PaymentsScreen(BaseScreen):
         table_layout.addWidget(table_header)
         
         # Create table
-        headers = ["Date", "Supplier", "Amount", "Method", "Reference", "Invoice", "Status", "Actions"]
-        self.payments_table = QTableWidget(0, len(headers))
-        self.payments_table.setHorizontalHeaderLabels(headers)
+        headers = ["Date", "Customer", "Amount", "Method", "Reference", "Invoice", "Status", "Actions"]
+        self.receipts_table = QTableWidget(0, len(headers))
+        self.receipts_table.setHorizontalHeaderLabels(headers)
         
         # Table styling
-        self.payments_table.setStyleSheet(f"""
+        self.receipts_table.setStyleSheet(f"""
             QTableWidget {{
                 background: {WHITE};
                 border: none;
@@ -536,19 +536,19 @@ class PaymentsScreen(BaseScreen):
         """)
         
         # Table configuration
-        self.payments_table.setAlternatingRowColors(False)
-        self.payments_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.payments_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.payments_table.setSortingEnabled(True)
-        self.payments_table.setShowGrid(False)
-        self.payments_table.verticalHeader().setVisible(False)
-        self.payments_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.receipts_table.setAlternatingRowColors(False)
+        self.receipts_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.receipts_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.receipts_table.setSortingEnabled(True)
+        self.receipts_table.setShowGrid(False)
+        self.receipts_table.verticalHeader().setVisible(False)
+        self.receipts_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         
         # Column sizing - responsive
-        header = self.payments_table.horizontalHeader()
+        header = self.receipts_table.horizontalHeader()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.Fixed)  # Date
-        header.setSectionResizeMode(1, QHeaderView.Stretch)  # Supplier - stretches
+        header.setSectionResizeMode(1, QHeaderView.Stretch)  # Customer - stretches
         header.setSectionResizeMode(2, QHeaderView.Fixed)  # Amount
         header.setSectionResizeMode(3, QHeaderView.Fixed)  # Method
         header.setSectionResizeMode(4, QHeaderView.Fixed)  # Reference
@@ -556,18 +556,18 @@ class PaymentsScreen(BaseScreen):
         header.setSectionResizeMode(6, QHeaderView.Fixed)  # Status
         header.setSectionResizeMode(7, QHeaderView.Fixed)  # Actions
         
-        self.payments_table.setColumnWidth(0, 100)  # Date
-        self.payments_table.setColumnWidth(2, 120)  # Amount
-        self.payments_table.setColumnWidth(3, 110)  # Method
-        self.payments_table.setColumnWidth(4, 130)  # Reference
-        self.payments_table.setColumnWidth(5, 100)  # Invoice
-        self.payments_table.setColumnWidth(6, 90)   # Status
-        self.payments_table.setColumnWidth(7, 120)  # Actions
+        self.receipts_table.setColumnWidth(0, 100)  # Date
+        self.receipts_table.setColumnWidth(2, 120)  # Amount
+        self.receipts_table.setColumnWidth(3, 110)  # Method
+        self.receipts_table.setColumnWidth(4, 130)  # Reference
+        self.receipts_table.setColumnWidth(5, 100)  # Invoice
+        self.receipts_table.setColumnWidth(6, 90)   # Status
+        self.receipts_table.setColumnWidth(7, 120)  # Actions
         
         # Row height
-        self.payments_table.verticalHeader().setDefaultSectionSize(42)
+        self.receipts_table.verticalHeader().setDefaultSectionSize(42)
         
-        table_layout.addWidget(self.payments_table)
+        table_layout.addWidget(self.receipts_table)
         
         # Pagination footer
         pagination_frame = QFrame()
@@ -636,59 +636,59 @@ class PaymentsScreen(BaseScreen):
     # ─────────────────────────────────────────────────────────────────────────
     
     def _load_data(self):
-        """Load supplier payments data into table"""
+        """Load customer receipts data into table"""
         try:
-            # Get only PAYMENT type records (money OUT to suppliers)
-            self.all_payments_data = db.get_payments(payment_type='PAYMENT') or []
-            self._populate_table(self.all_payments_data)
-            self._update_stats(self.all_payments_data)
+            # Get only RECEIPT type records (money IN from customers)
+            self.all_receipts_data = db.get_payments(payment_type='RECEIPT') or []
+            self._populate_table(self.all_receipts_data)
+            self._update_stats(self.all_receipts_data)
         except Exception as e:
             print(f"Database error: {e}")
-            self.all_payments_data = []
+            self.all_receipts_data = []
             self._populate_table([])
             self._update_stats([])
     
-    def _populate_table(self, payments_data):
-        """Populate table with supplier payments data"""
-        self.payments_table.setRowCount(len(payments_data))
+    def _populate_table(self, receipts_data):
+        """Populate table with customer receipts data"""
+        self.receipts_table.setRowCount(len(receipts_data))
         
-        for row, payment in enumerate(payments_data):
+        for row, receipt in enumerate(receipts_data):
             # Date
-            date_item = QTableWidgetItem(str(payment.get('date', '')))
+            date_item = QTableWidgetItem(str(receipt.get('date', '')))
             date_item.setTextAlignment(Qt.AlignCenter)
-            self.payments_table.setItem(row, 0, date_item)
+            self.receipts_table.setItem(row, 0, date_item)
             
-            # Supplier name
-            supplier_item = QTableWidgetItem(str(payment.get('party_name', 'N/A')))
-            self.payments_table.setItem(row, 1, supplier_item)
+            # Customer name
+            customer_item = QTableWidgetItem(str(receipt.get('party_name', 'N/A')))
+            self.receipts_table.setItem(row, 1, customer_item)
             
             # Amount
-            amount = payment.get('amount', 0)
+            amount = receipt.get('amount', 0)
             amount_item = QTableWidgetItem(f"₹{amount:,.2f}")
             amount_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             amount_item.setFont(QFont("Arial", 11, QFont.Bold))
-            amount_item.setForeground(QColor(DANGER))  # Red for money OUT
-            self.payments_table.setItem(row, 2, amount_item)
+            amount_item.setForeground(QColor(SUCCESS))  # Green for money IN
+            self.receipts_table.setItem(row, 2, amount_item)
             
             # Method
-            method_item = QTableWidgetItem(str(payment.get('mode', 'Cash')))
+            method_item = QTableWidgetItem(str(receipt.get('mode', 'Cash')))
             method_item.setTextAlignment(Qt.AlignCenter)
-            self.payments_table.setItem(row, 3, method_item)
+            self.receipts_table.setItem(row, 3, method_item)
             
             # Reference
-            reference_item = QTableWidgetItem(str(payment.get('reference', '') or '-'))
+            reference_item = QTableWidgetItem(str(receipt.get('reference', '') or '-'))
             reference_item.setTextAlignment(Qt.AlignCenter)
-            self.payments_table.setItem(row, 4, reference_item)
+            self.receipts_table.setItem(row, 4, reference_item)
             
-            # Invoice (linked purchase invoice)
-            invoice_id = payment.get('invoice_id')
-            invoice_text = f"PUR-{invoice_id}" if invoice_id else "-"
+            # Invoice (linked sales invoice)
+            invoice_id = receipt.get('invoice_id')
+            invoice_text = f"INV-{invoice_id}" if invoice_id else "-"
             invoice_item = QTableWidgetItem(invoice_text)
             invoice_item.setTextAlignment(Qt.AlignCenter)
-            self.payments_table.setItem(row, 5, invoice_item)
+            self.receipts_table.setItem(row, 5, invoice_item)
             
             # Status with color coding
-            status = payment.get('status', 'Completed')
+            status = receipt.get('status', 'Completed')
             status_item = QTableWidgetItem(status)
             status_item.setTextAlignment(Qt.AlignCenter)
             
@@ -703,16 +703,16 @@ class PaymentsScreen(BaseScreen):
                 status_item.setForeground(QColor(color))
                 status_item.setBackground(QColor(bg_color))
             
-            self.payments_table.setItem(row, 6, status_item)
+            self.receipts_table.setItem(row, 6, status_item)
             
             # Action buttons
-            actions_widget = self._create_action_buttons(payment)
-            self.payments_table.setCellWidget(row, 7, actions_widget)
+            actions_widget = self._create_action_buttons(receipt)
+            self.receipts_table.setCellWidget(row, 7, actions_widget)
         
         self._update_pagination_info()
     
-    def _create_action_buttons(self, payment):
-        """Create action buttons for each payment row"""
+    def _create_action_buttons(self, receipt):
+        """Create action buttons for each receipt row"""
         widget = QWidget()
         widget.setStyleSheet("background: transparent; border: none;")
         widget.setFixedHeight(40)
@@ -723,9 +723,9 @@ class PaymentsScreen(BaseScreen):
         layout.setAlignment(Qt.AlignCenter)
         
         actions = [
-            ("View", "View Details", lambda _, p=payment: self._view_payment(p), "#EEF2FF", PRIMARY),
-            ("Edit", "Edit Payment", lambda _, p=payment: self._edit_payment(p), "#FEF3C7", WARNING),
-            ("Del", "Delete", lambda _, p=payment: self._delete_payment(p), "#FEE2E2", DANGER)
+            ("View", "View Details", lambda _, r=receipt: self._view_receipt(r), "#EEF2FF", PRIMARY),
+            ("Edit", "Edit Receipt", lambda _, r=receipt: self._edit_receipt(r), "#FEF3C7", WARNING),
+            ("Del", "Delete", lambda _, r=receipt: self._delete_receipt(r), "#FEE2E2", DANGER)
         ]
         
         for text, tooltip, callback, bg_color, hover_color in actions:
@@ -754,34 +754,34 @@ class PaymentsScreen(BaseScreen):
         
         return widget
     
-    def _update_stats(self, payments_data):
-        """Update statistics display for supplier payments"""
-        total_paid = sum(p.get('amount', 0) for p in payments_data)
-        total_count = len(payments_data)
+    def _update_stats(self, receipts_data):
+        """Update statistics display for customer receipts"""
+        total_received = sum(r.get('amount', 0) for r in receipts_data)
+        total_count = len(receipts_data)
         
-        # Count unique suppliers
-        suppliers = set(p.get('party_id') for p in payments_data if p.get('party_id'))
-        suppliers_count = len(suppliers)
+        # Count unique customers
+        customers = set(r.get('party_id') for r in receipts_data if r.get('party_id'))
+        customers_count = len(customers)
         
         # Calculate this month's total
         from datetime import datetime
         current_month = datetime.now().strftime('%Y-%m')
         month_total = sum(
-            p.get('amount', 0) for p in payments_data 
-            if str(p.get('date', '')).startswith(current_month)
+            r.get('amount', 0) for r in receipts_data 
+            if str(r.get('date', '')).startswith(current_month)
         )
         
-        if hasattr(self, 'total_paid_label') and self.total_paid_label:
-            self.total_paid_label.setText(f"₹{total_paid:,.0f}")
+        if hasattr(self, 'total_received_label') and self.total_received_label:
+            self.total_received_label.setText(f"₹{total_received:,.0f}")
         if hasattr(self, 'total_count_label') and self.total_count_label:
             self.total_count_label.setText(str(total_count))
         if hasattr(self, 'month_total_label') and self.month_total_label:
             self.month_total_label.setText(f"₹{month_total:,.0f}")
-        if hasattr(self, 'suppliers_count_label') and self.suppliers_count_label:
-            self.suppliers_count_label.setText(str(suppliers_count))
+        if hasattr(self, 'customers_count_label') and self.customers_count_label:
+            self.customers_count_label.setText(str(customers_count))
     
-    def _filter_payments(self):
-        """Filter payments based on search and filter controls"""
+    def _filter_receipts(self):
+        """Filter receipts based on search and filter controls"""
         search_text = self.search_input.text().lower().strip()
         method_filter = self.method_filter.currentText()
         period_filter = self.period_filter.currentText()
@@ -789,55 +789,55 @@ class PaymentsScreen(BaseScreen):
         
         filtered_data = []
         
-        for payment in self.all_payments_data:
+        for receipt in self.all_receipts_data:
             # Search filter
             if search_text:
                 searchable = f"""
-                    {payment.get('party_name', '')} 
-                    {payment.get('reference', '')} 
-                    {payment.get('mode', '')}
-                    {payment.get('notes', '')}
+                    {receipt.get('party_name', '')} 
+                    {receipt.get('reference', '')} 
+                    {receipt.get('mode', '')}
+                    {receipt.get('notes', '')}
                 """.lower()
                 if search_text not in searchable:
                     continue
             
             # Method filter
-            if method_filter != "All Methods" and payment.get('mode') != method_filter:
+            if method_filter != "All Methods" and receipt.get('mode') != method_filter:
                 continue
             
             # Status filter
-            if status_filter != "All Status" and payment.get('status', 'Completed') != status_filter:
+            if status_filter != "All Status" and receipt.get('status', 'Completed') != status_filter:
                 continue
             
             # Period filter
-            if not self._check_period_filter(payment.get('date', ''), period_filter):
+            if not self._check_period_filter(receipt.get('date', ''), period_filter):
                 continue
             
-            filtered_data.append(payment)
+            filtered_data.append(receipt)
         
         self._populate_table(filtered_data)
         self._update_stats(filtered_data)
     
-    def _check_period_filter(self, payment_date, period_filter):
-        """Check if payment date matches the period filter"""
+    def _check_period_filter(self, receipt_date, period_filter):
+        """Check if receipt date matches the period filter"""
         if period_filter == "All Time":
             return True
         
         try:
             from datetime import datetime, timedelta
             
-            payment_dt = datetime.strptime(str(payment_date), '%Y-%m-%d')
+            receipt_dt = datetime.strptime(str(receipt_date), '%Y-%m-%d')
             today = datetime.now()
             
             if period_filter == "Today":
-                return payment_dt.date() == today.date()
+                return receipt_dt.date() == today.date()
             elif period_filter == "This Week":
                 week_start = today - timedelta(days=today.weekday())
-                return payment_dt >= week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+                return receipt_dt >= week_start.replace(hour=0, minute=0, second=0, microsecond=0)
             elif period_filter == "This Month":
-                return payment_dt.year == today.year and payment_dt.month == today.month
+                return receipt_dt.year == today.year and receipt_dt.month == today.month
             elif period_filter == "This Year":
-                return payment_dt.year == today.year
+                return receipt_dt.year == today.year
         except ValueError:
             return True
         
@@ -850,8 +850,8 @@ class PaymentsScreen(BaseScreen):
         self.period_filter.setCurrentIndex(0)
         self.status_filter.setCurrentIndex(0)
         
-        self._populate_table(self.all_payments_data)
-        self._update_stats(self.all_payments_data)
+        self._populate_table(self.all_receipts_data)
+        self._update_stats(self.all_receipts_data)
     
     # ─────────────────────────────────────────────────────────────────────────
     # Pagination
@@ -859,7 +859,7 @@ class PaymentsScreen(BaseScreen):
     
     def _update_pagination_info(self):
         """Update pagination info display"""
-        total = len(self.all_payments_data)
+        total = len(self.all_receipts_data)
         items_per_page = int(self.items_per_page.currentText())
         total_pages = max(1, (total + items_per_page - 1) // items_per_page)
         
@@ -880,58 +880,58 @@ class PaymentsScreen(BaseScreen):
         """Go to previous page"""
         if self.current_page > 1:
             self.current_page -= 1
-            self._filter_payments()
+            self._filter_receipts()
     
     def _next_page(self):
         """Go to next page"""
-        total = len(self.all_payments_data)
+        total = len(self.all_receipts_data)
         items_per_page = int(self.items_per_page.currentText())
         total_pages = max(1, (total + items_per_page - 1) // items_per_page)
         
         if self.current_page < total_pages:
             self.current_page += 1
-            self._filter_payments()
+            self._filter_receipts()
     
     # ─────────────────────────────────────────────────────────────────────────
     # Actions
     # ─────────────────────────────────────────────────────────────────────────
     
-    def _record_payment(self):
-        """Open record supplier payment dialog"""
-        dialog = SupplierPaymentDialog(self)
+    def _record_receipt(self):
+        """Open record customer receipt dialog"""
+        dialog = ReceiptDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             self._load_data()
     
-    def _edit_payment(self, payment):
-        """Open edit supplier payment dialog"""
-        dialog = SupplierPaymentDialog(self, payment)
+    def _edit_receipt(self, receipt):
+        """Open edit customer receipt dialog"""
+        dialog = ReceiptDialog(self, receipt)
         if dialog.exec_() == QDialog.Accepted:
             self._load_data()
     
-    def _view_payment(self, payment):
-        """View supplier payment details"""
+    def _view_receipt(self, receipt):
+        """View customer receipt details"""
         details = f"""
-<h3>� Supplier Payment Details</h3>
+<h3>💰 Customer Receipt Details</h3>
 
-<p><b>Supplier:</b> {payment.get('party_name', 'N/A')}</p>
-<p><b>Amount:</b> ₹{payment.get('amount', 0):,.2f}</p>
-<p><b>Date:</b> {payment.get('date', 'N/A')}</p>
-<p><b>Method:</b> {payment.get('mode', 'N/A')}</p>
-<p><b>Reference:</b> {payment.get('reference', 'N/A') or '-'}</p>
-<p><b>Invoice:</b> {f"PUR-{payment.get('invoice_id')}" if payment.get('invoice_id') else '-'}</p>
-<p><b>Status:</b> {payment.get('status', 'N/A')}</p>
-<p><b>Notes:</b> {payment.get('notes', '').replace('[PAYMENT]', '').strip() or '-'}</p>
+<p><b>Customer:</b> {receipt.get('party_name', 'N/A')}</p>
+<p><b>Amount:</b> ₹{receipt.get('amount', 0):,.2f}</p>
+<p><b>Date:</b> {receipt.get('date', 'N/A')}</p>
+<p><b>Method:</b> {receipt.get('mode', 'N/A')}</p>
+<p><b>Reference:</b> {receipt.get('reference', 'N/A') or '-'}</p>
+<p><b>Invoice:</b> {f"INV-{receipt.get('invoice_id')}" if receipt.get('invoice_id') else '-'}</p>
+<p><b>Status:</b> {receipt.get('status', 'N/A')}</p>
+<p><b>Notes:</b> {receipt.get('notes', '').replace('[RECEIPT]', '').strip() or '-'}</p>
         """
-        QMessageBox.information(self, "Payment Details", details.strip())
+        QMessageBox.information(self, "Receipt Details", details.strip())
     
-    def _delete_payment(self, payment):
-        """Delete supplier payment with confirmation"""
+    def _delete_receipt(self, receipt):
+        """Delete customer receipt with confirmation"""
         reply = QMessageBox.question(
             self, "Confirm Delete",
-            f"Are you sure you want to delete this supplier payment?\n\n"
-            f"Supplier: {payment.get('party_name', 'N/A')}\n"
-            f"Amount: ₹{payment.get('amount', 0):,.2f}\n"
-            f"Date: {payment.get('date', 'N/A')}\n\n"
+            f"Are you sure you want to delete this customer receipt?\n\n"
+            f"Customer: {receipt.get('party_name', 'N/A')}\n"
+            f"Amount: ₹{receipt.get('amount', 0):,.2f}\n"
+            f"Date: {receipt.get('date', 'N/A')}\n\n"
             f"This action cannot be undone.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
@@ -939,16 +939,16 @@ class PaymentsScreen(BaseScreen):
         
         if reply == QMessageBox.Yes:
             try:
-                db.delete_payment(payment.get('id'))
-                QMessageBox.information(self, "Success", "✓ Payment deleted successfully!")
+                db.delete_payment(receipt.get('id'))
+                QMessageBox.information(self, "Success", "✓ Receipt deleted successfully!")
                 self._load_data()
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to delete payment:\n\n{str(e)}")
+                QMessageBox.critical(self, "Error", f"Failed to delete receipt:\n\n{str(e)}")
     
-    def _export_payments(self):
-        """Export payments data"""
+    def _export_receipts(self):
+        """Export receipts data"""
         QMessageBox.information(
             self, "Export", 
             "📤 Export functionality will be available soon!\n\n"
-            "This will allow you to export payment data to CSV or Excel."
+            "This will allow you to export receipt data to CSV or Excel."
         )

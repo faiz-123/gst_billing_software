@@ -23,7 +23,8 @@ from datetime import datetime, timedelta
 from .invoice_dialogue import InvoiceDialog
 from .product_dialogue import ProductDialog  
 from .party_dialog import PartyDialog
-from .payment_dialog import PaymentDialog
+from .payment_dialog import SupplierPaymentDialog
+from .receipt_dialog import ReceiptDialog
 
 
 class GradientFrame(QFrame):
@@ -733,7 +734,7 @@ class DashboardScreen(BaseScreen):
     def record_payment(self):
         """Open record payment dialog"""
         try:
-            dialog = PaymentDialog(self)
+            dialog = SupplierPaymentDialog(self)
             if dialog.exec_() == dialog.Accepted:
                 self.refresh_data()
                 main_window = self._get_main_window()

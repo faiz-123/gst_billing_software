@@ -20,7 +20,9 @@ from screens.dashboard import DashboardScreen
 from screens.parties import PartiesScreen
 from screens.products import ProductsScreen
 from screens.invoices import InvoicesScreen
+from screens.purchases import PurchasesScreen
 from screens.payments import PaymentsScreen
+from screens.receipts import ReceiptsScreen
 
 class MainWindow(QMainWindow):
     def __init__(self, company_name="GST Billing"):
@@ -29,10 +31,8 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1200, 800)
         self.company_name = company_name
         
-        # Load window settings
-        window_settings = config.get_window_settings()
-        if window_settings['maximized']:
-            self.showMaximized()
+        # Always start maximized
+        self.showMaximized()
         
         self.setup_ui()
         
@@ -64,6 +64,8 @@ class MainWindow(QMainWindow):
             'parties': PartiesScreen(),
             'products': ProductsScreen(),
             'invoices': InvoicesScreen(),
+            'purchases': PurchasesScreen(),
+            'receipts': ReceiptsScreen(),
             'payments': PaymentsScreen()
         }
         
@@ -75,10 +77,12 @@ class MainWindow(QMainWindow):
         """Setup sidebar menu items without sections"""
         # Main navigation items
         dashboard_btn = self.sidebar.add_menu_item("Dashboard", "🏠", lambda: self.navigate_to('dashboard'))
-        invoices_btn = self.sidebar.add_menu_item("Invoices", "📄", lambda: self.navigate_to('invoices'))
+        invoices_btn = self.sidebar.add_menu_item("Sales", "📄", lambda: self.navigate_to('invoices'))
+        self.sidebar.add_menu_item("Purchases", "🛒", lambda: self.navigate_to('purchases'))
         self.sidebar.add_menu_item("Products", "📦", lambda: self.navigate_to('products'))
         self.sidebar.add_menu_item("Parties", "👥", lambda: self.navigate_to('parties'))
-        self.sidebar.add_menu_item("Payments", "💳", lambda: self.navigate_to('payments'))
+        self.sidebar.add_menu_item("Receipts", "💰", lambda: self.navigate_to('receipts'))
+        self.sidebar.add_menu_item("Payments", "💸", lambda: self.navigate_to('payments'))
         
         self.sidebar.add_stretch()
         
@@ -112,9 +116,11 @@ class MainWindow(QMainWindow):
         # Map screen names to button text for finding the right button
         screen_button_map = {
             'dashboard': 'Dashboard',
-            'invoices': 'Invoices', 
+            'invoices': 'Sales', 
+            'purchases': 'Purchases',
             'products': 'Products',
             'parties': 'Parties',
+            'receipts': 'Receipts',
             'payments': 'Payments'
         }
         
@@ -150,6 +156,12 @@ def main():
     
     # Initialize database
     db.create_tables()
+    
+    # Restore current company from config if available
+    current_company_id = config.get('company.current_company_id')
+    if current_company_id:
+        db.set_current_company(current_company_id)
+        print(f"Restored current company ID: {current_company_id}")
     
     # Create and show main window
     window = MainWindow()

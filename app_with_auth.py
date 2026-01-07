@@ -121,6 +121,51 @@ class AuthenticatedApp(QMainWindow):
         print(f"Company selected: {company_name}")
         self.selected_company = company_name
         
+        # Set current company in database for data isolation
+        try:
+            from database import db
+            from config import config
+            from PyQt5.QtWidgets import QMessageBox
+            
+            company = db.get_company_by_name(company_name)
+            if company:
+                company_id = company['id']
+                
+                # Check for unassigned legacy data
+                unassigned = db.get_unassigned_data_count()
+                total_unassigned = sum(unassigned.values())
+                
+                if total_unassigned > 0:
+                    # Ask user if they want to migrate existing data to this company
+                    details = "\n".join([f"  • {table}: {count} records" for table, count in unassigned.items() if count > 0])
+                    reply = QMessageBox.question(
+                        self,
+                        "Migrate Existing Data?",
+                        f"There is existing data ({total_unassigned} records) not assigned to any company:\n\n{details}\n\n"
+                        f"Do you want to migrate this data to '{company_name}'?\n\n"
+                        f"• Click 'Yes' to assign existing data to this company\n"
+                        f"• Click 'No' to start fresh (existing data will remain unassigned)",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.Yes
+                    )
+                    
+                    if reply == QMessageBox.Yes:
+                        migrated = db.migrate_data_to_company(company_id)
+                        migrated_details = "\n".join([f"  • {table}: {count} records" for table, count in migrated.items() if count > 0])
+                        QMessageBox.information(
+                            self,
+                            "Data Migrated",
+                            f"Successfully migrated data to '{company_name}':\n\n{migrated_details}"
+                        )
+                
+                db.set_current_company(company_id)
+                config.set_current_company_id(company_id)
+                print(f"Set current company ID: {company_id}")
+            else:
+                print(f"Warning: Company '{company_name}' not found in database")
+        except Exception as e:
+            print(f"Error setting current company: {e}")
+        
         # Update window title to show selected company
         self.setWindowTitle(f"GST Billing Software - {company_name}")
         

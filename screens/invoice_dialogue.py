@@ -24,6 +24,30 @@ from theme import (
 from database import db
 
 
+def map_user_selection_to_internal(invoice_selection: str) -> str:
+    """Map user-facing invoice selection to internal invoice type.
+
+    User selections:
+      - 'GST + Same State' -> 'TAX Local'
+      - 'GST + Other State' -> 'TAX InterState'
+      - 'Without GST' -> 'Bill of Supply' (or 'Retail' depending on bill type)
+    """
+    s = (invoice_selection or '').strip().lower()
+    if s == 'gst + same state' or s == 'gst same state' or s == 'gst (same state)':
+        return 'TAX Local'
+    if s == 'gst + other state' or s == 'gst other state' or s == 'gst (other state)':
+        return 'TAX InterState'
+    # Default for anything that implies no GST
+    if 'without gst' in s or 'non-gst' in s or 'without' in s:
+        return 'Bill of Supply'
+    # Preserve existing simple GST/Non-GST choices
+    if s in ['gst', 'gst only']:
+        return 'TAX Local'
+    if s in ['non-gst', 'nongst', 'non gst']:
+        return 'Bill of Supply'
+    return invoice_selection
+
+
 # ============================================================================
 # COMMON STYLES - Centralized styling for consistency
 # ============================================================================
@@ -1138,6 +1162,7 @@ class InvoiceDialog(QDialog):
                 'invoice_date': self.invoice_date.date().toString('yyyy-MM-dd') if hasattr(self, 'invoice_date') else '',
                 'bill_type': self.billtype_combo.currentText() if hasattr(self, 'billtype_combo') else 'CASH',
                 'invoice_type': self.gst_combo.currentText() if hasattr(self, 'gst_combo') else 'GST',
+                'internal_invoice_type': map_user_selection_to_internal(self.gst_combo.currentText()) if hasattr(self, 'gst_combo') else map_user_selection_to_internal('GST'),
                 'items': items,
                 'notes': self.notes.toPlainText() if hasattr(self, 'notes') and self.notes else '',
                 'saved_at': QDate.currentDate().toString('yyyy-MM-dd')
@@ -1253,12 +1278,9 @@ class InvoiceDialog(QDialog):
         self.reset_button = self.create_action_button("🔄 Reset", "reset", WARNING, self.reset_form, "Clear all values and reset to defaults")
         action_layout.addWidget(self.reset_button)
         
-        save_text = "💾 Update Invoice" if self.invoice_data else "💾 Save Invoice"
-        self.save_button = self.create_action_button(save_text, "save", SUCCESS, self.save_invoice, "Save the invoice with all current details")
-        action_layout.addWidget(self.save_button)
-        
-        # Save & Print button
-        self.save_print_button = self.create_action_button("🖨️ Save & Print", "save_print", PRIMARY, self.save_and_print, "Save invoice as FINAL and open print preview")
+        # Save Print button (single button - removed separate Save Invoice)
+        save_text = "💾 Update & Print" if self.invoice_data else "💾 Save Print"
+        self.save_print_button = self.create_action_button(save_text, "save_print", PRIMARY, self.save_and_print, "Save invoice and open print preview")
         action_layout.addWidget(self.save_print_button)
         
         button_layout.addLayout(action_layout)
@@ -1599,7 +1621,7 @@ class InvoiceDialog(QDialog):
                                f"An error occurred while printing:\n{str(e)}")
 
     def save_and_print(self):
-        """Save invoice as FINAL and open print preview with exact GST invoice layout"""
+        """Save invoice and open print preview"""
         try:
             # Show confirmation dialog first
             reply = QMessageBox.question(
@@ -1748,8 +1770,11 @@ class InvoiceDialog(QDialog):
                 if hasattr(self, 'invoice_number'):
                     self.invoice_number.setText(invoice_no)
             
-            # Get invoice type from combo box
+            # Get invoice type from combo box (user-facing) and map to internal
             invoice_type = self.gst_combo.currentText() if hasattr(self, 'gst_combo') else 'GST'
+            internal_invoice_type = map_user_selection_to_internal(invoice_type)
+            # For DB and templates we still want 'GST' or 'Non-GST' semantic
+            invoice_type_for_db = 'Non-GST' if internal_invoice_type == 'Bill of Supply' else 'GST'
             
             # Save invoice with FINAL status
             if self.invoice_data:
@@ -1764,7 +1789,8 @@ class InvoiceDialog(QDialog):
                     'party_id': party_data['id'],
                     'grand_total': grand_total,
                     'status': 'FINAL',  # Mark as final
-                    'type': invoice_type  # Save invoice type (GST or Non-GST)
+                    'type': invoice_type_for_db,  # Save invoice type (GST or Non-GST)
+                    'internal_type': internal_invoice_type,
                 }
                 db.update_invoice(invoice_data)
                 invoice_id = self.invoice_data['id']
@@ -1792,7 +1818,7 @@ class InvoiceDialog(QDialog):
                     invoice_no,
                     invoice_date,
                     party_data['id'],
-                    invoice_type,  # Use selected invoice type (GST or Non-GST)
+                    invoice_type_for_db,  # Use selected invoice type (GST or Non-GST)
                     subtotal,
                     total_cgst,
                     total_sgst,
@@ -1818,6 +1844,9 @@ class InvoiceDialog(QDialog):
                         item['tax_amount'],
                         item['amount']
                     )
+            
+            # Update stock for sales items (decrease stock for products with track_stock enabled)
+            db.update_stock_for_sales_items(items)
             
             # Disable editing after final save
             self.disable_editing_after_final_save()
@@ -2425,10 +2454,6 @@ class InvoiceDialog(QDialog):
     def download_invoice_pdf(self, invoice_id, html_content):
         """Download invoice as PDF file using browser's print-to-PDF functionality"""
         try:
-            import tempfile
-            import webbrowser
-            import os
-            
             # Get invoice data for filename
             from pdf_generator import InvoicePDFGenerator
             generator = InvoicePDFGenerator()
@@ -2800,19 +2825,20 @@ class InvoiceDialog(QDialog):
         gst_layout.setContentsMargins(0, 0, 0, 0)
         gst_layout.setAlignment(Qt.AlignTop)
         
-        gst_lbl = QLabel("📋 Invoice Type:")
+        gst_lbl = QLabel("📋 Tax Type:")
         gst_lbl.setStyleSheet(label_style)
         gst_lbl.setFixedHeight(25)
         gst_layout.addWidget(gst_lbl)
         
-        gst_widget.setFixedWidth(170)
+        gst_widget.setFixedWidth(200)
         gst_widget.setMinimumHeight(80)
         
         self.gst_combo = QComboBox()
-        self.gst_combo.addItems(["GST", "Non-GST"])
+        # Use user-friendly options per mapping: GST + Same State, GST + Other State, Without GST
+        self.gst_combo.addItems(["GST + Same State", "GST + Other State", "Without GST"])
         gst_layout.addWidget(self.gst_combo)
         self.gst_combo.setFixedHeight(45)
-        self.gst_combo.setFixedWidth(150)
+        self.gst_combo.setFixedWidth(200)
         self.gst_combo.setStyleSheet(f"""
                     QComboBox {{
                         background: {PRIMARY};
@@ -2823,50 +2849,52 @@ class InvoiceDialog(QDialog):
                         font-weight: bold;
                         padding: 6px 12px;
                     }}
+                    QComboBox QAbstractItemView {{
+                        background: #22d3ee;
+                        selection-background-color: #e5e7eb;
+                        border: 1px solid {BORDER};
+                    }}
+
                     QComboBox:hover {{
                         border: 3px solid #22d3ee;
-                        background: #0ea5e9;
                     }}
                     QComboBox:focus {{
-                        border: 4px solid #06b6d4;
-                        background: #0284c7;
+                        border: 4px solid {PRIMARY};
+                        background: #22d3ee;
                     }}
+                    /* Remove the visible down-arrow for a cleaner Tax Type box */
                     QComboBox::drop-down {{
                         border: none;
-                        width: 30px;
+                        width: 0px;  /* collapse drop-down area to hide arrow */
+                        padding: 0;
+                        margin: 0;
                     }}
                     QComboBox::drop-down:hover {{
-                        background: rgba(255, 255, 255, 0.2);
-                        border-radius: 4px;
+                        background: #22d3ee;
                     }}
                     QComboBox::down-arrow {{
-                        width: 12px;
-                        height: 12px;
-                        color: white;
+                        image: none;  /* explicitly hide any arrow image */
+                        width: 0px;
+                        height: 0px;
                     }}
-                    QComboBox QAbstractItemView {{
-                        color: {TEXT_PRIMARY};
-                        background: #0284c7;
-                        selection-background-color: #e0f2fe;
-                        selection-color: {PRIMARY};
-                        border: 2px solid {PRIMARY};
-                        border-radius: 6px;
-                        font-size: 14px;
-                        outline: none;
-                    }}
-                    QComboBox QAbstractItemView::item {{
-                        padding: 8px;
-                        border-bottom: 1px solid #e5e7eb;
-                    }}
-                    QComboBox QAbstractItemView::item:hover {{
-                        background: #f0f9ff;
-                        color: {PRIMARY};
-                    }}
-                    QComboBox QAbstractItemView::item:selected {{
-                        background: {PRIMARY};
-                        color: {WHITE};
+                    QComboBox::down-arrow:disabled {{
+                        image: none;
+                        opacity: 0;
                     }}
                 """)
+
+        # When user changes the selection, map to internal type and update item tax behavior
+        def _on_gst_selection_changed(text):
+            try:
+                internal = map_user_selection_to_internal(text)
+                # If selection implies no GST, let items know via 'Non-GST' semantic
+                invoice_type_for_items = 'Non-GST' if internal == 'Bill of Supply' else 'GST'
+                self.on_invoice_type_changed(invoice_type_for_items)
+            except Exception as e:
+                print(f"Error handling gst selection change: {e}")
+
+        self.gst_combo.currentTextChanged.connect(_on_gst_selection_changed)
+        
         
         # Connect signal to update all items when invoice type changes
         self.gst_combo.currentTextChanged.connect(self.on_invoice_type_changed)
@@ -3664,6 +3692,8 @@ class InvoiceDialog(QDialog):
                         item['tax_amount'],
                         item['amount']
                     )
+                # Update stock for sales items (decrease stock for products with track_stock enabled)
+                db.update_stock_for_sales_items(items)
                 # Show success with visual feedback
                 highlight_success(self.invoice_number)
                 QMessageBox.information(self, "Success", "✅ Invoice updated successfully!")
@@ -3694,6 +3724,8 @@ class InvoiceDialog(QDialog):
                         item['tax_amount'],
                         item['amount']
                     )
+                # Update stock for sales items (decrease stock for products with track_stock enabled)
+                db.update_stock_for_sales_items(items)
                 # Show success with visual feedback
                 highlight_success(self.invoice_number)
                 QMessageBox.information(self, "Success", "✅ Invoice created successfully!")
@@ -3746,9 +3778,14 @@ class InvoiceDialog(QDialog):
             # Clear party search
             if hasattr(self, 'party_search') and self.party_search is not None:
                 self.party_search.clear()
-                # Clear party data map
+                # Repopulate party data map from parties list (don't clear it completely)
                 if hasattr(self, 'party_data_map'):
                     self.party_data_map = {}
+                    # Repopulate from self.parties
+                    for party in self.parties:
+                        name = party.get('name', '').upper()
+                        if name:
+                            self.party_data_map[name] = party
             
             # Clear notes if it exists
             if hasattr(self, 'notes') and self.notes is not None:
@@ -3782,13 +3819,13 @@ class InvoiceDialog(QDialog):
             
             if hasattr(self, 'save_print_button'):
                 self.save_print_button.setEnabled(True)
-                self.save_print_button.setText("🖨️ Save & Print")
+                self.save_print_button.setText("� Save Print")
             
             # Clear invoice_data so this is treated as a new invoice
             self.invoice_data = None
             
             # Show success message
-            QMessageBox.information(self, "Reset Complete", "Invoice has been reset successfully!")
+            QMessageBox.information(self, "Reset Complete", "Invoice has been reset. You can now create a new invoice.")
             
         except Exception as e:
             QMessageBox.critical(self, "Reset Error", f"Failed to reset invoice: {str(e)}")

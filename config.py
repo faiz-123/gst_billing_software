@@ -100,6 +100,14 @@ class Config:
         for key, value in company_data.items():
             self.set(f'company.{key}', value)
     
+    def get_current_company_id(self):
+        """Get the current company ID"""
+        return self.get('company.current_company_id')
+    
+    def set_current_company_id(self, company_id):
+        """Set the current company ID"""
+        self.set('company.current_company_id', company_id)
+    
     def get_next_invoice_number(self):
         """Get the next invoice number"""
         prefix = self.get('invoice.number_prefix', 'INV')

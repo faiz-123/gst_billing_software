@@ -486,7 +486,17 @@ class CompanyCreationScreen(QWidget):
                     data.get('gst_number'),
                     data.get('mobile'),
                     data.get('email'),
-                    data.get('address')
+                    data.get('address'),
+                    data.get('website'),
+                    data.get('tax_type'),
+                    data.get('fy_start'),
+                    data.get('fy_end'),
+                    data.get('other_license'),
+                    data.get('bank_name'),
+                    data.get('account_name'),
+                    data.get('account_number'),
+                    data.get('ifsc_code'),
+                    data.get('logo_path')
                 )
                 
                 QMessageBox.information(
@@ -501,7 +511,17 @@ class CompanyCreationScreen(QWidget):
                     data.get('gst_number'),
                     data.get('mobile'),
                     data.get('email'),
-                    data.get('address')
+                    data.get('address'),
+                    data.get('website'),
+                    data.get('tax_type'),
+                    data.get('fy_start'),
+                    data.get('fy_end'),
+                    data.get('other_license'),
+                    data.get('bank_name'),
+                    data.get('account_name'),
+                    data.get('account_number'),
+                    data.get('ifsc_code'),
+                    data.get('logo_path')
                 )
                 
                 QMessageBox.information(

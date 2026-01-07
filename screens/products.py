@@ -29,6 +29,11 @@ class ProductsScreen(BaseScreen):
         self.setup_products_screen()
         self.load_products_data()
     
+    def showEvent(self, event):
+        """Refresh data when screen becomes visible"""
+        super().showEvent(event)
+        self.load_products_data()
+    
     def setup_products_screen(self):
         """Setup modern responsive products screen"""
         # Main container with scroll support
@@ -636,7 +641,7 @@ class ProductsScreen(BaseScreen):
             self.products_table.setItem(row, 0, num_item)
             
             # Column 1: Product name with icon
-            product_type = product.get('type', '')
+            product_type = product.get('product_type', '')
             type_icon = "📦" if product_type == "Goods" else "🔧"
             name_display = f"{type_icon}  {product.get('name', '')}"
             name_item = QTableWidgetItem(name_display)
@@ -656,13 +661,13 @@ class ProductsScreen(BaseScreen):
             price_item.setFont(QFont("Arial", 12, QFont.DemiBold))
             self.products_table.setItem(row, 3, price_item)
             
-            # Column 4: Stock
-            stock = product.get('opening_stock', product.get('stock_quantity', 0)) or 0
+            # Column 4: Stock - use current_stock if available, fallback to opening_stock
+            stock = product.get('current_stock', product.get('opening_stock', product.get('stock_quantity', 0))) or 0
             unit = product.get('unit', 'Piece')
             if product_type == 'Service':
                 stock_text = "∞"
             else:
-                stock_text = f"{stock} {unit}"
+                stock_text = f"{int(stock)} {unit}"
             stock_item = QTableWidgetItem(stock_text)
             stock_item.setTextAlignment(Qt.AlignCenter)
             self.products_table.setItem(row, 4, stock_item)
@@ -718,8 +723,9 @@ class ProductsScreen(BaseScreen):
         if product.get('type', '').lower() == 'service':
             return "Service"
         
-        stock = product.get('opening_stock', product.get('stock_quantity', 0)) or 0
-        low_stock_alert = product.get('low_stock_alert', 5) or 5
+        # Use current_stock if available, fallback to opening_stock
+        stock = product.get('current_stock', product.get('opening_stock', product.get('stock_quantity', 0))) or 0
+        low_stock_alert = product.get('low_stock', product.get('low_stock_alert', 5)) or 5
         
         if stock <= 0:
             return "Out of Stock"

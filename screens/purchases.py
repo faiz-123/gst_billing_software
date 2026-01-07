@@ -1,5 +1,5 @@
 """
-Invoices screen - Create and manage invoices with enhanced UI and functionality
+Purchases screen - Create and manage purchase invoices with enhanced UI and functionality
 Responsive design with modern card-based layout
 """
 
@@ -11,9 +11,7 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem, QHeaderView, QDateEdit, QScrollArea, QSplitter,
     QAbstractItemView, QMenu, QAction, QSizePolicy, QGridLayout
 )
-from .invoice_dialogue import InvoiceDialog as ExternalInvoiceDialog
-# Backwards compatibility: re-export under original name
-InvoiceDialog = ExternalInvoiceDialog
+from .purchase_dialogue import PurchaseInvoiceDialog
 from PyQt5.QtCore import Qt, QDate, pyqtSignal, QSize
 from PyQt5.QtGui import QFont, QPixmap, QIcon, QColor
 
@@ -28,18 +26,18 @@ from database import db
 from pdf_generator import InvoicePDFGenerator
 
 
-class InvoicesScreen(BaseScreen):
-    """Enhanced Sales Invoices screen with modern responsive UI"""
+class PurchasesScreen(BaseScreen):
+    """Enhanced Purchases screen with modern responsive UI"""
     
     def __init__(self):
-        super().__init__("💼 Sales Invoices")
-        self.all_invoices_data = []
+        super().__init__("🛒 Purchase Invoices")
+        self.all_purchases_data = []
         self.current_page = 1
-        self.setup_invoices_screen()
-        self.load_invoices_data()
+        self.setup_purchases_screen()
+        self.load_purchases_data()
     
-    def setup_invoices_screen(self):
-        """Setup enhanced invoices screen content"""
+    def setup_purchases_screen(self):
+        """Setup enhanced purchases screen content"""
         # Create scroll area for responsiveness
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -108,7 +106,7 @@ class InvoicesScreen(BaseScreen):
         search_layout.addWidget(search_icon)
         
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search invoices...")
+        self.search_input.setPlaceholderText("Search purchase invoices...")
         self.search_input.setStyleSheet(f"""
             QLineEdit {{
                 border: none;
@@ -118,7 +116,7 @@ class InvoicesScreen(BaseScreen):
                 padding: 4px 0;
             }}
         """)
-        self.search_input.textChanged.connect(self.filter_invoices)
+        self.search_input.textChanged.connect(self.filter_purchases)
         search_layout.addWidget(self.search_input)
         
         header_layout.addWidget(search_frame)
@@ -126,8 +124,8 @@ class InvoicesScreen(BaseScreen):
         
         # Action buttons
         buttons_data = [
-            ("📤 Export", "secondary", self.export_invoices),
-            ("➕ New Invoice", "primary", self.create_invoice)
+            ("📤 Export", "secondary", self.export_purchases),
+            ("➕ New Purchase", "primary", self.create_purchase)
         ]
         
         for text, style, callback in buttons_data:
@@ -187,12 +185,12 @@ class InvoicesScreen(BaseScreen):
         stats_layout.setContentsMargins(0, 0, 0, 0)
         stats_layout.setSpacing(12)
         
-        # Statistics cards data
+        # Statistics cards data - using orange/amber theme for purchases
         stats_data = [
-            ("📋", "Total Invoices", "0", PRIMARY, "total_invoices_label"),
-            ("💰", "Total Revenue", "₹0", SUCCESS, "total_amount_label"),
-            ("⏰", "Overdue", "0", DANGER, "overdue_label"),
-            ("✅", "Paid", "0", "#10B981", "paid_label")
+            ("📋", "Total Purchases", "0", "#F59E0B", "total_purchases_label"),
+            ("💸", "Total Expense", "₹0", DANGER, "total_amount_label"),
+            ("⏰", "Unpaid", "0", "#6366F1", "unpaid_label"),
+            ("✅", "Paid", "0", SUCCESS, "paid_label")
         ]
         
         for icon, label_text, value, color, attr_name in stats_data:
@@ -307,10 +305,10 @@ class InvoicesScreen(BaseScreen):
         
         # Filter controls
         filter_controls = [
-            ("Status", ["All", "Paid", "Overdue", "Cancelled"], "status_filter"),
+            ("Status", ["All", "Paid", "Unpaid", "Cancelled"], "status_filter"),
             ("Period", ["All Time", "Today", "This Week", "This Month", "This Year"], "period_filter"),
             ("Amount", ["All Amounts", "Under ₹10K", "₹10K - ₹50K", "₹50K - ₹1L", "Above ₹1L"], "amount_filter"),
-            ("Party", ["All Parties"], "party_filter")
+            ("Supplier", ["All Suppliers"], "supplier_filter")
         ]
         
         combo_style = f"""
@@ -365,7 +363,7 @@ class InvoicesScreen(BaseScreen):
             combo.addItems(items)
             combo.setFixedHeight(32)
             combo.setStyleSheet(combo_style)
-            combo.currentTextChanged.connect(self.filter_invoices)
+            combo.currentTextChanged.connect(self.filter_purchases)
             setattr(self, attr_name, combo)
             filter_container.addWidget(combo)
             
@@ -392,7 +390,7 @@ class InvoicesScreen(BaseScreen):
                 border-color: {PRIMARY};
             }}
         """)
-        refresh_btn.clicked.connect(self.load_invoices_data)
+        refresh_btn.clicked.connect(self.load_purchases_data)
         filters_layout.addWidget(refresh_btn)
         
         # Clear filters button
@@ -418,7 +416,7 @@ class InvoicesScreen(BaseScreen):
         parent_layout.addWidget(filters_frame)
     
     def setup_table_section(self, parent_layout):
-        """Setup responsive table with pagination - styled like Parties table"""
+        """Setup responsive table with pagination"""
         table_frame = QFrame()
         table_frame.setObjectName("tableFrame")
         table_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -441,11 +439,11 @@ class InvoicesScreen(BaseScreen):
         title_container = QHBoxLayout()
         title_container.setSpacing(10)
         
-        title_icon = QLabel("📄")
+        title_icon = QLabel("🛒")
         title_icon.setStyleSheet("border: none; font-size: 20px;")
         title_container.addWidget(title_icon)
 
-        table_title = QLabel("Invoice List")
+        table_title = QLabel("Purchase Invoice List")
         table_title.setFont(QFont("Arial", 16, QFont.Bold))
         table_title.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
         title_container.addWidget(table_title)
@@ -454,7 +452,7 @@ class InvoicesScreen(BaseScreen):
         header_layout.addLayout(title_container)
 
         # Count badge
-        self.count_label = QLabel("0 invoices")
+        self.count_label = QLabel("0 purchases")
         self.count_label.setStyleSheet(f"""
             QLabel {{
                 color: {TEXT_SECONDARY};
@@ -491,26 +489,26 @@ class InvoicesScreen(BaseScreen):
                 width: 20px;
             }}
         """)
-        self.items_per_page.currentTextChanged.connect(self.load_invoices_data)
+        self.items_per_page.currentTextChanged.connect(self.load_purchases_data)
         header_layout.addWidget(self.items_per_page)
 
         table_layout.addLayout(header_layout)
 
         # Create table
-        headers = ["#", "Invoice No.", "Date", "Party", "Amount", "Status", "Actions"]
-        self.invoices_table = QTableWidget(0, len(headers))
-        self.invoices_table.setHorizontalHeaderLabels(headers)
-        self.invoices_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        headers = ["#", "Invoice No.", "Date", "Supplier", "Amount", "Status", "Actions"]
+        self.purchases_table = QTableWidget(0, len(headers))
+        self.purchases_table.setHorizontalHeaderLabels(headers)
+        self.purchases_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # Enhanced table styling (same as parties.py)
-        self.invoices_table.setStyleSheet(f"""
+        # Enhanced table styling
+        self.purchases_table.setStyleSheet(f"""
             QTableWidget {{
                 gridline-color: #F3F4F6;
                 background-color: {WHITE};
                 border: none;
                 font-size: 14px;
-                selection-background-color: #EEF2FF;
-                alternate-background-color: #FAFBFC;
+                selection-background-color: #FEF3C7;
+                alternate-background-color: #FFFBEB;
             }}
             QTableWidget::item {{
                 border-bottom: 1px solid #F3F4F6;
@@ -518,21 +516,21 @@ class InvoicesScreen(BaseScreen):
                 font-size: 14px;
             }}
             QTableWidget::item:selected {{
-                background-color: #EEF2FF;
+                background-color: #FEF3C7;
                 color: {TEXT_PRIMARY};
             }}
             QHeaderView::section {{
-                background-color: #F8FAFC;
+                background-color: #FFFBEB;
                 color: {TEXT_SECONDARY};
                 font-weight: 600;
                 border: none;
-                border-bottom: 2px solid #E5E7EB;
+                border-bottom: 2px solid #FCD34D;
                 padding: 12px 10px;
                 font-size: 14px;
                 text-transform: uppercase;
             }}
             QHeaderView::section:hover {{
-                background-color: #F1F5F9;
+                background-color: #FEF3C7;
             }}
             QScrollBar:vertical {{
                 background: {BACKGROUND};
@@ -545,7 +543,7 @@ class InvoicesScreen(BaseScreen):
                 min-height: 30px;
             }}
             QScrollBar::handle:vertical:hover {{
-                background: {PRIMARY};
+                background: #F59E0B;
             }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0;
@@ -553,48 +551,47 @@ class InvoicesScreen(BaseScreen):
         """)
 
         # Enable alternating row colors
-        self.invoices_table.setAlternatingRowColors(True)
+        self.purchases_table.setAlternatingRowColors(True)
 
         # Table configuration
-        self.invoices_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.invoices_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.invoices_table.setSortingEnabled(True)
-        self.invoices_table.setShowGrid(False)
-        self.invoices_table.verticalHeader().setVisible(False)
-        self.invoices_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.purchases_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.purchases_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.purchases_table.setSortingEnabled(True)
+        self.purchases_table.setShowGrid(False)
+        self.purchases_table.verticalHeader().setVisible(False)
+        self.purchases_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
         # Set fixed column widths
-        # ["#", "Invoice No.", "Date", "Party", "Amount", "Status", "Actions"]
-        self.invoices_table.setColumnWidth(0, 40)    # #
-        self.invoices_table.setColumnWidth(1, 100)   # Invoice No.
-        self.invoices_table.setColumnWidth(2, 150)   # Date
-        self.invoices_table.setColumnWidth(3, 150)   # Party
-        self.invoices_table.setColumnWidth(4, 150)   # Amount
-        self.invoices_table.setColumnWidth(5, 150)    # Status
-        self.invoices_table.setColumnWidth(6, 200)   # Actions
+        self.purchases_table.setColumnWidth(0, 40)    # #
+        self.purchases_table.setColumnWidth(1, 120)   # Invoice No.
+        self.purchases_table.setColumnWidth(2, 150)   # Date
+        self.purchases_table.setColumnWidth(3, 150)   # Supplier
+        self.purchases_table.setColumnWidth(4, 150)   # Amount
+        self.purchases_table.setColumnWidth(5, 100)   # Status
+        self.purchases_table.setColumnWidth(6, 200)   # Actions
 
-        # Make Party column stretch to fill remaining space
-        header = self.invoices_table.horizontalHeader()
+        # Make Supplier column stretch to fill remaining space
+        header = self.purchases_table.horizontalHeader()
         header.setSectionResizeMode(3, QHeaderView.Stretch)
 
         # Row height
-        self.invoices_table.verticalHeader().setDefaultSectionSize(48)
-        self.invoices_table.setMinimumHeight(400)
+        self.purchases_table.verticalHeader().setDefaultSectionSize(48)
+        self.purchases_table.setMinimumHeight(400)
 
         # Context menu and double-click to view
-        self.invoices_table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.invoices_table.customContextMenuRequested.connect(self.show_context_menu)
-        self.invoices_table.itemDoubleClicked.connect(self.handle_double_click)
+        self.purchases_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.purchases_table.customContextMenuRequested.connect(self.show_context_menu)
+        self.purchases_table.itemDoubleClicked.connect(self.handle_double_click)
 
-        table_layout.addWidget(self.invoices_table)
+        table_layout.addWidget(self.purchases_table)
 
         # Pagination footer
         pagination_frame = QFrame()
         pagination_frame.setStyleSheet(f"""
             QFrame {{
-                background: {BACKGROUND};
+                background: #FFFBEB;
                 border: none;
-                border-top: 1px solid {BORDER};
+                border-top: 1px solid #FCD34D;
                 border-radius: 0 0 12px 12px;
             }}
         """)
@@ -619,8 +616,8 @@ class InvoicesScreen(BaseScreen):
                 font-size: 13px;
             }}
             QPushButton:hover {{
-                background: {BACKGROUND};
-                border-color: {PRIMARY};
+                background: #FEF3C7;
+                border-color: #F59E0B;
             }}
             QPushButton:disabled {{
                 color: {BORDER};
@@ -650,131 +647,123 @@ class InvoicesScreen(BaseScreen):
         
         parent_layout.addWidget(table_frame)
     
-    def load_invoices_data(self):
-        """Load invoices data into table"""
+    def load_purchases_data(self):
+        """Load purchase invoices data into table"""
         try:
-            # Get invoices with party details using a JOIN query
+            # Get purchase invoices with supplier details using a JOIN query
             if hasattr(db, '_query'):
-                # Use a JOIN query to get party names - filter for Sales invoices only
-                # Also filter by company_id for data isolation
+                # Filter by company_id for data isolation
                 company_id = db.get_current_company_id()
                 if company_id:
                     query = """
                         SELECT 
-                            i.*,
-                            COALESCE(p.name, 'Unknown Party') as party_name,
+                            pi.*,
+                            COALESCE(p.name, 'Unknown Supplier') as party_name,
                             CASE 
-                                WHEN i.grand_total > 0 AND i.date < date('now', '-30 days') THEN 'Overdue'
-                                ELSE 'Sent'
-                            END as status
-                        FROM invoices i
-                        LEFT JOIN parties p ON i.party_id = p.id
-                        WHERE i.company_id = ?
-                        ORDER BY i.id DESC
+                                WHEN pi.status = 'Paid' THEN 'Paid'
+                                WHEN pi.grand_total > 0 AND pi.date < date('now', '-30 days') THEN 'Unpaid'
+                                ELSE COALESCE(pi.status, 'Unpaid')
+                            END as display_status
+                        FROM purchase_invoices pi
+                        LEFT JOIN parties p ON pi.supplier_id = p.id
+                        WHERE pi.company_id = ?
+                        ORDER BY pi.id DESC
                     """
-                    invoices = db._query(query, (company_id,))
+                    purchases = db._query(query, (company_id,))
                 else:
                     query = """
                         SELECT 
-                            i.*,
-                            COALESCE(p.name, 'Unknown Party') as party_name,
+                            pi.*,
+                            COALESCE(p.name, 'Unknown Supplier') as party_name,
                             CASE 
-                                WHEN i.grand_total > 0 AND i.date < date('now', '-30 days') THEN 'Overdue'
-                                ELSE 'Sent'
-                            END as status
-                        FROM invoices i
-                        LEFT JOIN parties p ON i.party_id = p.id
-                        ORDER BY i.id DESC
+                                WHEN pi.status = 'Paid' THEN 'Paid'
+                                WHEN pi.grand_total > 0 AND pi.date < date('now', '-30 days') THEN 'Unpaid'
+                                ELSE COALESCE(pi.status, 'Unpaid')
+                            END as display_status
+                        FROM purchase_invoices pi
+                        LEFT JOIN parties p ON pi.supplier_id = p.id
+                        ORDER BY pi.id DESC
                     """
-                    invoices = db._query(query)
+                    purchases = db._query(query)
             else:
-                # Fallback to basic method if _query not available
-                invoices = db.get_invoices()
+                purchases = db.get_purchase_invoices()
                 
                 # Add party names and status manually
-                for invoice in invoices:
-                    if invoice.get('party_id'):
+                for purchase in purchases:
+                    if purchase.get('supplier_id'):
                         try:
-                            party = db.get_party_by_id(invoice['party_id'])
-                            invoice['party_name'] = party.get('name', 'Unknown Party') if party else 'Unknown Party'
+                            party = db.get_party_by_id(purchase['supplier_id'])
+                            purchase['party_name'] = party.get('name', 'Unknown Supplier') if party else 'Unknown Supplier'
                         except:
-                            invoice['party_name'] = 'Unknown Party'
+                            purchase['party_name'] = 'Unknown Supplier'
                     else:
-                        invoice['party_name'] = 'Unknown Party'
+                        purchase['party_name'] = 'Unknown Supplier'
                     
-                    # Add status based on business logic
-                    if invoice.get('grand_total', 0) > 0:
-                        invoice['status'] = 'Sent'  # Default status
-                    else:
-                        invoice['status'] = 'Draft'
+                    purchase['display_status'] = purchase.get('status', 'Unpaid')
             
-            print(f"Loaded {len(invoices)} invoices from database")  # Debug info
+            print(f"Loaded {len(purchases)} purchase invoices from database")
             
-            self.all_invoices_data = invoices
-            self.populate_table(invoices)
-            self.update_stats(invoices)
+            self.all_purchases_data = purchases
+            self.populate_table(purchases)
+            self.update_stats(purchases)
             
         except Exception as e:
-            print(f"Error loading invoices: {e}")  # Debug info
-            # If there's an error, show empty table instead of sample data
-            self.all_invoices_data = []
+            print(f"Error loading purchases: {e}")
+            self.all_purchases_data = []
             self.populate_table([])
             self.update_stats([])
             
-            # Show a user-friendly message
             QMessageBox.information(
                 self, 
                 "Database Info", 
-                f"Unable to load invoices from database.\n\nError: {str(e)}\n\nPlease check your database connection."
+                f"Unable to load purchase invoices from database.\n\nError: {str(e)}\n\nPlease check your database connection."
             )
     
-    def populate_table(self, invoices_data):
-        """Populate table with invoices data matching Party table style"""
-        # Disable sorting while populating to avoid weird behavior
-        self.invoices_table.setSortingEnabled(False)
-        self.invoices_table.setRowCount(len(invoices_data))
+    def populate_table(self, purchases_data):
+        """Populate table with purchase invoice data"""
+        self.purchases_table.setSortingEnabled(False)
+        self.purchases_table.setRowCount(len(purchases_data))
         
-        for row, invoice in enumerate(invoices_data):
-            # Alternate row colors for better readability
-            row_color = WHITE if row % 2 == 0 else "#F8FAFC"
+        for row, purchase in enumerate(purchases_data):
+            row_color = WHITE if row % 2 == 0 else "#FFFBEB"
             
-            # Row number (column 0 - #)
+            # Row number (column 0)
             row_num_item = QTableWidgetItem(str(row + 1))
             row_num_item.setTextAlignment(Qt.AlignCenter)
             row_num_item.setFont(QFont("Arial", 14))
             row_num_item.setForeground(QColor(TEXT_SECONDARY))
             row_num_item.setBackground(QColor(row_color))
-            self.invoices_table.setItem(row, 0, row_num_item)
+            self.purchases_table.setItem(row, 0, row_num_item)
             
             # Invoice number (column 1)
-            invoice_item = QTableWidgetItem(str(invoice.get('invoice_no', f'INV-{invoice["id"]:03d}')))
+            invoice_item = QTableWidgetItem(str(purchase.get('invoice_no', f'PUR-{purchase["id"]:03d}')))
             invoice_item.setFont(QFont("Arial", 14, QFont.Bold))
-            invoice_item.setForeground(QColor(PRIMARY))
+            invoice_item.setForeground(QColor("#F59E0B"))  # Amber color for purchase
             invoice_item.setBackground(QColor(row_color))
-            self.invoices_table.setItem(row, 1, invoice_item)
+            self.purchases_table.setItem(row, 1, invoice_item)
             
             # Date (column 2)
-            date_item = QTableWidgetItem(str(invoice.get('date', '2024-01-01')))
+            date_item = QTableWidgetItem(str(purchase.get('date', '2024-01-01')))
             date_item.setFont(QFont("Arial", 14))
             date_item.setBackground(QColor(row_color))
-            self.invoices_table.setItem(row, 2, date_item)
+            self.purchases_table.setItem(row, 2, date_item)
             
-            # Party name (column 3)
-            party_item = QTableWidgetItem(str(invoice.get('party_name', 'Sample Party')))
-            party_item.setFont(QFont("Arial", 14))
-            party_item.setBackground(QColor(row_color))
-            self.invoices_table.setItem(row, 3, party_item)
+            # Supplier name (column 3)
+            supplier_item = QTableWidgetItem(str(purchase.get('party_name', 'Unknown Supplier')))
+            supplier_item.setFont(QFont("Arial", 14))
+            supplier_item.setBackground(QColor(row_color))
+            self.purchases_table.setItem(row, 3, supplier_item)
             
             # Amount with currency formatting (column 4)
-            amount = invoice.get('grand_total', 0)
+            amount = purchase.get('grand_total', 0)
             amount_item = QTableWidgetItem(f"₹{amount:,.2f}")
             amount_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             amount_item.setFont(QFont("Arial", 14, QFont.Bold))
             amount_item.setBackground(QColor(row_color))
-            self.invoices_table.setItem(row, 4, amount_item)
+            self.purchases_table.setItem(row, 4, amount_item)
             
             # Status with color coding (column 5)
-            status = invoice.get('status', 'Draft')
+            status = purchase.get('display_status', purchase.get('status', 'Unpaid'))
             status_item = QTableWidgetItem(status)
             status_item.setTextAlignment(Qt.AlignCenter)
             status_item.setFont(QFont("Arial", 14, QFont.Bold))
@@ -782,7 +771,7 @@ class InvoicesScreen(BaseScreen):
             # Color code status
             status_colors = {
                 'Draft': ("#6B7280", "#F3F4F6"),
-                'Sent': ("#3B82F6", "#EBF8FF"),
+                'Unpaid': ("#6366F1", "#EEF2FF"),
                 'Paid': ("#10B981", "#D1FAE5"),
                 'Overdue': ("#EF4444", "#FEE2E2"),
                 'Cancelled': ("#6B7280", "#F3F4F6")
@@ -795,18 +784,17 @@ class InvoicesScreen(BaseScreen):
             else:
                 status_item.setBackground(QColor(row_color))
             
-            self.invoices_table.setItem(row, 5, status_item)
+            self.purchases_table.setItem(row, 5, status_item)
             
             # Action buttons (column 6)
-            actions_widget = self.create_action_buttons(invoice)
-            self.invoices_table.setCellWidget(row, 6, actions_widget)
+            actions_widget = self.create_action_buttons(purchase)
+            self.purchases_table.setCellWidget(row, 6, actions_widget)
         
-        # Re-enable sorting after populating
-        self.invoices_table.setSortingEnabled(True)
+        self.purchases_table.setSortingEnabled(True)
         self.update_pagination_info()
     
-    def create_action_buttons(self, invoice):
-        """Create action buttons for each invoice row matching Party table style"""
+    def create_action_buttons(self, purchase):
+        """Create action buttons for each purchase row"""
         widget = QWidget()
         widget.setStyleSheet("background: transparent; border: none;")
         widget.setFixedHeight(28)
@@ -815,17 +803,14 @@ class InvoicesScreen(BaseScreen):
         layout.setSpacing(10)
         layout.setAlignment(Qt.AlignCenter)
 
-        # Action buttons - same style as parties.py
         actions = [
-            ("View Pdf", "View Invoice", lambda _, inv=invoice: self.view_invoice(inv), "#EEF2FF", PRIMARY),
-            ("Del", "Delete Invoice", lambda _, inv=invoice: self.delete_invoice(inv), "#FEE2E2", DANGER)
+            ("View", "View Purchase", lambda _, inv=purchase: self.view_purchase(inv), "#FEF3C7", "#F59E0B"),
+            ("Del", "Delete Purchase", lambda _, inv=purchase: self.delete_purchase(inv), "#FEE2E2", DANGER)
         ]
 
         for text, tooltip, callback, bg_color, hover_color in actions:
             btn = QPushButton(text)
             btn.setFixedSize(50, 28)
-            if text == "View Pdf":
-                btn.setFixedSize(80, 28)
             btn.setToolTip(tooltip)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setStyleSheet(f"""
@@ -848,24 +833,10 @@ class InvoicesScreen(BaseScreen):
             layout.addWidget(btn)
 
         return widget
-
-    def get_invoice_priority(self, invoice):
-        """Determine invoice priority based on amount and due date"""
-        amount = invoice.get('grand_total', 0)
-        status = invoice.get('status', 'Draft')
-        
-        if status == 'Overdue':
-            return "🔴"  # High priority
-        elif amount > 50000:
-            return "🔴"  # High priority for large amounts
-        elif amount > 20000:
-            return "🟡"  # Medium priority
-        else:
-            return "🟢"  # Low priority
     
     def update_pagination_info(self):
         """Update pagination information"""
-        total_items = len(self.all_invoices_data)
+        total_items = len(self.all_purchases_data)
         items_per_page = int(self.items_per_page.currentText())
         current_page = getattr(self, 'current_page', 1)
         total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
@@ -873,153 +844,114 @@ class InvoicesScreen(BaseScreen):
         start_item = (current_page - 1) * items_per_page + 1
         end_item = min(current_page * items_per_page, total_items)
         
+        if total_items == 0:
+            start_item = 0
+        
         self.pagination_info.setText(f"Showing {start_item} - {end_item} of {total_items} items")
         self.page_info.setText(f"Page {current_page} of {total_pages}")
         
-        # Update button states
         self.prev_page_btn.setEnabled(current_page > 1)
         self.next_page_btn.setEnabled(current_page < total_pages)
-    
-    def handle_table_action(self, action):
-        """Handle table action buttons"""
-        if action == "search":
-            self.show_advanced_search()
-        elif action == "import":
-            self.import_invoices()
-        elif action == "export":
-            self.export_selected_invoices()
-        elif action == "delete":
-            self.delete_selected_invoices()
-        elif action == "bulk":
-            self.show_bulk_actions_menu()
     
     def clear_filters(self):
         """Clear all applied filters"""
         self.status_filter.setCurrentIndex(0)
         self.period_filter.setCurrentIndex(0)
         self.amount_filter.setCurrentIndex(0)
-        self.party_filter.setCurrentIndex(0)
-        self.filter_invoices()
-    
-    def manage_templates(self):
-        """Manage invoice templates"""
-        QMessageBox.information(self, "Templates", "Template management coming soon!")
+        self.supplier_filter.setCurrentIndex(0)
+        self.filter_purchases()
     
     def previous_page(self):
         """Go to previous page"""
         current_page = getattr(self, 'current_page', 1)
         if current_page > 1:
             self.current_page = current_page - 1
-            self.load_invoices_data()
+            self.load_purchases_data()
     
     def next_page(self):
         """Go to next page"""
-        total_items = len(self.all_invoices_data)
+        total_items = len(self.all_purchases_data)
         items_per_page = int(self.items_per_page.currentText())
         total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
         current_page = getattr(self, 'current_page', 1)
         
         if current_page < total_pages:
             self.current_page = current_page + 1
-            self.load_invoices_data()
+            self.load_purchases_data()
     
-    # Placeholder methods for future implementation
-    def show_advanced_search(self): pass
-    def import_invoices(self): pass
-    def export_selected_invoices(self): pass
-    def delete_selected_invoices(self): pass
-    def show_bulk_actions_menu(self): pass
-    def show_context_menu(self, position): pass
+    def show_context_menu(self, position):
+        """Show context menu for table row"""
+        pass
     
     def handle_double_click(self, item):
-        """Handle double-click on invoice row - open invoice in read-only view mode"""
+        """Handle double-click on purchase row"""
         row = item.row()
-        if row < len(self.all_invoices_data):
-            invoice = self.all_invoices_data[row]
-            self.open_invoice_readonly(invoice)
+        if row < len(self.all_purchases_data):
+            purchase = self.all_purchases_data[row]
+            self.open_purchase_readonly(purchase)
     
-    def open_invoice_readonly(self, invoice):
-        """Open invoice dialog in read-only mode for viewing"""
+    def open_purchase_readonly(self, purchase):
+        """Open purchase dialog in read-only mode"""
         try:
-            if isinstance(invoice, dict):
-                invoice_id = invoice.get('id')
+            if isinstance(purchase, dict):
+                purchase_id = purchase.get('id')
             else:
-                invoice_id = invoice
+                purchase_id = purchase
             
-            if not invoice_id:
-                QMessageBox.warning(self, "Error", "Invalid invoice data")
+            if not purchase_id:
+                QMessageBox.warning(self, "Error", "Invalid purchase data")
                 return
             
-            # Get full invoice data from database by ID
-            invoice_data = db.get_invoice_with_items_by_id(invoice_id)
+            purchase_data = db.get_purchase_invoice_with_items_by_id(purchase_id)
             
-            if not invoice_data:
-                QMessageBox.warning(self, "Error", f"Could not load invoice data for ID: {invoice_id}")
+            if not purchase_data:
+                QMessageBox.warning(self, "Error", f"Could not load purchase data for ID: {purchase_id}")
                 return
             
-            # Open InvoiceDialog in read-only mode
-            dialog = ExternalInvoiceDialog(self, invoice_data=invoice_data, read_only=True)
+            dialog = PurchaseInvoiceDialog(self, invoice_data=purchase_data, read_only=True)
             dialog.exec_()
             
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to open invoice: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to open purchase: {str(e)}")
     
-    def send_invoice(self, invoice):
-        """Send invoice to customer"""
-        if isinstance(invoice, dict):
-            invoice_no = invoice.get('invoice_no', f"INV-{invoice['id']:03d}")
-        else:
-            invoice_no = f"Invoice ID: {invoice}"
-        QMessageBox.information(self, "Send Invoice", f"Sending invoice {invoice_no}")
-    
-    def record_payment(self, invoice):
-        """Record payment for invoice"""
-        if isinstance(invoice, dict):
-            invoice_no = invoice.get('invoice_no', f"INV-{invoice['id']:03d}")
-        else:
-            invoice_no = f"Invoice ID: {invoice}"
-        QMessageBox.information(self, "Record Payment", f"Recording payment for invoice {invoice_no}")
-    
-    def update_stats(self, invoices):
-        """Update enhanced statistics with all metrics"""
-        total_count = len(invoices)
-        total_amount = sum(inv['grand_total'] for inv in invoices)
+    def update_stats(self, purchases):
+        """Update statistics with all metrics"""
+        total_count = len(purchases)
+        total_amount = sum(inv.get('grand_total', 0) for inv in purchases)
         
-        # Calculate various statuses
-        overdue_count = sum(1 for inv in invoices if inv.get('status') == 'Overdue')
-        paid_count = sum(1 for inv in invoices if inv.get('status') == 'Paid')
+        unpaid_count = sum(1 for inv in purchases if inv.get('display_status', inv.get('status')) in ['Unpaid', 'Draft'])
+        paid_count = sum(1 for inv in purchases if inv.get('display_status', inv.get('status')) == 'Paid')
         
-        # Update all statistics labels
-        self.total_invoices_label.setText(str(total_count))
+        self.total_purchases_label.setText(str(total_count))
         self.total_amount_label.setText(f"₹{total_amount:,.0f}")
-        self.overdue_label.setText(str(overdue_count))
+        self.unpaid_label.setText(str(unpaid_count))
         self.paid_label.setText(str(paid_count))
         
-        # Update count label in table header
-        self.count_label.setText(f"{total_count} invoices")
+        self.count_label.setText(f"{total_count} purchases")
     
-    def filter_invoices(self):
-        """Enhanced filter invoices based on multiple criteria"""
+    def filter_purchases(self):
+        """Filter purchases based on multiple criteria"""
         search_text = self.search_input.text().lower()
         status_filter = self.status_filter.currentText()
         period_filter = self.period_filter.currentText()
         amount_filter = self.amount_filter.currentText()
-        party_filter = self.party_filter.currentText()
+        supplier_filter = self.supplier_filter.currentText()
         
         filtered_data = []
-        for invoice in self.all_invoices_data:
+        for purchase in self.all_purchases_data:
             # Search filter
             if search_text:
-                searchable_text = f"{invoice.get('invoice_no', '')} {invoice.get('party_name', '')}".lower()
+                searchable_text = f"{purchase.get('invoice_no', '')} {purchase.get('party_name', '')}".lower()
                 if search_text not in searchable_text:
                     continue
             
             # Status filter
-            if status_filter != "All" and invoice.get('status', 'Draft') != status_filter:
+            status = purchase.get('display_status', purchase.get('status', 'Unpaid'))
+            if status_filter != "All" and status != status_filter:
                 continue
             
             # Amount filter
-            amount = invoice.get('grand_total', 0)
+            amount = purchase.get('grand_total', 0)
             if amount_filter == "Under ₹10K" and amount >= 10000:
                 continue
             elif amount_filter == "₹10K - ₹50K" and not (10000 <= amount < 50000):
@@ -1029,92 +961,74 @@ class InvoicesScreen(BaseScreen):
             elif amount_filter == "Above ₹1L" and amount < 100000:
                 continue
             
-            # Party filter
-            if party_filter != "All Parties" and invoice.get('party_name', '') != party_filter:
+            # Supplier filter
+            if supplier_filter != "All Suppliers" and purchase.get('party_name', '') != supplier_filter:
                 continue
             
-            # Period filter (simplified implementation)
-            # In a real application, you would parse dates and filter by actual date ranges
-            
-            filtered_data.append(invoice)
+            filtered_data.append(purchase)
         
         self.populate_table(filtered_data)
         self.update_stats(filtered_data)
     
-    def create_invoice(self):
-        """Open create invoice dialog"""
-        dialog = ExternalInvoiceDialog(self)
+    def create_purchase(self):
+        """Open create purchase invoice dialog"""
+        dialog = PurchaseInvoiceDialog(self)
         if dialog.exec_() == QDialog.Accepted:
-            self.load_invoices_data()
+            self.load_purchases_data()
     
-    def edit_invoice(self, invoice):
-        """Open edit invoice dialog"""
-        dialog = ExternalInvoiceDialog(self, invoice)
+    def edit_purchase(self, purchase):
+        """Open edit purchase dialog"""
+        dialog = PurchaseInvoiceDialog(self, purchase)
         if dialog.exec_() == QDialog.Accepted:
-            self.load_invoices_data()
+            self.load_purchases_data()
     
-    def view_invoice(self, invoice):
-        """View invoice details - generates and shows PDF preview"""
+    def view_purchase(self, purchase):
+        """View purchase details"""
         try:
-            if isinstance(invoice, dict):
-                invoice_id = invoice.get('id')
-                invoice_no = invoice.get('invoice_no', f"INV-{invoice_id:03d}")
+            if isinstance(purchase, dict):
+                purchase_id = purchase.get('id')
             else:
-                invoice_id = invoice
-                invoice_no = f"INV-{invoice_id:03d}"
+                purchase_id = purchase
             
-            if not invoice_id:
-                QMessageBox.warning(self, "Error", "Invalid invoice data")
+            if not purchase_id:
+                QMessageBox.warning(self, "Error", "Invalid purchase data")
                 return
             
             # Show print preview
-            self.show_print_preview(invoice_id)
+            from .invoice_preview import show_invoice_preview
+            show_invoice_preview(self, purchase_id)
                 
         except Exception as e:
-            QMessageBox.critical(
-                self, 
-                "Error", 
-                f"Failed to view invoice: {str(e)}"
-            )
+            QMessageBox.critical(self, "Error", f"Failed to view purchase: {str(e)}")
     
-    def show_print_preview(self, invoice_id):
-        """Show HTML preview dialog - uses common utility to avoid code duplication"""
-        from .invoice_preview import show_invoice_preview
-        show_invoice_preview(self, invoice_id)
-    
-    def print_invoice(self, invoice):
-        """Print/export invoice as PDF"""
-        QMessageBox.information(self, "Print Invoice", "Print/PDF functionality will be implemented soon!")
-    
-    def delete_invoice(self, invoice):
-        """Delete invoice with confirmation"""
-        if isinstance(invoice, dict):
-            invoice_no = invoice.get('invoice_no', f"INV-{invoice['id']:03d}")
-            invoice_id = invoice['id']
+    def delete_purchase(self, purchase):
+        """Delete purchase with confirmation"""
+        if isinstance(purchase, dict):
+            invoice_no = purchase.get('invoice_no', f"PUR-{purchase['id']:03d}")
+            purchase_id = purchase['id']
         else:
-            invoice_no = f"Invoice ID: {invoice}"
-            invoice_id = invoice
+            invoice_no = f"Purchase ID: {purchase}"
+            purchase_id = purchase
             
         reply = QMessageBox.question(
             self, "Confirm Delete",
-            f"Are you sure you want to delete invoice {invoice_no}?\n\nThis action cannot be undone.",
+            f"Are you sure you want to delete purchase invoice {invoice_no}?\n\nThis action cannot be undone.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         
         if reply == QMessageBox.Yes:
             try:
-                db.delete_invoice(invoice_id)
-                QMessageBox.information(self, "Success", "Invoice deleted successfully!")
-                self.load_invoices_data()
+                db.delete_purchase_invoice(purchase_id)
+                QMessageBox.information(self, "Success", "Purchase invoice deleted successfully!")
+                self.load_purchases_data()
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to delete invoice: {str(e)}")
+                QMessageBox.critical(self, "Error", f"Failed to delete purchase: {str(e)}")
     
-    def export_invoices(self):
-        """Export invoices data"""
+    def export_purchases(self):
+        """Export purchases data"""
         QMessageBox.information(self, "Export", "Export functionality will be implemented soon!")
     
-    
     def refresh_data(self):
-        """Refresh invoices data"""
-        self.load_invoices_data()
+        """Refresh purchases data"""
+        self.load_purchases_data()

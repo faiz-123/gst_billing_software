@@ -645,13 +645,27 @@ class CompanySelectionScreen(QWidget):
             
         try:
             name = company_data.get('company_name', 'Unknown Company')
-            gstin = company_data.get('gst', None)
-            mobile = company_data.get('mobile', None)
-            email = company_data.get('email', None)
-            address = company_data.get('address', None)
+            gstin = company_data.get('gst_number') or company_data.get('gst')
+            mobile = company_data.get('mobile')
+            email = company_data.get('email')
+            address = company_data.get('address')
+            website = company_data.get('website')
+            tax_type = company_data.get('tax_type')
+            fy_start = company_data.get('fy_start')
+            fy_end = company_data.get('fy_end')
+            other_license = company_data.get('other_license')
+            bank_name = company_data.get('bank_name')
+            account_name = company_data.get('account_name')
+            account_number = company_data.get('account_number')
+            ifsc_code = company_data.get('ifsc_code')
+            logo_path = company_data.get('logo_path')
             
             # Add to database
-            company_id = db.add_company(name, gstin, mobile, email, address)
+            company_id = db.add_company(
+                name, gstin, mobile, email, address, website, tax_type,
+                fy_start, fy_end, other_license, bank_name, account_name,
+                account_number, ifsc_code, logo_path
+            )
             
             if company_id:
                 print(f"Added company '{name}' to database with ID: {company_id}")
