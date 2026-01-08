@@ -497,8 +497,8 @@ class PurchaseInvoiceDialogInner(InvoiceDialog):
                 self.party_search.setText(party.get('name', ''))
             
             # Set invoice type (GST/Non-GST) if available
-            if hasattr(self, 'gst_combo') and invoice.get('type'):
-                index = self.gst_combo.findText(invoice['type'])
+            if hasattr(self, 'gst_combo') and invoice.get('tax_type'):
+                index = self.gst_combo.findText(invoice['tax_type'])
                 if index >= 0:
                     self.gst_combo.setCurrentIndex(index)
             

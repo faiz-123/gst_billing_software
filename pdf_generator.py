@@ -47,7 +47,7 @@ class InvoicePDFGenerator:
                 raise Exception(f"Invoice with ID {invoice_id} not found")
             
             # Determine template based on invoice type
-            invoice_type = invoice_data['invoice'].get('type', 'GST')
+            invoice_type = invoice_data['invoice'].get('tax_type', 'GST')
             self.template_path = self.get_template_path(invoice_type)
             
             # Prepare template data based on invoice type

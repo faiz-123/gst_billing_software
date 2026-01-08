@@ -137,11 +137,23 @@ class Database:
             CREATE TABLE IF NOT EXISTS invoices (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 company_id INTEGER,
-                invoice_no TEXT,
-                date TEXT,
+                invoice_no TEXT NOT NULL,
+                date TEXT NOT NULL,
                 party_id INTEGER,
+                tax_type TEXT DEFAULT 'GST',
                 internal_type TEXT,
+                bill_type TEXT DEFAULT 'CASH',
+                subtotal REAL DEFAULT 0,
+                discount REAL DEFAULT 0,
+                cgst REAL DEFAULT 0,
+                sgst REAL DEFAULT 0,
+                igst REAL DEFAULT 0,
+                round_off REAL DEFAULT 0,
                 grand_total REAL DEFAULT 0,
+                balance_due REAL DEFAULT 0,
+                status TEXT DEFAULT 'Draft',
+                notes TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(company_id) REFERENCES companies(id),
                 FOREIGN KEY(party_id) REFERENCES parties(id)
             )
@@ -304,15 +316,25 @@ class Database:
                 self._ensure_column("products", col, decl)
             except Exception:
                 pass
-        # Invoices
+        # Invoices - ensure all required columns exist
         for col, decl in [
             ("invoice_no", "TEXT"),
             ("date", "TEXT"),
             ("party_id", "INTEGER"),
+            ("tax_type", "TEXT DEFAULT 'GST'"),
             ("internal_type", "TEXT"),
+            ("bill_type", "TEXT DEFAULT 'CASH'"),
+            ("subtotal", "REAL DEFAULT 0"),
+            ("discount", "REAL DEFAULT 0"),
+            ("cgst", "REAL DEFAULT 0"),
+            ("sgst", "REAL DEFAULT 0"),
+            ("igst", "REAL DEFAULT 0"),
+            ("round_off", "REAL DEFAULT 0"),
             ("grand_total", "REAL DEFAULT 0"),
+            ("balance_due", "REAL DEFAULT 0"),
             ("status", "TEXT DEFAULT 'Draft'"),
-            ("type", "TEXT DEFAULT 'GST'"),  # GST or Non-GST
+            ("notes", "TEXT"),
+            ("created_at", "TEXT"),
         ]:
             try:
                 self._ensure_column("invoices", col, decl)
@@ -607,11 +629,20 @@ class Database:
                 result = self.update_product_stock(product_id, quantity, 'subtract')
                 print(f"DEBUG: update_product_stock returned: {result}")
 
-    # --- invoices (minimal) ---
-    def add_invoice(self, invoice_no, date, party_id, invoice_type='GST', subtotal=0, cgst=0, sgst=0, igst=0, round_off=0, grand_total=0, status='Draft', internal_type=None):
+    # --- invoices ---
+    def add_invoice(self, invoice_no, date, party_id, tax_type='GST', subtotal=0, cgst=0, sgst=0, igst=0, round_off=0, grand_total=0, status='Draft', internal_type=None, bill_type='CASH', discount=0, balance_due=0, notes=None):
         cur = self._execute(
-            "INSERT INTO invoices(company_id, invoice_no, date, party_id, internal_type, grand_total, status, type) VALUES(?,?,?,?,?,?,?,?)",
-            (self._current_company_id, invoice_no, date, party_id, internal_type, float(grand_total or 0), status, invoice_type),
+            """INSERT INTO invoices(
+                company_id, invoice_no, date, party_id, tax_type, internal_type, bill_type,
+                subtotal, discount, cgst, sgst, igst, round_off, grand_total,
+                balance_due, status, notes
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                self._current_company_id, invoice_no, date, party_id, tax_type, internal_type, bill_type,
+                float(subtotal or 0), float(discount or 0), float(cgst or 0), float(sgst or 0), float(igst or 0),
+                float(round_off or 0), float(grand_total or 0), float(balance_due or 0),
+                status, notes
+            ),
         )
         return cur.lastrowid
 
@@ -625,15 +656,28 @@ class Database:
         if not iid:
             return False
         self._execute(
-            "UPDATE invoices SET invoice_no = ?, date = ?, party_id = ?, internal_type = ?, grand_total = ?, status = ?, type = ? WHERE id = ?",
+            """UPDATE invoices SET 
+                invoice_no = ?, date = ?, party_id = ?, tax_type = ?, internal_type = ?, bill_type = ?,
+                subtotal = ?, discount = ?, cgst = ?, sgst = ?, igst = ?, round_off = ?,
+                grand_total = ?, balance_due = ?, status = ?, notes = ?
+            WHERE id = ?""",
             (
                 invoice_data.get('invoice_no'),
                 invoice_data.get('date'),
                 invoice_data.get('party_id'),
+                invoice_data.get('tax_type', 'GST'),
                 invoice_data.get('internal_type'),
+                invoice_data.get('bill_type', 'CASH'),
+                float(invoice_data.get('subtotal') or 0),
+                float(invoice_data.get('discount') or 0),
+                float(invoice_data.get('cgst') or 0),
+                float(invoice_data.get('sgst') or 0),
+                float(invoice_data.get('igst') or 0),
+                float(invoice_data.get('round_off') or 0),
                 float(invoice_data.get('grand_total') or 0),
+                float(invoice_data.get('balance_due') or 0),
                 invoice_data.get('status', 'Draft'),
-                invoice_data.get('type', 'GST'),
+                invoice_data.get('notes'),
                 iid,
             )
         )

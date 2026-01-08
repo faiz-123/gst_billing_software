@@ -51,7 +51,7 @@ def generate_invoice_html(parent, invoice_id):
             return None
         
         # Get invoice type and set appropriate template
-        invoice_type = invoice_data['invoice'].get('type', 'GST')
+        invoice_type = invoice_data['invoice'].get('tax_type', 'GST')
         generator.template_path = generator.get_template_path(invoice_type)
         
         # Prepare template data based on invoice type
