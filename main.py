@@ -13,16 +13,16 @@ QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
 from theme import APP_STYLESHEET
 from widgets import Sidebar
 from config import config
-from database import db
+from core.db.sqlite_db import db
 
-# Import screens
-from screens.dashboard import DashboardScreen
-from screens.parties import PartiesScreen
-from screens.products import ProductsScreen
-from screens.invoices import InvoicesScreen
-from screens.purchases import PurchasesScreen
-from screens.payments import PaymentsScreen
-from screens.receipts import ReceiptsScreen
+# Import screens from ui module
+from ui.dashboard.dashboard_screen import DashboardScreen
+from ui.parties.party_list_screen import PartiesScreen
+from ui.products.product_list_screen import ProductsScreen
+from ui.invoices.sales.sales_invoice_list_screen import InvoicesScreen
+from ui.invoices.purchase.purchase_invoice_list_screen import PurchasesScreen
+from ui.payments.payment_list_screen import PaymentsScreen
+from ui.receipts.receipt_list_screen import ReceiptsScreen
 
 class MainWindow(QMainWindow):
     def __init__(self, company_name="GST Billing"):
