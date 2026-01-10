@@ -3,7 +3,7 @@ Font definitions for GST Billing Software
 Contains font family and size constants
 """
 
-from PyQt5.QtGui import QFont
+from PySide6.QtGui import QFont
 
 # ---------------- Font Family ----------------
 FONT_FAMILY = "Arial"
@@ -68,4 +68,58 @@ def get_bold_font(size=FONT_SIZE_NORMAL):
     """
     font = QFont(FONT_FAMILY, size)
     font.setBold(True)
+    return font
+
+
+def get_label_font(size=FONT_SIZE_SMALL):
+    """Get label font with specified size (bold)
+    
+    Args:
+        size: Font size (default: FONT_SIZE_SMALL)
+        
+    Returns:
+        QFont: Configured font object
+    """
+    font = QFont(FONT_FAMILY, size)
+    font.setBold(True)
+    return font
+
+
+def get_section_title_font(size=14):
+    """Get section title font
+    
+    Args:
+        size: Font size (default: 14)
+        
+    Returns:
+        QFont: Configured font object
+    """
+    font = QFont(FONT_FAMILY, size)
+    font.setBold(True)
+    return font
+
+
+def get_link_font(size=13):
+    """Get font for link/hyperlink text
+    
+    Args:
+        size: Font size (default: 13)
+        
+    Returns:
+        QFont: Configured font object
+    """
+    font = QFont(FONT_FAMILY, size)
+    return font
+
+
+def get_checkbox_font(size=FONT_SIZE_SMALL):
+    """Get font for checkboxes
+    
+    Args:
+        size: Font size (default: FONT_SIZE_SMALL)
+        
+    Returns:
+        QFont: Configured font object
+    """
+    font = QFont(FONT_FAMILY, size)
     return font

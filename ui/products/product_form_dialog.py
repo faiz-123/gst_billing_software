@@ -1,39 +1,48 @@
 """
 Product dialog module (moved from products.py to avoid circular imports)
 """
-from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QDialog, QMessageBox,
-    QFormLayout, QLineEdit, QComboBox, QTextEdit, QCheckBox, QSpinBox, QDoubleSpinBox,
-    QScrollArea, QWidget, QGridLayout
+from PySide6.QtWidgets import (
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QMessageBox,
+    QScrollArea, QWidget, QGridLayout, QTextEdit
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from PySide6.QtCore import Qt
 
 from theme import (
-    SUCCESS, DANGER, PRIMARY, WARNING, WHITE, TEXT_PRIMARY,
-    BORDER, BACKGROUND, TEXT_SECONDARY, PRIMARY_HOVER
+    # Colors (only those still needed for remaining inline styles)
+    PRIMARY, TEXT_PRIMARY, BORDER,
+    # Fonts
+    get_title_font, get_section_title_font, get_link_font,
+    # Styles
+    get_section_frame_style, get_dialog_footer_style,
+    get_cancel_button_style, get_save_button_style,
+    get_link_label_style, get_scroll_area_style
 )
+from widgets import (
+    DialogInput, DialogComboBox, DialogSpinBox, DialogDoubleSpinBox,
+    DialogCheckBox, DialogTextEdit, DialogFieldGroup, CustomButton
+)
+from ui.base.base_dialog import BaseDialog
+from core.services.product_service import ProductService
+from core.validators import set_name_error_state, set_price_error_state
+from core.core_utils import to_upper
 from core.db.sqlite_db import db
 
 
-class ProductDialog(QDialog):
+class ProductDialog(BaseDialog):
     """Dialog for adding/editing products"""
     def __init__(self, parent=None, product_data=None):
-        super().__init__(parent)
         self.product_data = product_data
-        self.setWindowTitle("Add Product" if not product_data else "Edit Product")
-        self.setModal(True)
-        # Dynamic sizing based on screen
-        if parent:
-            screen_rect = parent.geometry()
-            width = min(1300, int(screen_rect.width() * 0.85))
-            height = min(1000, int(screen_rect.height() * 0.9))
-            self.resize(width, height)
-        else:
-            self.resize(1300, 1000)
-        self.setMinimumSize(800, 600)
+        self.product_service = ProductService(db)
+        super().__init__(
+            parent=parent,
+            title="Add Product" if not product_data else "Edit Product",
+            default_width=1300,
+            default_height=1000,
+            min_width=800,
+            min_height=600
+        )
         self.build_ui()
-    
+
     def build_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -43,7 +52,7 @@ class ProductDialog(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet(f"background: {BACKGROUND}; border: none;")
+        scroll.setStyleSheet(get_scroll_area_style())
         
         scroll_content = QWidget()
         self.scroll_layout = QVBoxLayout(scroll_content)
@@ -53,7 +62,7 @@ class ProductDialog(QDialog):
         # Header
         title_text = "Edit Product" if self.product_data else "Add New Product"
         title = QLabel(title_text)
-        title.setFont(QFont("Arial", 24, QFont.Bold))
+        title.setFont(get_title_font())
         title.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
         self.scroll_layout.addWidget(title)
         
@@ -101,18 +110,9 @@ class ProductDialog(QDialog):
         
         self.stock_link = QLabel("➕ <a href='#' style='color: {0}; text-decoration: none;'>Add Stock & Inventory</a>".format(PRIMARY))
         self.stock_link.setTextFormat(Qt.RichText)
-        self.stock_link.setFont(QFont("Arial", 13))
+        self.stock_link.setFont(get_link_font())
         self.stock_link.setCursor(Qt.PointingHandCursor)
-        self.stock_link.setStyleSheet(f"""
-            QLabel {{
-                color: {PRIMARY};
-                background: transparent;
-                padding: 8px 0;
-            }}
-            QLabel:hover {{
-                color: {PRIMARY_HOVER};
-            }}
-        """)
+        self.stock_link.setStyleSheet(get_link_label_style())
         self.stock_link.mousePressEvent = self._toggle_stock_section
         link_layout.addWidget(self.stock_link)
         link_layout.addStretch()
@@ -138,18 +138,9 @@ class ProductDialog(QDialog):
         
         self.additional_link = QLabel("➕ <a href='#' style='color: {0}; text-decoration: none;'>Add Additional Information</a>".format(PRIMARY))
         self.additional_link.setTextFormat(Qt.RichText)
-        self.additional_link.setFont(QFont("Arial", 13))
+        self.additional_link.setFont(get_link_font())
         self.additional_link.setCursor(Qt.PointingHandCursor)
-        self.additional_link.setStyleSheet(f"""
-            QLabel {{
-                color: {PRIMARY};
-                background: transparent;
-                padding: 8px 0;
-            }}
-            QLabel:hover {{
-                color: {PRIMARY_HOVER};
-            }}
-        """)
+        self.additional_link.setStyleSheet(get_link_label_style())
         self.additional_link.mousePressEvent = self._toggle_additional_section
         link_layout.addWidget(self.additional_link)
         link_layout.addStretch()
@@ -170,14 +161,7 @@ class ProductDialog(QDialog):
         """Create a styled section card with title and content - matches products.py main frame style"""
         section = QFrame()
         section.setObjectName("sectionFrame")
-        section.setStyleSheet(f"""
-            QFrame#sectionFrame {{
-                background: {WHITE};
-                border: 1px solid {BORDER};
-                border-radius: 12px;
-                padding: 8px;
-            }}
-        """)
+        section.setStyleSheet(get_section_frame_style())
         
         layout = QVBoxLayout(section)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -185,7 +169,7 @@ class ProductDialog(QDialog):
         
         # Section title
         title_label = QLabel(title)
-        title_label.setFont(QFont("Arial", 14, QFont.Bold))
+        title_label.setFont(get_section_title_font())
         title_label.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none; background: transparent;")
         layout.addWidget(title_label)
         
@@ -344,34 +328,8 @@ class ProductDialog(QDialog):
         layout.setContentsMargins(0, 5, 0, 5)
         layout.setSpacing(10)
         
-        self.track_stock_checkbox = QCheckBox("Track Stock")
+        self.track_stock_checkbox = DialogCheckBox("Track Stock")
         self.track_stock_checkbox.setChecked(False)
-        self.track_stock_checkbox.setFont(QFont("Arial", 12))
-        self.track_stock_checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                color: {TEXT_PRIMARY};
-                font-weight: 600;
-                background: transparent;
-                spacing: 8px;
-            }}
-            QCheckBox::indicator {{
-                width: 20px;
-                height: 20px;
-                border: 2px solid {BORDER};
-                border-radius: 4px;
-                background: {WHITE};
-            }}
-            QCheckBox::indicator:checked {{
-                background: {PRIMARY};
-                border-color: {PRIMARY};
-            }}
-            QCheckBox::indicator:checked::after {{
-                content: "✓";
-            }}
-            QCheckBox::indicator:hover {{
-                border-color: {PRIMARY};
-            }}
-        """)
         self.track_stock_checkbox.stateChanged.connect(self._on_track_stock_changed)
         layout.addWidget(self.track_stock_checkbox)
         layout.addStretch()
@@ -380,25 +338,16 @@ class ProductDialog(QDialog):
     
     def _on_track_stock_changed(self, state: int):
         """Handle Track Stock checkbox state change"""
-        is_checked = state == Qt.Checked
+        is_checked = state == Qt.Checked.value
         self._update_stock_fields_state(is_checked)
     
     def _update_stock_fields_state(self, enabled: bool):
         """Update Opening Stock and Low Stock Alert fields read-only state"""
-        # Set read-only state
-        self.opening_stock.setReadOnly(not enabled)
-        self.low_stock_alert.setReadOnly(not enabled)
+        # Use the widget's set_readonly method
+        self.opening_stock.set_readonly(not enabled)
+        self.low_stock_alert.set_readonly(not enabled)
         
-        # Update styling based on state
-        if enabled:
-            # Editable style
-            self.opening_stock.setStyleSheet(self._input_style())
-            self.low_stock_alert.setStyleSheet(self._input_style())
-        else:
-            # Read-only style
-            readonly_style = self._readonly_input_style()
-            self.opening_stock.setStyleSheet(readonly_style)
-            self.low_stock_alert.setStyleSheet(readonly_style)
+        if not enabled:
             # Reset values to 0 when disabled
             self.opening_stock.setValue(0)
             self.low_stock_alert.setValue(0)
@@ -439,78 +388,34 @@ class ProductDialog(QDialog):
         
         return widget
     
-    def _create_field_group(self, label_text: str, input_widget: QWidget) -> QWidget:
-        """Create a field group with label and input"""
-        group = QWidget()
-        group.setStyleSheet("background: transparent; border: none;")
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-        
-        label = QLabel(label_text)
-        label.setTextFormat(Qt.RichText)
-        label.setFont(QFont("Arial", 12))
-        label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-weight: 600; border: none; background: transparent;")
-        layout.addWidget(label)
-        
-        layout.addWidget(input_widget)
-        
-        return group
+    def _create_field_group(self, label_text: str, input_widget: QWidget) -> DialogFieldGroup:
+        """Create a field group with label and input using DialogFieldGroup"""
+        return DialogFieldGroup(label_text, input_widget)
     
     def _build_footer(self) -> QFrame:
         """Build the footer with action buttons"""
         footer = QFrame()
         footer.setFixedHeight(80)
-        footer.setStyleSheet(f"""
-            QFrame {{
-                background: {WHITE};
-                border-top: 1px solid {BORDER};
-            }}
-        """)
+        footer.setStyleSheet(get_dialog_footer_style())
         
         layout = QHBoxLayout(footer)
         layout.setContentsMargins(40, 0, 40, 0)
         
         layout.addStretch()
         
-        cancel_btn = QPushButton("Cancel")
+        cancel_btn = CustomButton("Cancel", "secondary")
         cancel_btn.setCursor(Qt.PointingHandCursor)
         cancel_btn.setFixedSize(120, 44)
-        cancel_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {TEXT_SECONDARY};
-                border: 2px solid {BORDER};
-                border-radius: 8px;
-                font-size: 14px;
-                font-weight: 600;
-            }}
-            QPushButton:hover {{
-                background: {BACKGROUND};
-                border-color: {TEXT_SECONDARY};
-            }}
-        """)
+        cancel_btn.setStyleSheet(get_cancel_button_style())
         cancel_btn.clicked.connect(self.reject)
         layout.addWidget(cancel_btn)
         
         layout.addSpacing(12)
         
-        save_btn = QPushButton("Save Product")
+        save_btn = CustomButton("Save Product", "primary")
         save_btn.setCursor(Qt.PointingHandCursor)
         save_btn.setFixedSize(140, 44)
-        save_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {PRIMARY};
-                color: {WHITE};
-                border: none;
-                border-radius: 8px;
-                font-size: 14px;
-                font-weight: 600;
-            }}
-            QPushButton:hover {{
-                background: {PRIMARY_HOVER};
-            }}
-        """)
+        save_btn.setStyleSheet(get_save_button_style())
         save_btn.clicked.connect(self.save_product)
         layout.addWidget(save_btn)
         
@@ -518,77 +423,47 @@ class ProductDialog(QDialog):
     
     # === Input Field Creators ===
     
-    def _create_name_input(self) -> QLineEdit:
-        self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("Enter item name")
-        self.name_input.setStyleSheet(self._input_style())
-        self.name_input.setFixedHeight(44)
+    def _create_name_input(self) -> DialogInput:
+        self.name_input = DialogInput("Enter item name")
         self.name_input.textChanged.connect(self._on_name_changed)
-        self.name_input.textChanged.connect(lambda text: self._to_upper(self.name_input, text))
+        self.name_input.textChanged.connect(lambda text: to_upper(self.name_input, text))
         return self.name_input
     
-    def _create_hsn_input(self) -> QLineEdit:
-        self.hsn_code = QLineEdit()
-        self.hsn_code.setPlaceholderText("Enter HSN code")
-        self.hsn_code.setStyleSheet(self._input_style())
-        self.hsn_code.setFixedHeight(44)
+    def _create_hsn_input(self) -> DialogInput:
+        self.hsn_code = DialogInput("Enter HSN code")
         return self.hsn_code
     
-    def _create_barcode_input(self) -> QLineEdit:
-        self.barcode_input = QLineEdit()
-        self.barcode_input.setPlaceholderText("Enter barcode or SKU")
-        self.barcode_input.setStyleSheet(self._input_style())
-        self.barcode_input.setFixedHeight(44)
+    def _create_barcode_input(self) -> DialogInput:
+        self.barcode_input = DialogInput("Enter barcode or SKU")
         return self.barcode_input
     
-    def _create_type_combo(self) -> QComboBox:
-        self.type_combo = QComboBox()
-        self.type_combo.addItems(["Goods", "Service"])
-        self.type_combo.setStyleSheet(self._input_style())
-        self.type_combo.setFixedHeight(44)
+    def _create_type_combo(self) -> DialogComboBox:
+        self.type_combo = DialogComboBox(["Goods", "Service"])
         return self.type_combo
     
-    def _create_category_input(self) -> QLineEdit:
-        self.category_input = QLineEdit()
-        self.category_input.setPlaceholderText("e.g., Electronics, Clothing")
-        self.category_input.setStyleSheet(self._input_style())
-        self.category_input.setFixedHeight(44)
-        self.category_input.textChanged.connect(lambda text: self._to_upper(self.category_input, text))
+    def _create_category_input(self) -> DialogInput:
+        self.category_input = DialogInput("e.g., Electronics, Clothing")
+        self.category_input.textChanged.connect(lambda text: to_upper(self.category_input, text))
         return self.category_input
     
-    def _create_unit_combo(self) -> QComboBox:
-        self.unit_combo = QComboBox()
-        self.unit_combo.addItems(["PCS", "KG", "LTR", "BOX", "MTR", "SET"])
-        self.unit_combo.setStyleSheet(self._input_style())
-        self.unit_combo.setFixedHeight(44)
+    def _create_unit_combo(self) -> DialogComboBox:
+        self.unit_combo = DialogComboBox(["PCS", "KG", "LTR", "BOX", "MTR", "SET"])
         return self.unit_combo
     
-    def _create_selling_price_input(self) -> QDoubleSpinBox:
-        self.selling_price = QDoubleSpinBox()
-        self.selling_price.setRange(0, 9999999.99)
-        self.selling_price.setDecimals(2)
+    def _create_selling_price_input(self) -> DialogDoubleSpinBox:
+        self.selling_price = DialogDoubleSpinBox(0, 9999999.99, 2)
         self.selling_price.setPrefix("₹ ")
-        self.selling_price.setStyleSheet(self._input_style())
-        self.selling_price.setFixedHeight(44)
         self.selling_price.valueChanged.connect(self._on_selling_price_changed)
         return self.selling_price
     
-    def _create_purchase_price_input(self) -> QDoubleSpinBox:
-        self.purchase_price = QDoubleSpinBox()
-        self.purchase_price.setRange(0, 9999999.99)
-        self.purchase_price.setDecimals(2)
+    def _create_purchase_price_input(self) -> DialogDoubleSpinBox:
+        self.purchase_price = DialogDoubleSpinBox(0, 9999999.99, 2)
         self.purchase_price.setPrefix("₹ ")
-        self.purchase_price.setStyleSheet(self._input_style())
-        self.purchase_price.setFixedHeight(44)
         return self.purchase_price
     
-    def _create_mrp_input(self) -> QDoubleSpinBox:
-        self.mrp = QDoubleSpinBox()
-        self.mrp.setRange(0, 9999999.99)
-        self.mrp.setDecimals(2)
+    def _create_mrp_input(self) -> DialogDoubleSpinBox:
+        self.mrp = DialogDoubleSpinBox(0, 9999999.99, 2)
         self.mrp.setPrefix("₹ ")
-        self.mrp.setStyleSheet(self._input_style())
-        self.mrp.setFixedHeight(44)
         return self.mrp
     
     def _create_gst_registered_checkbox(self) -> QWidget:
@@ -599,34 +474,8 @@ class ProductDialog(QDialog):
         layout.setContentsMargins(0, 5, 0, 5)
         layout.setSpacing(10)
         
-        self.gst_registered_checkbox = QCheckBox("GST Registered")
+        self.gst_registered_checkbox = DialogCheckBox("GST Registered")
         self.gst_registered_checkbox.setChecked(False)
-        self.gst_registered_checkbox.setFont(QFont("Arial", 12))
-        self.gst_registered_checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                color: {TEXT_PRIMARY};
-                font-weight: 600;
-                background: transparent;
-                spacing: 8px;
-            }}
-            QCheckBox::indicator {{
-                width: 20px;
-                height: 20px;
-                border: 2px solid {BORDER};
-                border-radius: 4px;
-                background: {WHITE};
-            }}
-            QCheckBox::indicator:checked {{
-                background: {PRIMARY};
-                border-color: {PRIMARY};
-            }}
-            QCheckBox::indicator:checked::after {{
-                content: "✓";
-            }}
-            QCheckBox::indicator:hover {{
-                border-color: {PRIMARY};
-            }}
-        """)
         self.gst_registered_checkbox.stateChanged.connect(self._on_gst_registered_changed)
         layout.addWidget(self.gst_registered_checkbox)
         layout.addStretch()
@@ -635,243 +484,97 @@ class ProductDialog(QDialog):
     
     def _on_gst_registered_changed(self, state: int):
         """Handle GST Registered checkbox state change"""
-        is_checked = state == Qt.Checked
+        is_checked = state == Qt.Checked.value
         self._update_gst_fields_state(is_checked)
     
     def _update_gst_fields_state(self, enabled: bool):
         """Update GST, SGST, CGST fields read-only state"""
-        # Set read-only state
-        self.tax_rate.setReadOnly(not enabled)
-        self.sgst_input.setReadOnly(not enabled)
-        self.cgst_input.setReadOnly(not enabled)
+        # Use the widget's set_readonly method
+        self.tax_rate.set_readonly(not enabled)
+        self.sgst_input.set_readonly(not enabled)
+        self.cgst_input.set_readonly(not enabled)
         
-        # Update styling based on state
         if enabled:
-            # Editable style
-            self.tax_rate.setStyleSheet(self._input_style())
-            self.sgst_input.setStyleSheet(self._input_style())
-            self.cgst_input.setStyleSheet(self._input_style())
             # Set default GST values when enabled (if currently 0)
             if self.tax_rate.value() == 0:
                 self.tax_rate.setValue(18.0)
                 self.sgst_input.setValue(9.0)
                 self.cgst_input.setValue(9.0)
         else:
-            # Read-only style
-            readonly_style = self._readonly_input_style()
-            self.tax_rate.setStyleSheet(readonly_style)
-            self.sgst_input.setStyleSheet(readonly_style)
-            self.cgst_input.setStyleSheet(readonly_style)
             # Reset values to 0 when disabled
             self.tax_rate.setValue(0)
             self.sgst_input.setValue(0)
             self.cgst_input.setValue(0)
-    
-    def _readonly_input_style(self) -> str:
-        """Return style for read-only input fields"""
-        return f"""
-            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
-                border: 1px solid {BORDER};
-                border-radius: 8px;
-                padding: 0 12px;
-                color: {TEXT_SECONDARY};
-                background: {BACKGROUND};
-                font-size: 14px;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 30px;
-            }}
-            QComboBox::down-arrow {{
-                image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 6px solid {TEXT_SECONDARY};
-                margin-right: 10px;
-            }}
-        """
 
-    def _create_tax_rate_input(self) -> QDoubleSpinBox:
-        self.tax_rate = QDoubleSpinBox()
-        self.tax_rate.setRange(0, 100)
-        self.tax_rate.setDecimals(2)
+    def _create_tax_rate_input(self) -> DialogDoubleSpinBox:
+        self.tax_rate = DialogDoubleSpinBox(0, 100, 2)
         self.tax_rate.setValue(0)  # Default to 0, will be set when GST Registered is checked
         self.tax_rate.setSuffix(" %")
-        self.tax_rate.setStyleSheet(self._input_style())
-        self.tax_rate.setFixedHeight(44)
         self.tax_rate.valueChanged.connect(self._on_gst_changed)
         return self.tax_rate
     
-    def _create_sgst_input(self) -> QDoubleSpinBox:
-        self.sgst_input = QDoubleSpinBox()
-        self.sgst_input.setRange(0, 100)
-        self.sgst_input.setDecimals(2)
+    def _create_sgst_input(self) -> DialogDoubleSpinBox:
+        self.sgst_input = DialogDoubleSpinBox(0, 100, 2)
         self.sgst_input.setValue(0)  # Default to 0, will be set when GST Registered is checked
         self.sgst_input.setSuffix(" %")
-        self.sgst_input.setStyleSheet(self._input_style())
-        self.sgst_input.setFixedHeight(44)
         return self.sgst_input
     
-    def _create_cgst_input(self) -> QDoubleSpinBox:
-        self.cgst_input = QDoubleSpinBox()
-        self.cgst_input.setRange(0, 100)
-        self.cgst_input.setDecimals(2)
+    def _create_cgst_input(self) -> DialogDoubleSpinBox:
+        self.cgst_input = DialogDoubleSpinBox(0, 100, 2)
         self.cgst_input.setValue(0)  # Default to 0, will be set when GST Registered is checked
         self.cgst_input.setSuffix(" %")
-        self.cgst_input.setStyleSheet(self._input_style())
-        self.cgst_input.setFixedHeight(44)
         return self.cgst_input
     
-    def _create_discount_input(self) -> QDoubleSpinBox:
-        self.discount_input = QDoubleSpinBox()
-        self.discount_input.setRange(0, 100)
-        self.discount_input.setDecimals(2)
+    def _create_discount_input(self) -> DialogDoubleSpinBox:
+        self.discount_input = DialogDoubleSpinBox(0, 100, 2)
         self.discount_input.setSuffix(" %")
-        self.discount_input.setStyleSheet(self._input_style())
-        self.discount_input.setFixedHeight(44)
         return self.discount_input
     
-    def _create_opening_stock_input(self) -> QSpinBox:
-        self.opening_stock = QSpinBox()
-        self.opening_stock.setRange(0, 9999999)
+    def _create_opening_stock_input(self) -> DialogSpinBox:
+        self.opening_stock = DialogSpinBox(0, 9999999)
         self.opening_stock.setValue(0)  # Default to 0, will be editable when Track Stock is checked
-        self.opening_stock.setStyleSheet(self._input_style())
-        self.opening_stock.setFixedHeight(44)
         return self.opening_stock
     
-    def _create_low_stock_input(self) -> QSpinBox:
-        self.low_stock_alert = QSpinBox()
-        self.low_stock_alert.setRange(0, 9999999)
+    def _create_low_stock_input(self) -> DialogSpinBox:
+        self.low_stock_alert = DialogSpinBox(0, 9999999)
         self.low_stock_alert.setValue(0)  # Default to 0, will be editable when Track Stock is checked
-        self.low_stock_alert.setStyleSheet(self._input_style())
-        self.low_stock_alert.setFixedHeight(44)
         return self.low_stock_alert
     
-    def _create_warranty_input(self) -> QSpinBox:
-        self.warranty_input = QSpinBox()
-        self.warranty_input.setRange(0, 120)
+    def _create_warranty_input(self) -> DialogSpinBox:
+        self.warranty_input = DialogSpinBox(0, 120)
         self.warranty_input.setValue(0)
-        self.warranty_input.setStyleSheet(self._input_style())
-        self.warranty_input.setFixedHeight(44)
         self.warranty_input.setSpecialValueText("No Warranty")
         self.warranty_input.setSuffix(" months")
         return self.warranty_input
     
-    def _create_serial_number_combo(self) -> QComboBox:
-        self.has_serial_number = QComboBox()
-        self.has_serial_number.addItems(["No", "Yes"])
-        self.has_serial_number.setStyleSheet(self._input_style())
-        self.has_serial_number.setFixedHeight(44)
+    def _create_serial_number_combo(self) -> DialogComboBox:
+        self.has_serial_number = DialogComboBox(["No", "Yes"])
         self.has_serial_number.setToolTip("If Yes, serial numbers will be required when creating purchase invoices")
         return self.has_serial_number
     
-    def _create_description_input(self) -> QTextEdit:
-        self.description_input = QTextEdit()
-        self.description_input.setPlaceholderText("Enter product description (optional)")
-        self.description_input.setFixedHeight(80)
-        self.description_input.setStyleSheet(f"""
-            QTextEdit {{
-                border: 1px solid {BORDER};
-                border-radius: 8px;
-                padding: 10px 12px;
-                color: {TEXT_PRIMARY};
-                background: {WHITE};
-                font-size: 14px;
-            }}
-            QTextEdit:focus {{
-                border-color: {PRIMARY};
-            }}
-        """)
+    def _create_description_input(self) -> DialogTextEdit:
+        self.description_input = DialogTextEdit("Enter product description (optional)", 80)
         return self.description_input
     
     # === Helper Methods ===
     
-    def _input_style(self) -> str:
-        return f"""
-            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
-                border: 1px solid {BORDER};
-                border-radius: 8px;
-                padding: 0 12px;
-                color: {TEXT_PRIMARY};
-                background: {WHITE};
-                font-size: 14px;
-            }}
-            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
-                border-color: {PRIMARY};
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 30px;
-            }}
-            QComboBox::down-arrow {{
-                image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 6px solid {TEXT_SECONDARY};
-                margin-right: 10px;
-            }}
-        """
-    
-    @staticmethod
-    def _to_upper(edit: QLineEdit, text: str):
-        upper = text.upper()
-        if text != upper:
-            cursor_pos = edit.cursorPosition()
-            edit.blockSignals(True)
-            edit.setText(upper)
-            edit.setCursorPosition(cursor_pos)
-            edit.blockSignals(False)
-    
     def _on_gst_changed(self, value: float):
-        half = round(value / 2, 2)
+        sgst, cgst = self.product_service.calculate_split_gst(value)
         self.sgst_input.blockSignals(True)
         self.cgst_input.blockSignals(True)
-        self.sgst_input.setValue(half)
-        self.cgst_input.setValue(half)
+        self.sgst_input.setValue(sgst)
+        self.cgst_input.setValue(cgst)
         self.sgst_input.blockSignals(False)
         self.cgst_input.blockSignals(False)
     
     def _on_name_changed(self, text: str):
         if text and text.strip():
-            self._set_name_error_state(False)
-    
-    def _set_name_error_state(self, is_error: bool):
-        if is_error:
-            self.name_input.setStyleSheet(f"""
-                QLineEdit {{
-                    border: 2px solid {DANGER};
-                    border-radius: 8px;
-                    padding: 0 12px;
-                    background: #fff5f5;
-                    color: {TEXT_PRIMARY};
-                    font-size: 14px;
-                }}
-            """)
-            self.name_input.setToolTip("Item Name is required")
-        else:
-            self.name_input.setStyleSheet(self._input_style())
-            self.name_input.setToolTip("")
+            set_name_error_state(self.name_input, False)
     
     def _on_selling_price_changed(self, value: float):
-        if value > 0:
-            self._set_selling_price_error_state(False)
-    
-    def _set_selling_price_error_state(self, is_error: bool):
-        if is_error:
-            self.selling_price.setStyleSheet(f"""
-                QDoubleSpinBox {{
-                    border: 2px solid {DANGER};
-                    border-radius: 8px;
-                    padding: 0 12px;
-                    background: #fff5f5;
-                    color: {TEXT_PRIMARY};
-                    font-size: 14px;
-                }}
-            """)
-            self.selling_price.setToolTip("Selling price must be greater than 0")
-        else:
-            self.selling_price.setStyleSheet(self._input_style())
-            self.selling_price.setToolTip("")
+        valid, error = self.product_service.validate_selling_price(value)
+        if not valid:
+            set_price_error_state(self.selling_price, True)
     
     def populate_form(self):
         """Populate form with existing product data"""
@@ -937,82 +640,58 @@ class ProductDialog(QDialog):
         self.description_input.setPlainText(data.get('description', ''))
     
     def save_product(self):
-        """Save product data"""
+        """Save product data using ProductService"""
         name = self.name_input.text().strip()
-        if not name:
-            self._set_name_error_state(True)
+        if not self.product_service.validate_product_name(name):
+            set_name_error_state(self.name_input, True)
             self.name_input.setFocus()
             return
         
         selling_price = self.selling_price.value()
-        if selling_price <= 0:
-            self._set_selling_price_error_state(True)
+        valid, error = self.product_service.validate_selling_price(selling_price)
+        if not valid:
+            set_price_error_state(self.selling_price, True)
             self.selling_price.setFocus()
             return
-        
-        hsn = self.hsn_code.text().strip() or None
-        stock_qty = float(self.opening_stock.value())
         
         # Get checkbox states
         is_gst_registered = 1 if self.gst_registered_checkbox.isChecked() else 0
         track_stock = 1 if self.track_stock_checkbox.isChecked() else 0
         
-        try:
-            if self.product_data:  # Editing
-                update_payload = {
-                    'id': self.product_data['id'],
-                    'name': name,
-                    'hsn_code': hsn,
-                    'barcode': self.barcode_input.text().strip() or None,
-                    'unit': self.unit_combo.currentText(),
-                    'sales_rate': float(selling_price),
-                    'purchase_rate': float(self.purchase_price.value()),
-                    'discount_percent': float(self.discount_input.value()),
-                    'mrp': float(self.mrp.value()),
-                    'tax_rate': self.tax_rate.value(),
-                    'sgst_rate': self.sgst_input.value(),
-                    'cgst_rate': self.cgst_input.value(),
-                    'opening_stock': stock_qty,
-                    'low_stock': float(self.low_stock_alert.value()),
-                    'product_type': self.type_combo.currentText(),
-                    'category': self.category_input.text().strip() or None,
-                    'description': self.description_input.toPlainText().strip() or None,
-                    'warranty_months': self.warranty_input.value(),
-                    'has_serial_number': 1 if self.has_serial_number.currentText() == "Yes" else 0,
-                    'is_gst_registered': is_gst_registered,
-                    'track_stock': track_stock,
-                }
-                db.update_product(update_payload)
-                QMessageBox.information(self, "Success", "Product updated successfully!")
-            else:  # Adding new
-                db.add_product(
-                    name=name,
-                    hsn_code=hsn,
-                    barcode=self.barcode_input.text().strip() or None,
-                    unit=self.unit_combo.currentText(),
-                    sales_rate=float(selling_price),
-                    purchase_rate=float(self.purchase_price.value()),
-                    discount_percent=float(self.discount_input.value()),
-                    mrp=float(self.mrp.value()),
-                    tax_rate=self.tax_rate.value(),
-                    sgst_rate=self.sgst_input.value(),
-                    cgst_rate=self.cgst_input.value(),
-                    opening_stock=stock_qty,
-                    low_stock=float(self.low_stock_alert.value()),
-                    product_type=self.type_combo.currentText(),
-                    category=self.category_input.text().strip() or None,
-                    description=self.description_input.toPlainText().strip() or None,
-                    warranty_months=self.warranty_input.value(),
-                    has_serial_number=1 if self.has_serial_number.currentText() == "Yes" else 0,
-                    is_gst_registered=is_gst_registered,
-                    track_stock=track_stock,
-                )
-                QMessageBox.information(self, "Success", "Product added successfully!")
-            
-            self.accept()
+        # Prepare product data using service
+        product_data = self.product_service.prepare_product_data(
+            name=name,
+            hsn_code=self.hsn_code.text().strip(),
+            barcode=self.barcode_input.text().strip(),
+            unit=self.unit_combo.currentText(),
+            sales_rate=selling_price,
+            purchase_rate=self.purchase_price.value(),
+            discount_percent=self.discount_input.value(),
+            mrp=self.mrp.value(),
+            tax_rate=self.tax_rate.value(),
+            sgst_rate=self.sgst_input.value(),
+            cgst_rate=self.cgst_input.value(),
+            opening_stock=self.opening_stock.value(),
+            low_stock=self.low_stock_alert.value(),
+            product_type=self.type_combo.currentText(),
+            category=self.category_input.text().strip(),
+            description=self.description_input.toPlainText().strip(),
+            warranty_months=self.warranty_input.value(),
+            has_serial_number=1 if self.has_serial_number.currentText() == "Yes" else 0,
+            is_gst_registered=is_gst_registered,
+            track_stock=track_stock,
+            product_id=self.product_data['id'] if self.product_data else None
+        )
         
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save product: {str(e)}")
+        # Save using service
+        is_update = self.product_data is not None
+        success, message = self.product_service.save_product(product_data, is_update)
+        
+        if success:
+            QMessageBox.information(self, "Success", message)
+            self.accept()
+        else:
+            QMessageBox.critical(self, "Error", message)
     
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts: Enter to save, Escape to cancel."""
@@ -1024,3 +703,4 @@ class ProductDialog(QDialog):
             self.reject()
             return
         super().keyPressEvent(event)
+

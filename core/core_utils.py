@@ -155,3 +155,20 @@ def calculate_gst_amounts(taxable_amount, tax_percent, is_interstate=False):
             "igst_amount": 0,
             "total_tax": total_tax
         }
+
+
+def to_upper(edit, text: str):
+    """
+    Convert text to uppercase and update the input field while preserving cursor position.
+    
+    Args:
+        edit: Input widget with setText, cursorPosition, setCursorPosition, and blockSignals methods
+        text: Current text value
+    """
+    upper = text.upper()
+    if text != upper:
+        cursor_pos = edit.cursorPosition()
+        edit.blockSignals(True)
+        edit.setText(upper)
+        edit.setCursorPosition(cursor_pos)
+        edit.blockSignals(False)

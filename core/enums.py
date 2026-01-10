@@ -5,18 +5,12 @@ Contains all enum types used across the application
 
 from enum import Enum
 
-
+ 
 class PartyType(str, Enum):
     """Types of parties"""
     CUSTOMER = "Customer"
     SUPPLIER = "Supplier"
     BOTH = "Both"
-
-
-class BalanceType(str, Enum):
-    """Types of balance"""
-    DEBIT = "dr"
-    CREDIT = "cr"
 
 
 class TaxType(str, Enum):
@@ -65,6 +59,12 @@ class ProductType(str, Enum):
     """Types of products"""
     GOODS = "Goods"
     SERVICES = "Services"
+
+
+class BalanceType(str, Enum):
+    """Types of balance for opening balance"""
+    DEBIT = "To Receive"
+    CREDIT = "To Pay"
 
 
 class Unit(str, Enum):

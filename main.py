@@ -3,8 +3,8 @@ Main entry point and navigation manager for GST Billing Software
 """
 
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QHBoxLayout, QWidget, QStackedWidget
-from PyQt5.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QMainWindow, QHBoxLayout, QWidget, QStackedWidget
+from PySide6.QtCore import Qt
 
 # Enable WebEngine sharing BEFORE QApplication is created
 # This is required for QWebEngineView to work properly
@@ -133,7 +133,7 @@ class MainWindow(QMainWindow):
     
     def show_coming_soon(self, feature_name):
         """Show coming soon message for unimplemented features"""
-        from PyQt5.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox
         QMessageBox.information(
             self, 
             "Coming Soon", 
@@ -167,7 +167,7 @@ def main():
     window = MainWindow()
     window.show()
     
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()

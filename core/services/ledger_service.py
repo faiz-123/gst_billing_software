@@ -26,11 +26,11 @@ class LedgerService:
         # Get party opening balance
         parties = self.db._query("SELECT * FROM parties WHERE id = ?", (party_id,))
         if not parties:
-            return {'balance': 0, 'balance_type': 'dr'}
+            return {'balance': 0}
         
         party = parties[0]
         opening_balance = float(party.get('opening_balance', 0) or 0)
-        balance_type = party.get('balance_type', 'dr')
+        party_type = (party.get('party_type', 'Customer') or 'Customer').lower()
         
         # Calculate from invoices (amount owed by customer)
         invoices = self.db._query(
@@ -66,17 +66,19 @@ class LedgerService:
         customer_balance = invoice_total - receipt_total
         supplier_balance = purchase_total - payment_total
         
-        # Add opening balance
-        if balance_type.lower() == 'dr':
-            customer_balance += opening_balance
+        # Add opening balance based on party type
+        # Suppliers: opening balance is credit (we owe them)
+        # Customers: opening balance is debit (they owe us)
+        if party_type == 'supplier':
+            supplier_balance += opening_balance
         else:
-            customer_balance -= opening_balance
+            customer_balance += opening_balance
         
         return {
             'party_id': party_id,
             'party_name': party.get('name', ''),
+            'party_type': party_type,
             'opening_balance': opening_balance,
-            'balance_type': balance_type,
             'invoice_total': invoice_total,
             'receipt_total': receipt_total,
             'purchase_total': purchase_total,
@@ -97,7 +99,7 @@ class LedgerService:
         
         for party in parties:
             party_type = party.get('party_type', 'Customer')
-            if party_type.lower() not in ['customer', 'both']:
+            if (party_type or '').lower() not in ['customer', 'both']:
                 continue
             
             balance_info = self.get_party_balance(party['id'])
@@ -124,7 +126,7 @@ class LedgerService:
         
         for party in parties:
             party_type = party.get('party_type', 'Customer')
-            if party_type.lower() not in ['supplier', 'both']:
+            if (party_type or '').lower() not in ['supplier', 'both']:
                 continue
             
             balance_info = self.get_party_balance(party['id'])

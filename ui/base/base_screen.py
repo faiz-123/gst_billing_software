@@ -3,8 +3,8 @@ Base screen class with common functionality
 All screens should inherit from this class
 """
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
-from PyQt5.QtCore import Qt
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
+from PySide6.QtCore import Qt
 import sys
 import os
 

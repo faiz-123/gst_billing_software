@@ -144,7 +144,7 @@ class InvoiceService:
         for inv in invoices:
             grand_total = float(inv.get('grand_total', 0) or 0)
             balance_due = float(inv.get('balance_due', 0) or 0)
-            status = inv.get('status', 'Draft')
+            status = inv.get('status', 'Draft') or 'Draft'
             
             total_amount += grand_total
             paid_amount += (grand_total - balance_due)

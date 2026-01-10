@@ -104,14 +104,12 @@ class PurchasesScreen(BaseScreen):
         
         # Export button
         export_btn = CustomButton("📤 Export", "secondary")
-        export_btn.setFixedWidth(120)
         export_btn.setCursor(Qt.PointingHandCursor)
         export_btn.clicked.connect(self._on_export_clicked)
         layout.addWidget(export_btn)
         
         # Add button
         add_btn = CustomButton("+ New Purchase", "primary")
-        add_btn.setFixedWidth(160)
         add_btn.setCursor(Qt.PointingHandCursor)
         add_btn.clicked.connect(self._on_add_clicked)
         layout.addWidget(add_btn)
@@ -275,6 +273,34 @@ class PurchasesScreen(BaseScreen):
         """Create the purchases table."""
         frame = TableFrame()
         
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+        
+        # Table header
+        header_layout = QHBoxLayout()
+        
+        title_label = QLabel("🛒 Purchase Invoice List")
+        title_label.setFont(get_bold_font(16))
+        title_label.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none;")
+        header_layout.addWidget(title_label)
+        
+        self._count_label = QLabel("0 purchases")
+        self._count_label.setStyleSheet(f"""
+            QLabel {{
+                color: {TEXT_SECONDARY};
+                font-size: 13px;
+                background: {BACKGROUND};
+                padding: 6px 14px;
+                border-radius: 16px;
+                border: none;
+            }}
+        """)
+        header_layout.addWidget(self._count_label)
+        header_layout.addStretch()
+        
+        layout.addLayout(header_layout)
+        
         # Create table using common widget
         self._table = ListTable(headers=[
             "#", "Invoice No.", "Date", "Supplier", "Amount", "Status", "Actions"
@@ -285,16 +311,16 @@ class PurchasesScreen(BaseScreen):
         
         # Column configuration
         self._table.configure_columns([
-            {"width": 50, "resize": "fixed"},     # #
-            {"width": 120, "resize": "fixed"},    # Invoice No.
-            {"width": 100, "resize": "fixed"},    # Date
-            {"resize": "stretch"},                 # Supplier
-            {"width": 120, "resize": "fixed"},    # Amount
-            {"width": 100, "resize": "fixed"},    # Status
-            {"width": 150, "resize": "fixed"},    # Actions
+            {"index": 0, "mode": "fixed", "width": 50},    # #
+            {"index": 1, "mode": "fixed", "width": 120},   # Invoice No.
+            {"index": 2, "mode": "fixed", "width": 100},   # Date
+            {"index": 3, "mode": "stretch"},               # Supplier
+            {"index": 4, "mode": "fixed", "width": 120},   # Amount
+            {"index": 5, "mode": "fixed", "width": 100},   # Status
+            {"index": 6, "mode": "fixed", "width": 150},   # Actions
         ])
         
-        frame.set_table(self._table)
+        layout.addWidget(self._table)
         return frame
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -394,6 +420,7 @@ class PurchasesScreen(BaseScreen):
         self._amount_card.set_value(f"₹{stats.total_amount:,.0f}")
         self._unpaid_card.set_value(str(stats.unpaid_count))
         self._paid_card.set_value(str(stats.paid_count))
+        self._count_label.setText(f"{stats.total} purchases")
     
     def _populate_table(self, purchases: list):
         """Populate table with purchase data."""

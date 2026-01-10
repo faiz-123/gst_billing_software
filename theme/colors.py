@@ -23,6 +23,14 @@ WHITE = "#FFFFFF"            # Pure white
 # ---------------- Accent Colors ----------------
 PURPLE = "#9333EA"           # Purple accent color
 
+# ---------------- Extended Colors for Invoice Dialog ----------------
+TEXT_DARK = "#111827"        # Alias for dark text
+TEXT_MUTED = "#9CA3AF"       # Muted text color
+PRIMARY_LIGHT = "#DBEAFE"    # Light blue for backgrounds
+PRIMARY_DARK = "#1D4ED8"     # Darker primary blue
+DANGER_LIGHT = "#FEE2E2"     # Light red for error backgrounds
+SUCCESS_LIGHT = "#D1FAE5"    # Light green for success backgrounds
+
 # ---------------- Additional Colors ----------------
 GRAY_50 = "#F9FAFB"
 GRAY_100 = "#F3F4F6"

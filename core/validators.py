@@ -238,3 +238,40 @@ def validate_required(value) -> bool:
     if isinstance(value, str):
         return bool(value.strip())
     return bool(value)
+
+
+# === UI Field Error State Helpers ===
+
+def set_field_error_state(widget, is_error: bool, error_message: str = ""):
+    """
+    Set error state on a widget that has set_error() method
+    
+    Args:
+        widget: Widget with set_error(is_error, message) method
+        is_error: True to show error state, False to clear
+        error_message: Error message to display when is_error is True
+    """
+    if hasattr(widget, 'set_error'):
+        widget.set_error(is_error, error_message if is_error else "")
+
+
+def set_name_error_state(name_widget, is_error: bool):
+    """
+    Set error state for a name/required text field
+    
+    Args:
+        name_widget: Widget with set_error() method
+        is_error: True to show error, False to clear
+    """
+    set_field_error_state(name_widget, is_error, "Item Name is required")
+
+
+def set_price_error_state(price_widget, is_error: bool):
+    """
+    Set error state for a price field
+    
+    Args:
+        price_widget: Widget with set_error() method
+        is_error: True to show error, False to clear
+    """
+    set_field_error_state(price_widget, is_error, "Selling price must be greater than 0")

@@ -7,7 +7,8 @@ from .core_utils import (
     format_currency,
     format_indian_number,
     get_gst_rate_from_tax_percent,
-    calculate_gst_amounts
+    calculate_gst_amounts,
+    to_upper
 )
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     'format_currency',
     'format_indian_number',
     'get_gst_rate_from_tax_percent',
-    'calculate_gst_amounts'
+    'calculate_gst_amounts',
+    'to_upper'
 ]

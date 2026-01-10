@@ -8,20 +8,16 @@ All business logic is delegated to InvoiceFormController.
 """
 
 import os
-import tempfile
-import webbrowser
-from typing import Optional, Dict, List, Any
-
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
     QFrame, QDialog, QMessageBox, QFormLayout, QLineEdit, QComboBox,
     QTextEdit, QCheckBox, QSpinBox, QDoubleSpinBox, QTableWidget,
     QTableWidgetItem, QHeaderView, QDateEdit, QScrollArea, QSplitter,
-    QAbstractItemView, QMenu, QListWidget, QFileDialog, QCompleter
+    QAbstractItemView, QMenu, QListWidget, QFileDialog
 )
 from PySide6.QtCore import Qt, QDate, Signal, QTimer
 from PySide6.QtGui import QFont, QPixmap, QIcon, QColor, QKeySequence, QAction, QShortcut
-
+from PySide6.QtWidgets import QCompleter
 from widgets import (
     CustomButton, CustomTable, CustomInput, FormField, PartySelector, ProductSelector,
     InvoiceItemWidget, highlight_error, highlight_success, show_validation_error
@@ -72,45 +68,19 @@ from controllers.invoice_controller import invoice_form_controller
 
 
 class InvoiceDialog(QDialog):
-    """
-    Enhanced dialog for creating/editing sales invoices with modern UI.
-    
-    This dialog handles:
-    - Creating new sales invoices
-    - Editing existing invoices
-    - Read-only viewing of invoices
-    - Invoice preview and printing
-    
-    Architecture: UI → Controller → Service → DB
-    All business logic is delegated to invoice_form_controller.
-    """
-    
-    def __init__(
-        self,
-        parent: Optional[QWidget] = None,
-        invoice_data: Optional[Dict[str, Any]] = None,
-        invoice_number: Optional[str] = None,
-        read_only: bool = False
-    ) -> None:
-        """
-        Initialize the invoice dialog.
-        
-        Args:
-            parent: Parent widget
-            invoice_data: Existing invoice data for editing
-            invoice_number: Invoice number to load
-            read_only: Whether the dialog is in read-only mode
-        """
+
+    """Enhanced dialog for creating/editing invoices with modern UI"""
+    def __init__(self, parent=None, invoice_data=None, invoice_number=None, read_only=False):
         super().__init__(parent)
-        self.invoice_data: Optional[Dict[str, Any]] = invoice_data
-        self.products: List[Dict[str, Any]] = []
-        self.parties: List[Dict[str, Any]] = []
-        self.read_only: bool = read_only
+        self.invoice_data = invoice_data
+        self.products = []
+        self.parties = []
+        self.read_only = read_only  # Read-only mode flag
         # Guard to avoid re-entrant opening of PartySelector from typing
-        self._party_selector_active: bool = False
+        self._party_selector_active = False
         # Auto-save timer
-        self._autosave_timer: Optional[QTimer] = None
-        self._has_unsaved_changes: bool = False
+        self._autosave_timer = None
+        self._has_unsaved_changes = False
 
         # Load existing invoice if invoice_number is provided
         if invoice_number and not invoice_data:
@@ -142,13 +112,8 @@ class InvoiceDialog(QDialog):
             # Start auto-save for new invoices
             QTimer.singleShot(200, self.setup_autosave)
 
-    def load_existing_invoice(self, invoice_number: str) -> None:
-        """
-        Load existing invoice data by invoice number via controller.
-        
-        Args:
-            invoice_number: The invoice number to load
-        """
+    def load_existing_invoice(self, invoice_number):
+        """Load existing invoice data by invoice number via controller."""
         try:
             invoice_data = invoice_form_controller.get_invoice_by_number(invoice_number)
             if invoice_data:
@@ -158,7 +123,7 @@ class InvoiceDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load invoice: {str(e)}")
 
-    def populate_invoice_data(self) -> None:
+    def populate_invoice_data(self):
         """Populate form fields with existing invoice data"""
         if not self.invoice_data:
             return
@@ -246,8 +211,8 @@ class InvoiceDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(self, "Warning", f"Error populating invoice data: {str(e)}")
 
-    def apply_read_only_mode(self) -> None:
-        """Apply read-only mode to the entire dialog - disable all editing."""
+    def apply_read_only_mode(self):
+        """Apply read-only mode to the entire dialog - disable all editing"""
         try:
             # Update window title to indicate view mode
             invoice_no = self.invoice_number.text() if hasattr(self, 'invoice_number') else 'Invoice'
@@ -316,8 +281,8 @@ class InvoiceDialog(QDialog):
         except Exception as e:
             print(f"Error applying read-only mode: {e}")
 
-    def ensure_maximized(self) -> None:
-        """Ensure the window is properly maximized."""
+    def ensure_maximized(self):
+        """Ensure the window is properly maximized"""
         from PySide6.QtGui import QGuiApplication
         # Use availableGeometry to account for menu bar and dock
         screen = QGuiApplication.primaryScreen().availableGeometry()
@@ -325,8 +290,8 @@ class InvoiceDialog(QDialog):
         self.setWindowState(Qt.WindowMaximized)
         self.showMaximized()
 
-    def set_initial_focus(self) -> None:
-        """Set initial focus on the party search box for new invoices."""
+    def set_initial_focus(self):
+        """Set initial focus on the party search box for new invoices"""
         try:
             if hasattr(self, 'party_search'):
                 self.party_search.setFocus()
@@ -335,8 +300,8 @@ class InvoiceDialog(QDialog):
         except Exception as e:
             print(f"Error setting initial focus: {e}")
 
-    def setup_autosave(self) -> None:
-        """Setup auto-save timer to save draft every 30 seconds."""
+    def setup_autosave(self):
+        """Setup auto-save timer to save draft every 30 seconds"""
         try:
             self._autosave_timer = QTimer(self)
             self._autosave_timer.timeout.connect(self.autosave_draft)
@@ -345,8 +310,8 @@ class InvoiceDialog(QDialog):
         except Exception as e:
             print(f"Failed to setup auto-save: {e}")
 
-    def autosave_draft(self) -> None:
-        """Auto-save current invoice data as draft."""
+    def autosave_draft(self):
+        """Auto-save current invoice data as draft"""
         try:
             # Only save if there's meaningful data
             party_text = self.party_search.text().strip() if hasattr(self, 'party_search') else ''
@@ -373,8 +338,8 @@ class InvoiceDialog(QDialog):
         except Exception as e:
             print(f"Auto-save draft failed: {e}")
 
-    def collect_draft_data(self) -> Dict[str, Any]:
-        """Collect current form data for draft saving."""
+    def collect_draft_data(self):
+        """Collect current form data for draft saving"""
         try:
             items = []
             for i in range(self.items_layout.count() - 1):
@@ -400,8 +365,8 @@ class InvoiceDialog(QDialog):
             print(f"Error collecting draft data: {e}")
             return {}
 
-    def closeEvent(self, event) -> None:
-        """Handle dialog close - stop auto-save timer."""
+    def closeEvent(self, event):
+        """Handle dialog close - stop auto-save timer"""
         try:
             if self._autosave_timer:
                 self._autosave_timer.stop()
@@ -409,8 +374,8 @@ class InvoiceDialog(QDialog):
             pass
         super().closeEvent(event)
 
-    def init_window(self) -> None:
-        """Initialize window properties and styling."""
+    def init_window(self):
+        """Initialize window properties and styling"""
         title = "📄 Create Invoice" if not self.invoice_data else "📝 Edit Invoice"
         self.setWindowTitle(title)
         self.setModal(True)
@@ -422,7 +387,7 @@ class InvoiceDialog(QDialog):
         self.setMinimumSize(1200, 900)
         self.setStyleSheet(get_invoice_dialog_style())
 
-    def load_data(self) -> None:
+    def load_data(self):
         """Load products and parties data via controller."""
         try:
             self.products = invoice_form_controller.get_products()
@@ -432,8 +397,8 @@ class InvoiceDialog(QDialog):
             self.products = []
             self.parties = []
 
-    def setup_ui(self) -> None:
-        """Setup enhanced dialog UI with modern design and better organization."""
+    def setup_ui(self):
+        """Setup enhanced dialog UI with modern design and better organization"""
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setSpacing(10)
         self.main_layout.setContentsMargins(30, 30, 30, 30)  # Reduced bottom margin
@@ -441,8 +406,8 @@ class InvoiceDialog(QDialog):
         self.setup_action_buttons()
         self.apply_final_styling()
 
-    def setup_content_sections(self) -> None:
-        """Setup the main content sections with enhanced layout."""
+    def setup_content_sections(self):
+        """Setup the main content sections with enhanced layout"""
         self.content_splitter = QSplitter(Qt.Vertical)
         self.header_frame = self.create_header_section()
         self.content_splitter.addWidget(self.header_frame)
@@ -459,36 +424,29 @@ class InvoiceDialog(QDialog):
         if not self.read_only and not self.invoice_data:
             self.add_item()
 
-    def setup_action_buttons(self) -> None:
-        """Setup enhanced action buttons using CustomButton from common_widgets."""
+    def setup_action_buttons(self):
+        """Setup enhanced action buttons using CustomButton from common_widgets"""
         button_container = QFrame()
         button_container.setObjectName("buttonContainer")
         button_container.setStyleSheet(f"""
-            QFrame#buttonContainer {{ background: {WHITE}; border: 1px solid {DANGER}; border-radius: 12px; }}
+            QFrame#buttonContainer {{ background: {WHITE}; border: 1px solid {BORDER}; border-radius: 12px; }}
         """)
         button_container.setMinimumHeight(70)
         button_container.setMaximumHeight(80)
         button_layout = QHBoxLayout(button_container)
         button_layout.setSpacing(12)
-        # button_layout.setContentsMargins(20, 15, 20, 15)
+        button_layout.setContentsMargins(20, 15, 20, 15)
         
-        # Utility buttons (left side) - wrapped in QFrame for background color
-        utility_frame = QFrame()
-        utility_frame.setObjectName("utilityFrame")
-        utility_frame.setStyleSheet(f"""
-            QFrame#utilityFrame {{ background: {BACKGROUND}; border: 1px solid {BORDER}; border-radius: 8px; padding: 5px; }}
-        """)
-        utility_layout = QHBoxLayout(utility_frame)
+        # Utility buttons (left side)
+        utility_layout = QHBoxLayout()
         utility_layout.setSpacing(8)
-        utility_layout.setContentsMargins(10, 5, 10, 5)
         
         self.help_button = CustomButton("❓ Help", "secondary")
-        # self.help_button.setToolTip("Get help with invoice creation")
-        self.help_button.setCursor(Qt.PointingHandCursor)
+        self.help_button.setToolTip("Get help with invoice creation")
         self.help_button.clicked.connect(self.show_help)
         utility_layout.addWidget(self.help_button)
         
-        button_layout.addWidget(utility_frame)
+        button_layout.addLayout(utility_layout)
         button_layout.addStretch()
         
         # Action buttons (right side)
@@ -498,14 +456,12 @@ class InvoiceDialog(QDialog):
         # Cancel button
         self.cancel_button = CustomButton("❌ Cancel", "danger")
         self.cancel_button.setToolTip("Cancel and close without saving")
-        self.cancel_button.setCursor(Qt.PointingHandCursor)
         self.cancel_button.clicked.connect(self.reject)
         action_layout.addWidget(self.cancel_button)
         
         # Reset button
         self.reset_button = CustomButton("🔄 Reset", "secondary")
         self.reset_button.setToolTip("Clear all values and reset to defaults")
-        self.reset_button.setCursor(Qt.PointingHandCursor)
         self.reset_button.clicked.connect(self.reset_form)
         action_layout.addWidget(self.reset_button)
         
@@ -513,22 +469,19 @@ class InvoiceDialog(QDialog):
         save_text = "💾 Update & Print" if self.invoice_data else "💾 Save Print"
         self.save_print_button = CustomButton(save_text, "primary")
         self.save_print_button.setToolTip("Save invoice and open print preview")
-        self.save_print_button.setCursor(Qt.PointingHandCursor)
         self.save_print_button.clicked.connect(self.save_and_print)
         action_layout.addWidget(self.save_print_button)
         
         button_layout.addLayout(action_layout)
         self.main_layout.addWidget(button_container, 0)  # Stretch factor 0 - don't expand
 
-    def apply_final_styling(self) -> None:
-        """Apply final styling and setup additional features."""
+    def apply_final_styling(self):
         self.setAttribute(Qt.WA_TranslucentBackground, False)
         self.showMaximized()
         self.setup_keyboard_shortcuts()
         self.setup_validation()
 
-    def setup_keyboard_shortcuts(self) -> None:
-        """Setup keyboard shortcuts for common actions."""
+    def setup_keyboard_shortcuts(self):
         # Save shortcuts
         save_shortcut = QShortcut(QKeySequence.Save, self)
         save_shortcut.activated.connect(self.save_invoice)
@@ -560,14 +513,12 @@ class InvoiceDialog(QDialog):
         cancel_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self)
         cancel_shortcut.activated.connect(self.reject)
 
-    def setup_validation(self) -> None:
-        """Setup initial form validation state."""
+    def setup_validation(self):
         # Set initial balance due visibility based on default bill type
         if hasattr(self, 'billtype_combo'):
             self.on_bill_type_changed(self.billtype_combo.currentText())
 
-    def show_help(self) -> None:
-        """Show help dialog with instructions and keyboard shortcuts."""
+    def show_help(self):
         help_text = """
         <h3>📋 Invoice Creation Help</h3>
         
@@ -798,8 +749,8 @@ class InvoiceDialog(QDialog):
             QMessageBox.critical(self, "Print Error", 
                                f"An error occurred while printing:\n{str(e)}")
 
-    def save_and_print(self) -> None:
-        """Save invoice and open print preview."""
+    def save_and_print(self):
+        """Save invoice and open print preview"""
         try:
             # Show confirmation dialog first
             reply = QMessageBox.question(
@@ -829,13 +780,8 @@ class InvoiceDialog(QDialog):
             QMessageBox.critical(self, "Save & Print Error", 
                                f"An error occurred during save & print:\n{str(e)}")
 
-    def validate_invoice_for_final_save(self) -> bool:
-        """
-        Validate that invoice has all required data for final save.
-        
-        Returns:
-            True if validation passes, False otherwise.
-        """
+    def validate_invoice_for_final_save(self):
+        """Validate that invoice has all required data for final save"""
         # Check invoice number
         invoice_no = self.invoice_number.text().strip() if hasattr(self, 'invoice_number') else ''
         if not invoice_no:
@@ -897,13 +843,8 @@ class InvoiceDialog(QDialog):
         
         return True
 
-    def save_final_invoice(self) -> Optional[int]:
-        """
-        Save invoice with FINAL status via controller.
-        
-        Returns:
-            The invoice ID if save was successful, None otherwise.
-        """
+    def save_final_invoice(self):
+        """Save invoice with FINAL status via controller and return invoice ID."""
         try:
             # Collect party data
             party_text = getattr(self, 'party_search').text().strip()
@@ -913,7 +854,7 @@ class InvoiceDialog(QDialog):
                 raise Exception(f"Invalid party selected: {party_text}")
             
             # Collect items
-            items: List[Dict[str, Any]] = []
+            items = []
             for i in range(self.items_layout.count() - 1):
                 item_widget = self.items_layout.itemAt(i).widget()
                 if isinstance(item_widget, InvoiceItemWidget):
@@ -935,7 +876,7 @@ class InvoiceDialog(QDialog):
                     self.invoice_number.setText(invoice_no)
             
             # Prepare data for controller
-            invoice_data_dict: Dict[str, Any] = {
+            invoice_data_dict = {
                 'invoice_no': invoice_no,
                 'date': invoice_date,
                 'party_id': party_data['id'],
@@ -973,13 +914,8 @@ class InvoiceDialog(QDialog):
             QMessageBox.critical(self, "Save Error", f"Failed to save invoice: {str(e)}")
             return None
 
-    def disable_editing_after_final_save(self, show_message: bool = True) -> None:
-        """
-        Disable all editing controls after invoice is saved as FINAL.
-        
-        Args:
-            show_message: Whether to show a confirmation message to the user.
-        """
+    def disable_editing_after_final_save(self, show_message=True):
+        """Disable all editing controls after invoice is saved as FINAL"""
         # Disable the Save & Print button itself
         if hasattr(self, 'save_print_button'):
             self.save_print_button.setEnabled(False)
@@ -995,26 +931,13 @@ class InvoiceDialog(QDialog):
             QMessageBox.information(self, "Invoice Finalized", 
                                   "Invoice has been saved as FINAL and cannot be edited further.")
 
-    def show_print_preview(self, invoice_id: int) -> None:
-        """
-        Show HTML preview dialog for the invoice.
-        
-        Args:
-            invoice_id: The ID of the invoice to preview.
-        """
+    def show_print_preview(self, invoice_id):
+        """Show HTML preview dialog - uses common utility"""
         from ui.invoices.sales.invoice_preview_screen import show_invoice_preview
         show_invoice_preview(self, invoice_id)
 
-    def generate_invoice_html(self, invoice_id: int) -> Optional[str]:
-        """
-        Generate HTML content for the invoice.
-        
-        Args:
-            invoice_id: The ID of the invoice to generate HTML for.
-            
-        Returns:
-            HTML string if successful, None otherwise.
-        """
+    def generate_invoice_html(self, invoice_id):
+        """Generate HTML content for the invoice"""
         try:
             from ui.print.invoice_pdf_generator import InvoicePDFGenerator
             generator = InvoicePDFGenerator()
@@ -2363,7 +2286,7 @@ class InvoiceDialog(QDialog):
                 self.balance_label.setText(f"₹{balance:,.2f}")
             except Exception:
                 self.balance_label.setText("₹0.00")
-
+            
     # Items management
     def quick_add_product(self, product_data):
         """Quickly add a product to the invoice from the quick-select chips"""
@@ -2427,8 +2350,7 @@ class InvoiceDialog(QDialog):
             print(f"Quick add product error: {e}")
             QMessageBox.warning(self, "Error", f"Failed to add product: {str(e)}")
 
-    def add_item(self) -> None:
-        """Add a new invoice item row with validation."""
+    def add_item(self):
         # Check if the last item row has a product selected before adding new row
         if self.items_layout.count() > 1:  # There's at least one item row (plus stretch)
             last_item_widget = None
@@ -2462,13 +2384,7 @@ class InvoiceDialog(QDialog):
         # Auto-scroll to show the new row and set focus
         QTimer.singleShot(50, lambda: self.scroll_to_new_item(item_widget))
 
-    def remove_item(self, item_widget: InvoiceItemWidget) -> None:
-        """
-        Remove an invoice item row after confirmation.
-        
-        Args:
-            item_widget: The InvoiceItemWidget to remove.
-        """
+    def remove_item(self, item_widget):
         if self.items_layout.count() <= 2:
             QMessageBox.warning(self, "Cannot Remove", "🚫 At least one item is required for the invoice!")
             return
@@ -2519,8 +2435,7 @@ class InvoiceDialog(QDialog):
         except Exception as e:
             print(f"Error numbering items: {e}")
 
-    def update_totals(self) -> None:
-        """Update all totals, tax breakdowns, and balance due calculations."""
+    def update_totals(self):
         try:
             subtotal, total_discount, total_tax, item_count = 0, 0, 0, 0
             total_cgst, total_sgst, total_igst = 0, 0, 0
@@ -2661,8 +2576,7 @@ class InvoiceDialog(QDialog):
         except Exception as e:
             print(f"Error updating totals: {e}")
 
-    def save_invoice(self) -> None:
-        """Save the invoice with validation and user confirmation."""
+    def save_invoice(self):
         # Show confirmation dialog first
         action_text = "update" if self.invoice_data else "save"
         reply = QMessageBox.question(
@@ -2766,8 +2680,8 @@ class InvoiceDialog(QDialog):
         else:
             QMessageBox.critical(self, "Error", f"❌ {result.message}")
 
-    def reset_form(self) -> None:
-        """Reset all form fields to defaults and update date to today."""
+    def reset_form(self):
+        """Reset all form fields to defaults and update date to today"""
         try:
             # Show confirmation dialog first
             reply = QMessageBox.question(

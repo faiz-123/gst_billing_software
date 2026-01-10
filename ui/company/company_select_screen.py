@@ -3,12 +3,12 @@ Company Selection Screen for GST Billing Software
 Modern, responsive design with gradient background and card-based layout
 """
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, 
     QFrame, QScrollArea, QGraphicsDropShadowEffect, QSizePolicy
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QSize
-from PyQt5.QtGui import QFont, QColor, QCursor
+from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtGui import QFont, QColor, QCursor
 
 # Import database
 try:
@@ -20,9 +20,9 @@ except ImportError:
 class CompanyCard(QFrame):
     """Individual company card widget with modern styling"""
     
-    company_selected = pyqtSignal(str)  # Emits company name when selected
-    company_edit_requested = pyqtSignal(dict)  # Emits company data when edit is requested
-    company_delete_requested = pyqtSignal(dict)  # Emits company data when delete is requested
+    company_selected = Signal(str)  # Emits company name when selected
+    company_edit_requested = Signal(dict)  # Emits company data when edit is requested
+    company_delete_requested = Signal(dict)  # Emits company data when delete is requested
     
     # Avatar colors for variety
     AVATAR_COLORS = ["#667eea", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899"]
@@ -250,10 +250,10 @@ class CompanyCard(QFrame):
 class CompanySelectionScreen(QWidget):
     """Screen for selecting a company with modern design"""
     
-    company_selected = pyqtSignal(str)
-    new_company_requested = pyqtSignal()
-    edit_company_requested = pyqtSignal(dict)  # New signal for edit requests
-    delete_company_requested = pyqtSignal(dict)  # New signal for delete requests
+    company_selected = Signal(str)
+    new_company_requested = Signal()
+    edit_company_requested = Signal(dict)  # New signal for edit requests
+    delete_company_requested = Signal(dict)  # New signal for delete requests
     
     def __init__(self, parent=None):
         super().__init__(parent)

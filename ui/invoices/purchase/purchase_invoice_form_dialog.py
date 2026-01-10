@@ -4,8 +4,8 @@ Uses separate purchase_invoices table instead of the invoices table.
 Extends the base InvoiceDialog functionality with purchase-specific behavior.
 """
 
-from PyQt5.QtWidgets import QDialog, QMessageBox
-from PyQt5.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QDialog, QMessageBox
+from PySide6.QtCore import Qt, QTimer
 
 from ui.invoices.sales.sales_invoice_form_dialog import InvoiceDialog, InvoiceItemWidget
 from core.db.sqlite_db import db
@@ -31,7 +31,7 @@ class PurchaseInvoiceDialog(QDialog):
         
     def exec_(self):
         """Execute the inner dialog"""
-        result = self._inner_dialog.exec_()
+        result = self._inner_dialog.exec()
         # Mirror the result to this dialog
         if result == QDialog.Accepted:
             self.accept()
@@ -65,8 +65,8 @@ class PurchaseInvoiceDialogInner(InvoiceDialog):
         self.setWindowTitle(title)
         self.setModal(True)
         self.setWindowFlags(Qt.Dialog | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
-        from PyQt5.QtWidgets import QApplication
-        screen = QApplication.desktop().screenGeometry()
+        from PySide6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen().availableGeometry()
         self.setGeometry(screen)
         self.setMinimumSize(1200, 900)
         # Use amber/orange theme for purchases
@@ -91,9 +91,10 @@ class PurchaseInvoiceDialogInner(InvoiceDialog):
     
     def setup_action_buttons(self):
         """Setup action buttons - only Save Print for purchase invoices"""
-        from PyQt5.QtWidgets import QFrame, QHBoxLayout, QPushButton
-        from PyQt5.QtCore import Qt
-        from theme import WHITE, BORDER, WARNING, DANGER, PRIMARY
+        from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton
+        from PySide6.QtCore import Qt
+        from theme import WHITE, BORDER, WARNING, DANGER, PRIMARY, BACKGROUND
+        from widgets import CustomButton
         
         button_container = QFrame()
         button_container.setStyleSheet(f"""
@@ -105,27 +106,45 @@ class PurchaseInvoiceDialogInner(InvoiceDialog):
         button_layout.setContentsMargins(15, 10, 15, 10)
         
         # Utility buttons (left side)
-        utility_layout = QHBoxLayout()
+        utility_frame = QFrame()
+        utility_frame.setStyleSheet(f"""
+            QFrame {{ background: {BACKGROUND}; border: 1px solid {BORDER}; border-radius: 8px; padding: 5px; }}
+        """)
+        utility_layout = QHBoxLayout(utility_frame)
         utility_layout.setSpacing(8)
-        self.help_button = self.create_action_button("❓ Help", "help", WARNING, self.show_help, "Get help with invoice creation")
+        utility_layout.setContentsMargins(10, 5, 10, 5)
+        
+        self.help_button = CustomButton("❓ Help", "secondary")
+        self.help_button.setCursor(Qt.PointingHandCursor)
+        self.help_button.clicked.connect(self.show_help)
         utility_layout.addWidget(self.help_button)
-        button_layout.addLayout(utility_layout)
+        
+        button_layout.addWidget(utility_frame)
         button_layout.addStretch()
         
         # Action buttons (right side)
         action_layout = QHBoxLayout()
         action_layout.setSpacing(8)
         
-        self.cancel_button = self.create_action_button("❌ Cancel", "cancel", DANGER, self.reject, "Cancel and close without saving")
+        self.cancel_button = CustomButton("❌ Cancel", "danger")
+        self.cancel_button.setToolTip("Cancel and close without saving")
+        self.cancel_button.setCursor(Qt.PointingHandCursor)
+        self.cancel_button.clicked.connect(self.reject)
         action_layout.addWidget(self.cancel_button)
         
         # Reset button
-        self.reset_button = self.create_action_button("🔄 Reset", "reset", WARNING, self.reset_form, "Clear all values and reset to defaults")
+        self.reset_button = CustomButton("🔄 Reset", "secondary")
+        self.reset_button.setToolTip("Clear all values and reset to defaults")
+        self.reset_button.setCursor(Qt.PointingHandCursor)
+        self.reset_button.clicked.connect(self.reset_form)
         action_layout.addWidget(self.reset_button)
         
         # Only Save Print button (no separate Save Invoice button)
         save_text = "💾 Save Print" if not self.invoice_data else "💾 Update & Print"
-        self.save_print_button = self.create_action_button(save_text, "save_print", PRIMARY, self.save_and_print, "Save purchase invoice and open print preview")
+        self.save_print_button = CustomButton(save_text, "primary")
+        self.save_print_button.setToolTip("Save purchase invoice and open print preview")
+        self.save_print_button.setCursor(Qt.PointingHandCursor)
+        self.save_print_button.clicked.connect(self.save_and_print)
         action_layout.addWidget(self.save_print_button)
         
         button_layout.addLayout(action_layout)
@@ -486,7 +505,7 @@ class PurchaseInvoiceDialogInner(InvoiceDialog):
             
             # Set dates
             if hasattr(self, 'invoice_date'):
-                from PyQt5.QtCore import QDate
+                from PySide6.QtCore import QDate
                 date_str = invoice.get('date', '')
                 if date_str:
                     date_obj = QDate.fromString(date_str, 'yyyy-MM-dd')

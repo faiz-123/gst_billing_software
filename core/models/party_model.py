@@ -23,7 +23,6 @@ class Party:
     state: Optional[str] = None
     pincode: Optional[str] = None
     opening_balance: float = 0.0
-    balance_type: str = "dr"
     
     @classmethod
     def from_dict(cls, data: dict) -> 'Party':
@@ -41,8 +40,7 @@ class Party:
             city=data.get('city'),
             state=data.get('state'),
             pincode=data.get('pincode'),
-            opening_balance=float(data.get('opening_balance', 0) or 0),
-            balance_type=data.get('balance_type', 'dr')
+            opening_balance=float(data.get('opening_balance', 0) or 0)
         )
     
     def to_dict(self) -> dict:
@@ -60,16 +58,15 @@ class Party:
             'city': self.city,
             'state': self.state,
             'pincode': self.pincode,
-            'opening_balance': self.opening_balance,
-            'balance_type': self.balance_type
+            'opening_balance': self.opening_balance
         }
     
     @property
     def is_customer(self) -> bool:
         """Check if party is a customer"""
-        return self.party_type.lower() in ['customer', 'both']
+        return (self.party_type or '').lower() in ['customer', 'both']
     
     @property
     def is_supplier(self) -> bool:
         """Check if party is a supplier"""
-        return self.party_type.lower() in ['supplier', 'both']
+        return (self.party_type or '').lower() in ['supplier', 'both']

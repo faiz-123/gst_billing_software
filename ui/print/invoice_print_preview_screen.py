@@ -6,12 +6,12 @@ Professional, read-only interface for invoice printing
 
 import os
 import shutil
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
     QScrollArea, QFrame, QFileDialog, QMessageBox, QSplitter, QWidget
 )
-from PyQt5.QtCore import Qt, QUrl
-from PyQt5.QtGui import QPixmap, QFont
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QPixmap, QFont
 
 from theme import PRIMARY, SUCCESS, TEXT_SECONDARY, WHITE, BORDER, BACKGROUND
 
@@ -20,7 +20,7 @@ WEB_ENGINE_AVAILABLE = False
 QWebEngineView = None
 
 try:
-    from PyQt5.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtWebEngineWidgets import QWebEngineView
     WEB_ENGINE_AVAILABLE = True
 except ImportError:
     # Create a dummy class to prevent errors
@@ -1050,8 +1050,8 @@ The browser print dialog will give you the best quality output.""")
     def _handle_pdf_printing(self):
         """Handle PDF file printing (original functionality)"""
         # Instead of opening external app, show print options dialog
-        from PyQt5.QtPrintSupport import QPrintDialog, QPrinter
-        from PyQt5.QtGui import QPainter, QPixmap
+        from PySide6.QtPrintSupport import QPrintDialog, QPrinter
+        from PySide6.QtGui import QPainter, QPixmap
         
         try:
             # Create printer object
@@ -1062,7 +1062,7 @@ The browser print dialog will give you the best quality output.""")
             print_dialog = QPrintDialog(printer, self)
             print_dialog.setWindowTitle("Print Invoice")
             
-            if print_dialog.exec_() == QPrintDialog.Accepted:
+            if print_dialog.exec() == QPrintDialog.Accepted:
                 # User clicked OK in print dialog
                 print("✅ User confirmed printing")
                 
@@ -1087,7 +1087,7 @@ The browser print dialog will give you the best quality output.""")
         """Try to print PDF content directly"""
         try:
             import fitz  # PyMuPDF
-            from PyQt5.QtGui import QPainter, QPixmap
+            from PySide6.QtGui import QPainter, QPixmap
             
             # Open PDF document
             doc = fitz.open(self.pdf_path)
@@ -1214,7 +1214,7 @@ This method ensures the best quality PDF output with proper formatting.""")
         open_button = msg.addButton("Open in Browser", QMessageBox.AcceptRole)
         cancel_button = msg.addButton("Cancel", QMessageBox.RejectRole)
         
-        msg.exec_()
+        msg.exec()
         
         if msg.clickedButton() == open_button:
             # Open HTML in browser

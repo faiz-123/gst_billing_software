@@ -6,8 +6,8 @@ This integrates the login/company selection with the main application
 
 import sys
 import os
-from PyQt5.QtWidgets import QApplication, QMainWindow, QStackedWidget
-from PyQt5.QtCore import pyqtSlot
+from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
+from PySide6.QtCore import Slot
 
 # Add current directory to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -78,7 +78,7 @@ class AuthenticatedApp(QMainWindow):
         self.company_creation_screen.company_saved.connect(lambda data: print(f"Company saved: {data['company_name']}"))
         self.company_creation_screen.cancelled.connect(self.show_company_selection)
 
-    @pyqtSlot()
+    @Slot()
     def show_company_selection(self):
         """Show company selection screen"""
         print("Signal received: Showing company selection screen")
@@ -88,7 +88,7 @@ class AuthenticatedApp(QMainWindow):
         # Refresh companies list in case new company was added
         self.company_selection_screen.refresh_companies()
 
-    @pyqtSlot()
+    @Slot()
     def show_company_creation(self):
         """Show company creation screen"""
         print("Showing company creation screen")
@@ -98,7 +98,7 @@ class AuthenticatedApp(QMainWindow):
         # Reset form for new company
         self.company_creation_screen.reset_form()
 
-    @pyqtSlot(dict)
+    @Slot(dict)
     def show_company_edit(self, company_data):
         """Show company edit screen"""
         print(f"Showing company edit screen for: {company_data.get('name', 'Unknown')}")
@@ -117,7 +117,7 @@ class AuthenticatedApp(QMainWindow):
         self.stacked_widget.setCurrentWidget(edit_screen)
         self.showMaximized()
 
-    @pyqtSlot(str)
+    @Slot(str)
     def company_selected(self, company_name):
         """Handle company selection - Navigate to main application"""
         print(f"Company selected: {company_name}")
@@ -127,7 +127,7 @@ class AuthenticatedApp(QMainWindow):
         try:
             from core.db.sqlite_db import db
             from config import config
-            from PyQt5.QtWidgets import QMessageBox
+            from PySide6.QtWidgets import QMessageBox
             
             company = db.get_company_by_name(company_name)
             if company:
@@ -174,7 +174,7 @@ class AuthenticatedApp(QMainWindow):
         # Create and show main application
         self.show_main_application()
 
-    @pyqtSlot(dict)
+    @Slot(dict)
     def company_created(self, company_data):
         """Handle company creation - just navigate back and refresh"""
         print(f"Company created: {company_data['company_name']}")
@@ -182,17 +182,17 @@ class AuthenticatedApp(QMainWindow):
         # Just go back to company selection and refresh
         self.show_company_selection()
 
-    @pyqtSlot(dict)
+    @Slot(dict)
     def company_updated(self, company_data):
         """Handle company update"""
         print(f"Company updated: {company_data['company_name']}")
         # Refresh the company selection screen to show updated data
         self.show_company_selection()
 
-    @pyqtSlot(dict)
+    @Slot(dict)
     def delete_company(self, company_data):
         """Handle company deletion with confirmation"""
-        from PyQt5.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox
         
         # Show confirmation dialog
         company_name = company_data.get('name', 'Unknown Company')
@@ -258,7 +258,7 @@ class AuthenticatedApp(QMainWindow):
             print(f"Error opening main application: {e}")
             import traceback
             traceback.print_exc()
-            from PyQt5.QtWidgets import QMessageBox
+            from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(
                 self,
                 "Application Error",
@@ -289,7 +289,7 @@ def main():
     auth_app.show()
     
     # Run application
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

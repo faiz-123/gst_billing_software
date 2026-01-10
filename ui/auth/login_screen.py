@@ -3,16 +3,16 @@ Login Screen for GST Billing Software
 Modern, responsive design with gradient background and card-based layout
 """
 
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import QPropertyAnimation, QEasingCurve, QTimer
-from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer
+from PySide6.QtWidgets import QGraphicsDropShadowEffect
 
 
 class LoginScreen(QtWidgets.QWidget):
     """Login screen for user authentication"""
     
     # Signal emitted when login is successful
-    login_successful = QtCore.pyqtSignal()
+    login_successful = QtCore.Signal()
     
     def __init__(self, parent=None):
         super().__init__(parent)

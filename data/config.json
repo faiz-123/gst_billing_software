@@ -21,7 +21,7 @@
     "ui": {
         "theme": "default",
         "window_maximized": true,
-        "last_screen": "dashboard"
+        "last_screen": "products"
     },
     "database": {
         "path": "data/gst_billing.db",
@@ -29,24 +29,63 @@
         "backup_interval_days": 7
     },
     "invoice_draft": {
-        "party_name": "KAAMIL",
-        "invoice_date": "2026-01-08",
-        "bill_type": "CREDIT",
+        "party_name": "ANIL RATHOD",
+        "invoice_date": "2026-01-10",
+        "bill_type": "CASH",
         "invoice_type": "GST - Same State",
-        "internal_invoice_type": "GST - Same State",
+        "internal_invoice_type": "TAX Local",
         "items": [
             {
-                "product_id": 6,
-                "product_name": "BLUETOOTH EARPHONES",
+                "product_id": 15,
+                "product_name": "TYPE C CHARGER",
                 "hsn_no": "",
                 "quantity": 1.0,
                 "unit": "PCS",
-                "rate": 1299.0,
-                "discount_percent": 10.0,
-                "discount_amount": 129.9,
+                "rate": 600.0,
+                "discount_percent": 0.0,
+                "discount_amount": 0.0,
+                "tax_percent": 0.0,
+                "tax_amount": 0.0,
+                "amount": 600.0
+            },
+            {
+                "product_id": 13,
+                "product_name": "128 GB SANDISK MEMORY CARD",
+                "hsn_no": "",
+                "quantity": 1.0,
+                "unit": "PCS",
+                "rate": 5.0,
+                "discount_percent": 0.0,
+                "discount_amount": 0.0,
+                "tax_percent": 0.0,
+                "tax_amount": 0.0,
+                "amount": 5.0
+            },
+            {
+                "product_id": 12,
+                "product_name": "LAPTOP CMOS CELL",
+                "hsn_no": "",
+                "quantity": 1.0,
+                "unit": "PCS",
+                "rate": 200.0,
+                "discount_percent": 0.0,
+                "discount_amount": 0.0,
                 "tax_percent": 18.0,
-                "tax_amount": 210.438,
-                "amount": 1379.538
+                "tax_amount": 36.0,
+                "amount": 236.0
+            },
+            {
+                "product_id": 11,
+                "product_name": "DVR 16 CHANNE",
+                "hsn_no": "",
+                "quantity": 1.0,
+                "unit": "PCS",
+                "rate": 4500.0,
+                "discount_percent": 0.0,
+                "discount_amount": 0.0,
+                "tax_percent": 18.0,
+                "tax_amount": 810.0,
+                "amount": 5310.0
             },
             {
                 "product_id": 10,
@@ -62,20 +101,20 @@
                 "amount": 2124.0
             },
             {
-                "product_id": 9,
-                "product_name": "CAT 6 CABEL",
+                "product_id": 8,
+                "product_name": "CCTV CAMERA 2MP",
                 "hsn_no": "",
-                "quantity": 1.0,
+                "quantity": 5.0,
                 "unit": "PCS",
-                "rate": 20.0,
+                "rate": 1800.0,
                 "discount_percent": 0.0,
                 "discount_amount": 0.0,
                 "tax_percent": 18.0,
-                "tax_amount": 3.5999999999999996,
-                "amount": 23.6
+                "tax_amount": 1620.0,
+                "amount": 10620.0
             }
         ],
         "notes": "",
-        "saved_at": "2026-01-08"
+        "saved_at": "2026-01-10"
     }
 }

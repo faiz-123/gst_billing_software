@@ -5,21 +5,21 @@ Company Creation Screen for GST Billing Software
 import sys
 import re
 from typing import Optional, Dict, Any
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QLabel, QLineEdit, QTextEdit, QPushButton, QDateEdit,
     QVBoxLayout, QHBoxLayout, QGridLayout, QFileDialog, QMessageBox, QSizePolicy,
     QGroupBox, QSpacerItem
 )
-from PyQt5.QtGui import QFont, QPixmap
-from PyQt5.QtCore import Qt, QDate, pyqtSignal
+from PySide6.QtGui import QFont, QPixmap
+from PySide6.QtCore import Qt, QDate, Signal
 from ui.base.base_screen import BaseScreen
 
 
 class CompanyCreationScreen(QWidget):
     """Screen for creating a new company"""
     
-    company_created = pyqtSignal(dict)  # Emits company data when saved
-    cancelled = pyqtSignal()
+    company_created = Signal(dict)  # Emits company data when saved
+    cancelled = Signal()
     
     # Color constants
     PRIMARY = "#2563EB"
@@ -45,7 +45,7 @@ class CompanyCreationScreen(QWidget):
     MIN_WINDOW_SIZE = (800, 600)
 
     # Signals
-    company_saved = pyqtSignal(dict)  # Emitted when company data is saved successfully
+    company_saved = Signal(dict)  # Emitted when company data is saved successfully
 
     
     def __init__(self, parent=None, company_data=None):

@@ -3,21 +3,21 @@ Supplier Payment Dialog - Payment Recording Interface (Money OUT)
 For recording payments made to suppliers against purchase invoices.
 """
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, 
     QFrame, QDialog, QMessageBox, QLineEdit, QComboBox,
     QTextEdit, QDoubleSpinBox, QDateEdit, QScrollArea,
     QApplication, QGridLayout
 )
-from PyQt5.QtCore import Qt, QDate
-from PyQt5.QtGui import QFont
+from PySide6.QtCore import Qt, QDate
+from PySide6.QtGui import QFont
 
 from theme import (
     SUCCESS, DANGER, PRIMARY, WARNING, WHITE, TEXT_PRIMARY, TEXT_SECONDARY,
     BORDER, BACKGROUND, PRIMARY_HOVER
 )
 from core.db.sqlite_db import db
-from ui.parties.party_selector_dialog import PartySelector
+from widgets import PartySelector
 
 
 class SupplierPaymentDialog(QDialog):
@@ -57,7 +57,8 @@ class SupplierPaymentDialog(QDialog):
     
     def _center_window(self):
         """Center window on screen"""
-        screen = QApplication.desktop().screenGeometry()
+        # PySide6 compatible way to get screen geometry
+        screen = QApplication.primaryScreen().availableGeometry()
         x = (screen.width() - self.width()) // 2
         y = (screen.height() - self.height()) // 2
         self.move(x, y)
@@ -693,7 +694,7 @@ class SupplierPaymentDialog(QDialog):
             try:
                 dlg.resize(max(350, self.party_search.width()), 400)
                 pos = self.party_search.mapToGlobal(self.party_search.rect().bottomLeft())
-                screen = QApplication.desktop().availableGeometry()
+                screen = QApplication.primaryScreen().availableGeometry()
                 
                 x = pos.x()
                 y = pos.y() + 5
@@ -705,7 +706,7 @@ class SupplierPaymentDialog(QDialog):
             except Exception:
                 pass
             
-            if dlg.exec_() == QDialog.Accepted and dlg.selected_name:
+            if dlg.exec() == QDialog.Accepted and dlg.selected_name:
                 self.party_search.setText(dlg.selected_name)
         except Exception as e:
             print(f"Party selector error: {e}")

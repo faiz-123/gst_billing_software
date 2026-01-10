@@ -6,12 +6,67 @@ Business logic for payment and receipt operations
 from typing import List, Dict, Optional
 from datetime import datetime
 
+from core.db.sqlite_db import db as default_db
+
 
 class PaymentService:
     """Service class for payment-related business logic"""
     
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, db=None):
+        self.db = db or default_db
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # CRUD Operations (delegated to DB)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    def get_payments(self, payment_type: str = None) -> List[Dict]:
+        """
+        Get all payments, optionally filtered by type.
+        
+        Args:
+            payment_type: Filter by type ('PAYMENT' or 'RECEIPT')
+            
+        Returns:
+            List of payment dictionaries
+        """
+        return self.db.get_payments(payment_type) or []
+    
+    def get_payment_by_id(self, payment_id: int) -> Optional[Dict]:
+        """
+        Get a single payment by ID.
+        
+        Args:
+            payment_id: Payment ID
+            
+        Returns:
+            Payment dictionary or None
+        """
+        payments = self.db.get_payments()
+        for payment in payments:
+            if payment.get('id') == payment_id:
+                return payment
+        return None
+    
+    def delete_payment(self, payment_id: int) -> bool:
+        """
+        Delete a payment by ID.
+        
+        Args:
+            payment_id: Payment ID to delete
+            
+        Returns:
+            True if successful
+        """
+        try:
+            self.db.delete_payment(payment_id)
+            return True
+        except Exception as e:
+            print(f"[PaymentService] Error deleting payment: {e}")
+            return False
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # ID Generation
+    # ─────────────────────────────────────────────────────────────────────────
     
     def generate_payment_id(self, payment_type: str = "PAYMENT") -> str:
         """
@@ -156,3 +211,7 @@ class PaymentService:
             breakdown[mode]['amount'] = round(breakdown[mode]['amount'], 2)
         
         return breakdown
+
+
+# Singleton instance for app-wide use
+payment_service = PaymentService()

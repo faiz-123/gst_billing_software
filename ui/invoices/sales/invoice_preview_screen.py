@@ -7,11 +7,11 @@ import tempfile
 import os
 import webbrowser
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QFrame, QMessageBox, QFileDialog
 )
-from PyQt5.QtCore import Qt
+from PySide6.QtCore import Qt
 
 from theme import PRIMARY, WHITE, BORDER
 
@@ -73,7 +73,7 @@ def generate_invoice_html(parent, invoice_id):
 def show_html_preview_dialog(parent, html_content, invoice_id):
     """Show HTML preview directly in QWebEngineView"""
     try:
-        from PyQt5.QtWebEngineWidgets import QWebEngineView
+        from PySide6.QtWebEngineWidgets import QWebEngineView
     except ImportError:
         QMessageBox.critical(parent, "Error", 
                            "PyQtWebEngine not installed.\n\nRun: pip3 install PyQtWebEngine")
@@ -199,7 +199,7 @@ def show_html_preview_dialog(parent, html_content, invoice_id):
         preview_dialog.html_viewer = html_viewer
         
         # Show the dialog
-        preview_dialog.exec_()
+        preview_dialog.exec()
         
     except Exception as e:
         QMessageBox.critical(parent, "Preview Error", f"Failed to show preview: {str(e)}")
@@ -225,8 +225,8 @@ def open_html_in_browser(html_content, invoice_no):
 def save_invoice_as_pdf(preview_dialog):
     """Save invoice as PDF file"""
     try:
-        from PyQt5.QtCore import QMarginsF, QSizeF
-        from PyQt5.QtGui import QPageLayout, QPageSize
+        from PySide6.QtCore import QMarginsF, QSizeF
+        from PySide6.QtGui import QPageLayout, QPageSize
         
         invoice_no = preview_dialog.invoice_no
         

@@ -2,13 +2,13 @@
 Dashboard screen - Modern attractive overview of the application
 """
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QFrame, 
     QComboBox, QScrollArea, QSizePolicy, QGraphicsDropShadowEffect,
-    QGridLayout, QSpacerItem
+    QGridLayout, QSpacerItem, QDialog
 )
-from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
-from PyQt5.QtGui import QFont, QColor, QLinearGradient, QPainter, QBrush
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QFont, QColor, QLinearGradient, QPainter, QBrush
 
 from ui.base.base_screen import BaseScreen
 from widgets import CustomButton, CustomTable
@@ -477,9 +477,9 @@ class DashboardScreen(BaseScreen):
             
             # Calculate pending payments (invoices with Pending/Unpaid status)
             pending = sum(
-                float(inv.get('grand_total', 0)) 
+                float(inv.get('grand_total', 0) or 0) 
                 for inv in invoices 
-                if inv.get('status', '').lower() in ['pending', 'unpaid', 'draft']
+                if (inv.get('status') or '').lower() in ['pending', 'unpaid', 'draft']
             )
             
             # New invoices this week
@@ -489,7 +489,7 @@ class DashboardScreen(BaseScreen):
             ])
             
             # Count customers
-            customers = len([p for p in parties if p.get('party_type', '').lower() == 'customer'])
+            customers = len([p for p in parties if (p.get('party_type') or '').lower() == 'customer'])
             
             return {
                 'sales_today': f"₹{sales_today:,.0f}" if sales_today > 0 else "₹0",
@@ -699,7 +699,7 @@ class DashboardScreen(BaseScreen):
         """Open new invoice dialog"""
         try:
             dialog = InvoiceDialog(self)
-            if dialog.exec_() == dialog.Accepted:
+            if dialog.exec() == QDialog.Accepted:
                 self.refresh_data()
                 main_window = self._get_main_window()
                 if main_window:
@@ -711,7 +711,7 @@ class DashboardScreen(BaseScreen):
         """Open add product dialog"""
         try:
             dialog = ProductDialog(self)
-            if dialog.exec_() == dialog.Accepted:
+            if dialog.exec() == QDialog.Accepted:
                 self.refresh_data()
                 main_window = self._get_main_window()
                 if main_window:
@@ -723,7 +723,7 @@ class DashboardScreen(BaseScreen):
         """Open add party dialog"""
         try:
             dialog = PartyDialog(self)
-            if dialog.exec_() == dialog.Accepted:
+            if dialog.exec() == QDialog.Accepted:
                 self.refresh_data()
                 main_window = self._get_main_window()
                 if main_window:
@@ -735,7 +735,7 @@ class DashboardScreen(BaseScreen):
         """Open record payment dialog"""
         try:
             dialog = SupplierPaymentDialog(self)
-            if dialog.exec_() == dialog.Accepted:
+            if dialog.exec() == QDialog.Accepted:
                 self.refresh_data()
                 main_window = self._get_main_window()
                 if main_window:

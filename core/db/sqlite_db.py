@@ -110,6 +110,17 @@ class Database:
             )
             """
         )
+        
+        # Add balance_type column if it doesn't exist (for existing databases)
+        try:
+            self._execute(
+                """
+                ALTER TABLE parties ADD COLUMN balance_type TEXT DEFAULT 'dr'
+                """
+            )
+        except Exception:
+            pass  # Column already exists
+        
         # Create table for products
         self._execute(
             """
@@ -288,7 +299,6 @@ class Database:
             ("state", "TEXT"),
             ("pincode", "TEXT"),
             ("opening_balance", "REAL DEFAULT 0"),
-            ("balance_type", "TEXT DEFAULT 'dr'"),
         ]:
             try:
                 self._ensure_column("parties", col, decl)
@@ -468,7 +478,7 @@ class Database:
             state = d.get('state')
             pincode = d.get('pincode')
             opening = d.get('opening_balance', 0) or 0
-            bal_type = d.get('balance_type', 'dr')
+            balance_type = d.get('balance_type', 'dr')
             is_gst = d.get('is_gst_registered', 1 if gst else 0)
             party_type = d.get('type') or d.get('party_type', 'Customer')
         else:
@@ -483,7 +493,7 @@ class Database:
             state = kwargs.get('state')
             pincode = kwargs.get('pincode')
             opening = kwargs.get('opening_balance', 0) or 0
-            bal_type = kwargs.get('balance_type', 'dr')
+            balance_type = kwargs.get('balance_type', 'dr')
             is_gst = kwargs.get('is_gst_registered', 0)
             party_type = kwargs.get('party_type', 'Customer')
 
@@ -492,9 +502,37 @@ class Database:
             INSERT INTO parties(company_id, name, mobile, email, party_type, gst_number, pan, address, city, state, pincode, opening_balance, balance_type)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
-            (self._current_company_id, name, phone, email, party_type, gst, pan, address, city, state, pincode, float(opening or 0), bal_type),
+            (self._current_company_id, name, phone, email, party_type, gst, pan, address, city, state, pincode, float(opening or 0), balance_type),
         )
         return cur.lastrowid
+
+    def update_party(self, party_id: int, party_data: dict) -> bool:
+        """Update an existing party"""
+        d = party_data
+        name = d.get('name')
+        phone = d.get('phone') or d.get('mobile')
+        email = d.get('email')
+        gst = d.get('gst_number') or d.get('gstin')
+        pan = d.get('pan')
+        address = d.get('address')
+        city = d.get('city')
+        state = d.get('state')
+        pincode = d.get('pincode')
+        opening = d.get('opening_balance', 0) or 0
+        balance_type = d.get('balance_type', 'dr')
+        party_type = d.get('type') or d.get('party_type', 'Customer')
+        
+        self._execute(
+            """
+            UPDATE parties SET 
+                name = ?, mobile = ?, email = ?, party_type = ?, 
+                gst_number = ?, pan = ?, address = ?, city = ?, 
+                state = ?, pincode = ?, opening_balance = ?, balance_type = ?
+            WHERE id = ?
+            """,
+            (name, phone, email, party_type, gst, pan, address, city, state, pincode, float(opening or 0), balance_type, party_id),
+        )
+        return True
 
     def get_parties(self):
         if self._current_company_id:
