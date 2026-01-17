@@ -396,8 +396,48 @@ class PartyDialog(BaseDialog):
         self.city_input = DialogInput("Enter city")
         return self.city_input
     
-    def _create_state_input(self) -> DialogInput:
-        self.state_input = DialogInput("Enter state")
+    def _create_state_input(self) -> DialogComboBox:
+        # List of all Indian states and union territories
+        indian_states = [
+            "",  # Empty option for no selection
+            # "Andaman and Nicobar Islands",
+            "Andhra Pradesh",
+            "Arunachal Pradesh",
+            "Assam",
+            "Bihar",
+            "Chandigarh",
+            "Chhattisgarh",
+            # "Dadra and Nagar Haveli and Daman and Diu",
+            "Delhi",
+            "Goa",
+            "Gujarat",
+            "Haryana",
+            "Himachal Pradesh",
+            "Jammu and Kashmir",
+            "Jharkhand",
+            "Karnataka",
+            "Kerala",
+            "Ladakh",
+            "Lakshadweep",
+            "Madhya Pradesh",
+            "Maharashtra",
+            "Manipur",
+            "Meghalaya",
+            "Mizoram",
+            "Nagaland",
+            "Odisha",
+            "Puducherry",
+            "Punjab",
+            "Rajasthan",
+            "Sikkim",
+            "Tamil Nadu",
+            "Telangana",
+            "Tripura",
+            "Uttar Pradesh",
+            "Uttarakhand",
+            "West Bengal",
+        ]
+        self.state_input = DialogComboBox(indian_states)
         return self.state_input
     
     def _create_pincode_input(self) -> DialogInput:
@@ -468,7 +508,12 @@ class PartyDialog(BaseDialog):
             if bt_index >= 0:
                 self.balance_type_combo.setCurrentIndex(bt_index)
         
-        self.state_input.setText(d.get('state', ''))
+        # State (combo box)
+        state_value = d.get('state', '')
+        state_index = self.state_input.findText(state_value)
+        if state_index >= 0:
+            self.state_input.setCurrentIndex(state_index)
+        
         self.city_input.setText(d.get('city', ''))
         self.pincode_input.setText(d.get('pincode', ''))
         
@@ -494,7 +539,7 @@ class PartyDialog(BaseDialog):
         gst = self.gst_number_input.text().strip()
         pan = self.pan_input.text().strip()
         address = self.address_input.toPlainText().strip()
-        state = self.state_input.text().strip()
+        state = self.state_input.currentText().strip()
         city = self.city_input.text().strip()
         pincode = self.pincode_input.text().strip()
         party_type = self.type_combo.currentText().strip()

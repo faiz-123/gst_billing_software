@@ -18,7 +18,7 @@ from theme import (
     get_link_label_style, get_scroll_area_style
 )
 from widgets import (
-    DialogInput, DialogComboBox, DialogSpinBox, DialogDoubleSpinBox,
+    DialogInput, DialogComboBox, DialogEditableComboBox, DialogSpinBox, DialogDoubleSpinBox,
     DialogCheckBox, DialogTextEdit, DialogFieldGroup, CustomButton
 )
 from ui.base.base_dialog import BaseDialog
@@ -441,9 +441,14 @@ class ProductDialog(BaseDialog):
         self.type_combo = DialogComboBox(["Goods", "Service"])
         return self.type_combo
     
-    def _create_category_input(self) -> DialogInput:
-        self.category_input = DialogInput("e.g., Electronics, Clothing")
-        self.category_input.textChanged.connect(lambda text: to_upper(self.category_input, text))
+    def _create_category_input(self) -> DialogEditableComboBox:
+        # Get existing categories from database
+        existing_categories = db.get_product_categories()
+        self.category_input = DialogEditableComboBox(
+            items=existing_categories,
+            placeholder="Select or type new category",
+            auto_upper=True
+        )
         return self.category_input
     
     def _create_unit_combo(self) -> DialogComboBox:

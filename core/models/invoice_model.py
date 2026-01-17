@@ -70,8 +70,7 @@ class Invoice:
     invoice_no: str = ""
     date: str = ""
     party_id: Optional[int] = None
-    tax_type: str = "GST"
-    internal_type: Optional[str] = None
+    tax_type: str = "GST - Same State"
     bill_type: str = "CASH"
     subtotal: float = 0.0
     discount: float = 0.0
@@ -95,8 +94,7 @@ class Invoice:
             invoice_no=data.get('invoice_no', ''),
             date=data.get('date', ''),
             party_id=data.get('party_id'),
-            tax_type=data.get('tax_type', 'GST'),
-            internal_type=data.get('internal_type'),
+            tax_type=data.get('tax_type', 'GST - Same State'),
             bill_type=data.get('bill_type', 'CASH'),
             subtotal=float(data.get('subtotal', 0) or 0),
             discount=float(data.get('discount', 0) or 0),
@@ -125,7 +123,6 @@ class Invoice:
             'date': self.date,
             'party_id': self.party_id,
             'tax_type': self.tax_type,
-            'internal_type': self.internal_type,
             'bill_type': self.bill_type,
             'subtotal': self.subtotal,
             'discount': self.discount,

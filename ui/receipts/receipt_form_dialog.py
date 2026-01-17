@@ -1665,8 +1665,8 @@ class ReceiptDialog(QDialog):
                 continue
             
             inv_no = inv.get('invoice_no', f"INV-{inv.get('id', 0):03d}")
-            status = inv.get('status', 'Sent')
-            icon = "📄" if status == 'Sent' else "⏰" if status == 'Overdue' else "✓"
+            status = inv.get('status', 'Unpaid')
+            icon = "📄" if status == 'Unpaid' else "⏰" if status == 'Overdue' else "✓"
             
             display = f"{icon} {inv_no} — ₹{due:,.2f} due"
             self.invoice_combo.addItem(display, inv)

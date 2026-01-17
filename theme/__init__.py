@@ -63,7 +63,20 @@ from .styles import (
     # PDF preview styles
     get_pdf_preview_dialog_style, get_pdf_page_container_style,
     get_pdf_page_label_style, get_pdf_toolbar_style,
-    get_pdf_toolbar_button_style, get_pdf_page_info_style
+    get_pdf_toolbar_button_style, get_pdf_page_info_style,
+    # Items section improvements
+    get_item_row_even_style, get_item_row_odd_style, get_item_row_error_style,
+    get_empty_state_style, get_quick_chip_recent_style, get_stock_indicator_style,
+    get_action_icon_button_style,
+    # Invoice totals section styles (NEW)
+    get_totals_row_label_style, get_totals_row_value_style,
+    get_subtotal_value_style, get_discount_value_style, get_tax_value_style,
+    get_tax_breakdown_style, get_other_charges_input_style,
+    get_grand_total_row_style, get_grand_total_label_enhanced_style,
+    get_grand_total_value_enhanced_style, get_paid_amount_input_style,
+    get_balance_due_style_dynamic, get_roundoff_row_style,
+    get_invoice_discount_input_style, get_totals_separator_style,
+    get_previous_balance_style
 )
 
 __all__ = [
@@ -126,5 +139,18 @@ __all__ = [
     # PDF preview styles
     'get_pdf_preview_dialog_style', 'get_pdf_page_container_style',
     'get_pdf_page_label_style', 'get_pdf_toolbar_style',
-    'get_pdf_toolbar_button_style', 'get_pdf_page_info_style'
+    'get_pdf_toolbar_button_style', 'get_pdf_page_info_style',
+    # Items section improvements
+    'get_item_row_even_style', 'get_item_row_odd_style', 'get_item_row_error_style',
+    'get_empty_state_style', 'get_quick_chip_recent_style', 'get_stock_indicator_style',
+    'get_action_icon_button_style',
+    # Invoice totals section styles (NEW)
+    'get_totals_row_label_style', 'get_totals_row_value_style',
+    'get_subtotal_value_style', 'get_discount_value_style', 'get_tax_value_style',
+    'get_tax_breakdown_style', 'get_other_charges_input_style',
+    'get_grand_total_row_style', 'get_grand_total_label_enhanced_style',
+    'get_grand_total_value_enhanced_style', 'get_paid_amount_input_style',
+    'get_balance_due_style_dynamic', 'get_roundoff_row_style',
+    'get_invoice_discount_input_style', 'get_totals_separator_style',
+    'get_previous_balance_style'
 ]

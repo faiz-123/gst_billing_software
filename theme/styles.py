@@ -83,53 +83,154 @@ QPushButton {{
 
 
 def get_button_style(button_type="primary"):
-    """Get button stylesheet by type
+    """Get button stylesheet by type with PySide6 compatibility
     
     Args:
-        button_type: Type of button (primary, secondary, danger, success)
+        button_type: Type of button (primary, secondary, danger, success, warning)
         
     Returns:
-        str: CSS stylesheet string
+        str: CSS stylesheet string with all states (normal, hover, pressed, disabled)
     """
     styles = {
         "primary": f"""
             QPushButton {{
-                background: {PRIMARY};
+                background-color: {PRIMARY};
                 color: {WHITE};
                 border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+                min-height: 25px;
+                outline: none;
             }}
             QPushButton:hover {{
-                background: {PRIMARY_HOVER};
+                background-color: {PRIMARY_HOVER};
+                border: none;
+            }}
+            QPushButton:pressed {{
+                background-color: #1D4ED8;
+            }}
+            QPushButton:disabled {{
+                background-color: #BDBDBD;
+                color: #757575;
+                border: none;
+            }}
+            QPushButton:focus {{
+                outline: none;
+                border: none;
             }}
         """,
         "secondary": f"""
             QPushButton {{
-                background: {WHITE};
+                background-color: {WHITE};
                 color: {TEXT_PRIMARY};
                 border: 1px solid {BORDER};
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+                min-height: 25px;
+                outline: none;
             }}
             QPushButton:hover {{
-                background: {BACKGROUND};
+                background-color: {BACKGROUND};
+                border: 1px solid {PRIMARY};
+                color: {PRIMARY};
+            }}
+            QPushButton:pressed {{
+                background-color: #E8F0FF;
+            }}
+            QPushButton:disabled {{
+                background-color: #FAFAFA;
+                color: #BDBDBD;
+                border: 1px solid #E0E0E0;
+            }}
+            QPushButton:focus {{
+                outline: none;
+                border: 1px solid {PRIMARY};
             }}
         """,
         "danger": f"""
             QPushButton {{
-                background: {DANGER};
+                background-color: {DANGER};
                 color: {WHITE};
                 border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+                min-height: 25px;
+                outline: none;
             }}
             QPushButton:hover {{
-                background: #DC2626;
+                background-color: #DC2626;
+                border: none;
+            }}
+            QPushButton:pressed {{
+                background-color: #991B1B;
+            }}
+            QPushButton:disabled {{
+                background-color: #BDBDBD;
+                color: #757575;
+                border: none;
+            }}
+            QPushButton:focus {{
+                outline: none;
+                border: none;
             }}
         """,
         "success": f"""
             QPushButton {{
-                background: {SUCCESS};
+                background-color: {SUCCESS};
                 color: {WHITE};
                 border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+                min-height: 25px;
+                outline: none;
             }}
             QPushButton:hover {{
-                background: #059669;
+                background-color: #059669;
+                border: none;
+            }}
+            QPushButton:pressed {{
+                background-color: #065F46;
+            }}
+            QPushButton:disabled {{
+                background-color: #BDBDBD;
+                color: #757575;
+                border: none;
+            }}
+            QPushButton:focus {{
+                outline: none;
+                border: none;
+            }}
+        """,
+        "warning": f"""
+            QPushButton {{
+                background-color: #F59E0B;
+                color: {WHITE};
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: bold;
+                min-height: 25px;
+                outline: none;
+            }}
+            QPushButton:hover {{
+                background-color: #D97706;
+                border: none;
+            }}
+            QPushButton:pressed {{
+                background-color: #B45309;
+            }}
+            QPushButton:disabled {{
+                background-color: #BDBDBD;
+                color: #757575;
+                border: none;
+            }}
+            QPushButton:focus {{
+                outline: none;
+                border: none;
             }}
         """
     }
@@ -195,14 +296,17 @@ def get_calendar_stylesheet():
             border: 2px solid {BORDER};
             border-radius: 10px;
             font-size: 14px;
+            min-width: 300px;
+            min-height: 280px;
         }}
         
         /* Navigation bar styling */
         QCalendarWidget QWidget#qt_calendar_navigationbar {{
             background-color: {PRIMARY};
             color: {WHITE};
-            border-radius: 8px;
-            height: 40px;
+            border-radius: 8px 8px 0 0;
+            min-height: 45px;
+            padding: 4px;
         }}
         
         /* Navigation buttons */
@@ -211,14 +315,32 @@ def get_calendar_stylesheet():
             color: {WHITE};
             border: none;
             border-radius: 5px;
-            padding: 1px;
+            padding: 6px;
             font-weight: bold;
             font-size: 14px;
-            min-width: 50px;
-            height: 40px;
+            min-width: 40px;
+            min-height: 35px;
         }}
         QCalendarWidget QToolButton:hover {{
             background-color: {PRIMARY_HOVER};
+        }}
+        QCalendarWidget QToolButton#qt_calendar_prevmonth,
+        QCalendarWidget QToolButton#qt_calendar_nextmonth {{
+            min-width: 35px;
+            max-width: 35px;
+            qproperty-icon: none;
+        }}
+        QCalendarWidget QToolButton#qt_calendar_prevmonth {{
+            qproperty-text: "<";
+        }}
+        QCalendarWidget QToolButton#qt_calendar_nextmonth {{
+            qproperty-text: ">";
+        }}
+        
+        /* Month/Year menu button */
+        QCalendarWidget QToolButton::menu-indicator {{
+            image: none;
+            width: 0px;
         }}
         
         /* Month/Year spinboxes */
@@ -227,14 +349,14 @@ def get_calendar_stylesheet():
             color: {TEXT_PRIMARY};
             border: 1px solid {BORDER};
             border-radius: 5px;
-            padding: 1px;
+            padding: 4px;
             font-size: 14px;
+            min-width: 60px;
         }}
         
-        /* Day header (Mon, Tue, etc.) */
-        QCalendarWidget QWidget {{ 
-            alternate-background-color: {BACKGROUND};
-            padding: 0px;
+        /* Main calendar view container */
+        QCalendarWidget QWidget {{
+            alternate-background-color: {WHITE};
         }}
         
         /* Main calendar grid */
@@ -242,46 +364,58 @@ def get_calendar_stylesheet():
             background-color: {WHITE};
             alternate-background-color: {WHITE};
             color: {TEXT_PRIMARY};
-            gridline-color: {BORDER};
+            gridline-color: #E5E7EB;
             selection-background-color: {PRIMARY};
             selection-color: {WHITE};
-            font-size: 15px;
-            font-weight: bold;
+            font-size: 14px;
             outline: none;
+            border: none;
         }}
         
-        /* Individual date cells */
-        QCalendarWidget QTableView::item {{
+        /* Individual date cells - explicit styling */
+        QCalendarWidget QAbstractItemView:enabled {{
             color: #111827;
-            background-color: #FFFFFF;
-            border: 1px solid #E5E7EB;
-            padding: 8px;
-            font-size: 16px;
-            font-weight: bold;
-            text-align: center;
+            background-color: {WHITE};
+            font-size: 14px;
+            font-weight: 500;
         }}
         
+        QCalendarWidget QAbstractItemView:disabled {{
+            color: #9CA3AF;
+        }}
+        
+        /* Selected date */
         QCalendarWidget QTableView::item:selected {{
             background-color: {PRIMARY};
             color: {WHITE};
-            border: 2px solid {PRIMARY_HOVER};
+            border-radius: 4px;
             font-weight: bold;
         }}
         
+        /* Hover state */
         QCalendarWidget QTableView::item:hover {{
-            background-color: #F3F4F6;
+            background-color: #DBEAFE;
             color: #111827;
-            border: 2px solid {PRIMARY};
+            border-radius: 4px;
         }}
         
-        /* Header for days of week */
+        /* Header for days of week (Mon, Tue, etc.) */
+        QCalendarWidget QHeaderView {{
+            background-color: #F3F4F6;
+        }}
         QCalendarWidget QHeaderView::section {{
-            background-color: {BACKGROUND};
-            color: {TEXT_PRIMARY};
-            border: 1px solid {BORDER};
-            padding: 8px;
-            font-weight: bold;
-            font-size: 14px;
+            background-color: #F3F4F6;
+            color: #374151;
+            border: none;
+            padding: 6px;
+            font-weight: 600;
+            font-size: 12px;
+        }}
+        
+        /* Weekend days - slightly different color */
+        QCalendarWidget QHeaderView::section:first,
+        QCalendarWidget QHeaderView::section:last {{
+            color: #6B7280;
         }}
     """
 
@@ -1115,6 +1249,15 @@ def get_invoice_dialog_style():
         QDialog {{
             background: {BACKGROUND};
         }}
+        QToolTip {{
+            background-color: #1F2937;
+            color: #FFFFFF;
+            border: 1px solid #374151;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 13px;
+            font-weight: normal;
+        }}
     """
 
 
@@ -1221,34 +1364,59 @@ def get_form_combo_style():
 
 
 def get_date_edit_style():
-    """Get date edit widget style"""
+    """Get date edit widget style with calendar icon and proper dropdown"""
     return f"""
         QDateEdit {{
-            border: 1px solid {BORDER};
+            border: 2px solid {BORDER};
+            border-bottom: 2px solid {BORDER};
             border-radius: 6px;
-            padding: 8px 12px;
+            padding: 6px 8px;
+            padding-right: 30px;
             background: {WHITE};
             color: {TEXT_PRIMARY};
             font-size: {FONT_SIZE_NORMAL}px;
-            min-height: 20px;
+            font-weight: 500;
+            min-height: 24px;
+            margin-bottom: 2px;
         }}
         QDateEdit:focus {{
-            border-color: {PRIMARY};
+            border: 2px solid {PRIMARY};
+            border-bottom: 2px solid {PRIMARY};
+        }}
+        QDateEdit::drop-down {{
+            subcontrol-origin: padding;
+            subcontrol-position: center right;
+            width: 28px;
+            border: none;
+            background: transparent;
+            margin-right: 2px;
+        }}
+        QDateEdit::down-arrow {{
+            image: url(assets/icons/calendar.png);
+            width: 18px;
+            height: 18px;
+        }}
+        QDateEdit QAbstractItemView {{
+            background: {WHITE};
+            color: {TEXT_PRIMARY};
+            selection-background-color: {PRIMARY};
+            selection-color: {WHITE};
+            border: 1px solid {BORDER};
         }}
     """
 
 
 def get_invoice_number_input_style():
-    """Get invoice number input style"""
+    """Get invoice number input style - Red color for visibility"""
     return f"""
         QLineEdit {{
-            background: {BACKGROUND};
-            border: 1px solid {BORDER};
+            background: #FEF2F2;
+            border: 2px solid #EF4444;
             border-radius: 6px;
             padding: 8px 12px;
-            color: {TEXT_SECONDARY};
+            color: #DC2626;
             font-size: {FONT_SIZE_NORMAL}px;
-            font-weight: 600;
+            font-weight: 700;
         }}
     """
 
@@ -1642,14 +1810,185 @@ def get_items_header_style():
 
 
 def get_items_header_label_style():
-    """Get items header label style"""
+    """Get items header label style - clean uppercase without emojis"""
     return f"""
         QLabel {{
             color: {TEXT_SECONDARY};
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: {BACKGROUND};
+            border: none;
+            padding: 8px 4px;
+        }}
+    """
+
+
+def get_item_row_even_style():
+    """Get style for even-numbered item rows with hover highlight"""
+    return f"""
+        QFrame {{
+            background: {WHITE};
+            border: 1px solid {BORDER};
+            border-radius: 6px;
+            margin: 1px 0;
+        }}
+        QFrame:hover {{
+            background: #F3F4F6;
+            border: 2px solid {PRIMARY};
+            padding: 0px;
+            margin: 0px;
+        }}
+    """
+
+
+def get_item_row_odd_style():
+    """Get style for odd-numbered item rows with hover highlight"""
+    return f"""
+        QFrame {{
+            background: #F9FAFB;
+            border: 1px solid {BORDER};
+            border-radius: 6px;
+            margin: 1px 0;
+        }}
+        QFrame:hover {{
+            background: #F3F4F6;
+            border: 2px solid {PRIMARY};
+            padding: 0px;
+            margin: 0px;
+        }}
+    """
+
+
+def get_item_row_error_style():
+    """Get style for item row with validation error - with hover highlight"""
+    return f"""
+        QFrame {{
+            background: #FEF2F2;
+            border: 2px solid {DANGER};
+            border-radius: 6px;
+            margin: 1px 0;
+        }}
+        QFrame:hover {{
+            background: #FEE2E2;
+            border: 2px solid {DANGER};
+        }}
+    """
+
+
+def get_empty_state_style():
+    """Get style for empty state message in items section"""
+    return f"""
+        QLabel {{
+            color: {TEXT_SECONDARY};
+            font-size: 14px;
+            font-style: italic;
+            padding: 40px 20px;
+            background: {BACKGROUND};
+            border: 2px dashed {BORDER};
+            border-radius: 8px;
+        }}
+    """
+
+
+def get_quick_chip_recent_style():
+    """Get style for recently used product chips (highlighted)"""
+    return f"""
+        QPushButton {{
+            background: #EFF6FF;
+            color: {PRIMARY};
+            border: 1px solid {PRIMARY};
+            border-radius: 16px;
+            padding: 6px 14px;
             font-size: {FONT_SIZE_SMALL}px;
             font-weight: 600;
-            background: transparent;
-            border: none;
+        }}
+        QPushButton:hover {{
+            background: {PRIMARY};
+            color: {WHITE};
+        }}
+    """
+
+
+def get_stock_indicator_style(in_stock: bool = True):
+    """Get style for stock availability indicator"""
+    if in_stock:
+        return f"""
+            QLabel {{
+                color: {SUCCESS};
+                font-size: 10px;
+                font-weight: 500;
+                background: {SUCCESS_LIGHT};
+                border-radius: 3px;
+                padding: 2px 6px;
+            }}
+        """
+    else:
+        return f"""
+            QLabel {{
+                color: {DANGER};
+                font-size: 10px;
+                font-weight: 500;
+                background: {DANGER_LIGHT};
+                border-radius: 3px;
+                padding: 2px 6px;
+            }}
+        """
+
+
+def get_action_icon_button_style(color: str = None):
+    """Get style for small action icon buttons with enhanced hover, pressed, disabled, and focus states"""
+    bg_color = color or SUCCESS
+    # Calculate hover and shadow colors based on button color
+    hover_color = PRIMARY_HOVER if bg_color == SUCCESS else '#DC2626'
+    # Calculate shadow color (with reduced opacity for subtle effect)
+    if bg_color == SUCCESS:
+        shadow_color = '16, 185, 129'  # SUCCESS RGB
+        border_color = '#059669'  # Darker green
+        focus_color = PRIMARY  # Blue focus ring for visibility
+    else:  # DANGER color
+        shadow_color = '239, 68, 68'  # DANGER RGB
+        border_color = '#B91C1C'  # Darker red
+        focus_color = PRIMARY  # Blue focus ring for visibility
+    
+    return f"""
+        QPushButton {{
+            background: {bg_color};
+            color: {WHITE};
+            border: 2px solid transparent;
+            border-radius: 4px;
+            padding: 3px;
+            font-size: 14px;
+            font-weight: bold;
+            min-width: 24px;
+            max-width: 24px;
+            min-height: 24px;
+            max-height: 24px;
+            outline: none;
+        }}
+        QPushButton:hover {{
+            background: {hover_color};
+            border: 2px solid {border_color};
+        }}
+        QPushButton:pressed {{
+            background: {border_color};
+            border: 2px solid {border_color};
+            padding: 4px 2px 2px 4px;
+        }}
+        QPushButton:focus {{
+            border: 2px solid {focus_color};
+            outline: none;
+        }}
+        QPushButton:focus:hover {{
+            border: 2px solid {border_color};
+        }}
+        QPushButton:disabled {{
+            background: #CCCCCC;
+            color: #999999;
+            border: 2px solid #DDDDDD;
+            outline: none;
+            opacity: 0.6;
         }}
     """
 
@@ -1720,5 +2059,292 @@ def get_pdf_page_info_style():
             color: {TEXT_SECONDARY};
             font-size: {FONT_SIZE_SMALL}px;
             background: transparent;
+        }}
+    """
+
+
+# ============== INVOICE TOTALS SECTION STYLES ==============
+
+def get_totals_row_label_style():
+    """Get style for totals section row labels (right-aligned)"""
+    return f"""
+        QLabel {{
+            font-size: 13px;
+            font-weight: 500;
+            color: {TEXT_SECONDARY};
+            background: transparent;
+            border: none;
+            padding: 4px 0;
+        }}
+    """
+
+
+def get_totals_row_value_style():
+    """Get style for totals section row values"""
+    return f"""
+        QLabel {{
+            font-size: 14px;
+            font-weight: 600;
+            color: {TEXT_PRIMARY};
+            background: transparent;
+            border: none;
+            padding: 4px 8px;
+            min-width: 100px;
+        }}
+    """
+
+
+def get_subtotal_value_style():
+    """Get style for subtotal value"""
+    return f"""
+        QLabel {{
+            font-size: 14px;
+            font-weight: 600;
+            color: {TEXT_PRIMARY};
+            background: {BACKGROUND};
+            border: 1px solid {BORDER};
+            border-radius: 4px;
+            padding: 6px 10px;
+            min-width: 100px;
+        }}
+    """
+
+
+def get_discount_value_style():
+    """Get style for discount value (red/negative)"""
+    return f"""
+        QLabel {{
+            font-size: 13px;
+            font-weight: 600;
+            color: #DC2626;
+            background: #FEF2F2;
+            border: 1px solid #FECACA;
+            border-radius: 4px;
+            padding: 4px 8px;
+            min-width: 80px;
+            max-width: 120px;
+        }}
+    """
+
+
+def get_tax_value_style():
+    """Get style for tax value"""
+    return f"""
+        QLabel {{
+            font-size: 14px;
+            font-weight: 600;
+            color: #059669;
+            background: #ECFDF5;
+            border: 1px solid #A7F3D0;
+            border-radius: 4px;
+            padding: 6px 10px;
+            min-width: 100px;
+        }}
+    """
+
+
+def get_tax_breakdown_style():
+    """Get style for tax breakdown box (CGST/SGST or IGST)"""
+    return f"""
+        QLabel {{
+            font-size: 11px;
+            color: {TEXT_SECONDARY};
+            background: #F9FAFB;
+            border: 1px solid {BORDER};
+            border-radius: 4px;
+            padding: 4px 8px;
+        }}
+    """
+
+
+def get_other_charges_input_style():
+    """Get style for other charges input field"""
+    return f"""
+        QDoubleSpinBox {{
+            font-size: 13px;
+            font-weight: 500;
+            border: 1px solid {BORDER};
+            border-radius: 4px;
+            padding: 4px 8px;
+            background: {WHITE};
+            min-width: 100px;
+        }}
+        QDoubleSpinBox:focus {{
+            border: 2px solid {PRIMARY};
+        }}
+        QDoubleSpinBox:hover {{
+            border: 1px solid {PRIMARY_HOVER};
+        }}
+    """
+
+
+def get_grand_total_row_style():
+    """Get style for grand total row container with top border"""
+    return f"""
+        QWidget {{
+            background: transparent;
+            border: none;
+            border-top: 2px solid {BORDER};
+            padding-top: 8px;
+            margin-top: 4px;
+        }}
+    """
+
+
+def get_grand_total_label_enhanced_style():
+    """Get enhanced style for grand total label"""
+    return f"""
+        QLabel {{
+            font-size: 13px;
+            font-weight: bold;
+            color: {TEXT_PRIMARY};
+            background: transparent;
+            border: none;
+            padding: 4px 0;
+        }}
+    """
+
+
+def get_grand_total_value_enhanced_style():
+    """Get enhanced style for grand total value"""
+    return f"""
+        QLabel {{
+            font-size: 20px;
+            font-weight: bold;
+            color: {PRIMARY};
+            background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%);
+            border: 2px solid {PRIMARY};
+            border-radius: 8px;
+            padding: 10px 16px;
+            min-width: 140px;
+        }}
+    """
+
+
+def get_paid_amount_input_style():
+    """Get style for paid amount input"""
+    return f"""
+        QDoubleSpinBox {{
+            font-size: 14px;
+            font-weight: 600;
+            border: 2px solid #10B981;
+            border-radius: 6px;
+            padding: 6px 10px;
+            background: #ECFDF5;
+            color: #059669;
+            min-width: 120px;
+        }}
+        QDoubleSpinBox:focus {{
+            border: 2px solid #059669;
+            background: {WHITE};
+        }}
+        QDoubleSpinBox:hover {{
+            border: 2px solid #059669;
+        }}
+    """
+
+
+def get_balance_due_style_dynamic(balance: float):
+    """Get dynamic style for balance due based on amount"""
+    if balance <= 0:
+        # Fully paid - green with checkmark style
+        return f"""
+            QLabel {{
+                font-size: 14px;
+                font-weight: bold;
+                color: #059669;
+                background: #ECFDF5;
+                border: 1px solid #10B981;
+                border-radius: 6px;
+                padding: 6px 12px;
+            }}
+        """
+    elif balance > 10000:
+        # High balance - warning style with animation hint
+        return f"""
+            QLabel {{
+                font-size: 14px;
+                font-weight: bold;
+                color: #DC2626;
+                background: #FEF2F2;
+                border: 1px solid #EF4444;
+                border-radius: 6px;
+                padding: 6px 12px;
+            }}
+        """
+    else:
+        # Normal balance
+        return f"""
+            QLabel {{
+                font-size: 14px;
+                font-weight: bold;
+                color: #F59E0B;
+                background: #FFFBEB;
+                border: 1px solid #FBBF24;
+                border-radius: 6px;
+                padding: 6px 12px;
+            }}
+        """
+
+
+def get_roundoff_row_style():
+    """Get style for round-off row"""
+    return f"""
+        QWidget {{
+            background: transparent;
+            border: none;
+        }}
+    """
+
+
+def get_invoice_discount_input_style():
+    """Get style for invoice-level discount input"""
+    return f"""
+        QWidget {{
+            background: transparent;
+        }}
+        QDoubleSpinBox {{
+            font-size: 13px;
+            border: 1px solid {BORDER};
+            border-radius: 4px;
+            padding: 4px;
+            background: {WHITE};
+            min-width: 70px;
+        }}
+        QDoubleSpinBox:focus {{
+            border: 2px solid {PRIMARY};
+        }}
+        QComboBox {{
+            font-size: 12px;
+            border: 1px solid {BORDER};
+            border-radius: 4px;
+            padding: 4px;
+            background: {WHITE};
+            min-width: 50px;
+        }}
+    """
+
+
+def get_totals_separator_style():
+    """Get style for separator line in totals section"""
+    return f"""
+        QFrame {{
+            background-color: {BORDER};
+            max-height: 1px;
+            margin: 8px 0;
+        }}
+    """
+
+
+def get_previous_balance_style():
+    """Get style for previous outstanding balance display"""
+    return f"""
+        QLabel {{
+            font-size: 12px;
+            color: #9333EA;
+            background: #FAF5FF;
+            border: 1px solid #E9D5FF;
+            border-radius: 4px;
+            padding: 4px 8px;
         }}
     """

@@ -9,7 +9,7 @@ from .common_widgets import (
     SearchInputContainer, RefreshButton, ListHeader, StatsContainer,
     SearchBox, FormField, SidebarButton, Sidebar,
     # Dialog-specific widgets
-    DialogInput, DialogComboBox, DialogSpinBox, DialogDoubleSpinBox,
+    DialogInput, DialogComboBox, DialogEditableComboBox, DialogSpinBox, DialogDoubleSpinBox,
     DialogCheckBox, DialogTextEdit, DialogFieldGroup,
     # Selector dialogs
     PartySelector, ProductSelector,
@@ -24,7 +24,7 @@ __all__ = [
     'SearchInputContainer', 'RefreshButton', 'ListHeader', 'StatsContainer',
     'SearchBox', 'FormField', 'SidebarButton', 'Sidebar',
     # Dialog-specific widgets
-    'DialogInput', 'DialogComboBox', 'DialogSpinBox', 'DialogDoubleSpinBox',
+    'DialogInput', 'DialogComboBox', 'DialogEditableComboBox', 'DialogSpinBox', 'DialogDoubleSpinBox',
     'DialogCheckBox', 'DialogTextEdit', 'DialogFieldGroup',
     # Selector dialogs
     'PartySelector', 'ProductSelector',

@@ -6,11 +6,12 @@ from PySide6.QtWidgets import (
     QPushButton, QLineEdit, QLabel, QComboBox, QTableWidget, 
     QVBoxLayout, QHBoxLayout, QFrame, QHeaderView, QAbstractItemView,
     QScrollArea, QWidget, QSpinBox, QDoubleSpinBox, QCheckBox, QTextEdit,
-    QDialog, QListWidget, QMessageBox
+    QDialog, QListWidget, QMessageBox, QCompleter, QStyledItemDelegate,
+    QApplication, QStyle
 )
 from PySide6.QtWidgets import QTableWidgetItem
-from PySide6.QtCore import Qt, QEvent
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QEvent, Signal, QTimer
+from PySide6.QtGui import QFont, QPalette, QColor
 
 # Import from the new theme module location
 import sys
@@ -18,7 +19,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from theme import (
     get_button_style, BORDER, WHITE, TEXT_PRIMARY, FONT_SIZE_NORMAL,
-    FONT_SIZE_LARGE, BACKGROUND, TEXT_SECONDARY, PRIMARY,
+    FONT_SIZE_LARGE, BACKGROUND, TEXT_SECONDARY, PRIMARY, PRIMARY_HOVER,
     get_dialog_input_style, get_readonly_input_style, get_error_input_style,
     get_checkbox_style, get_textarea_style, get_label_font, get_checkbox_font,
     get_stat_card_style, get_stat_label_style, get_stat_value_style,
@@ -27,11 +28,33 @@ from theme import (
 )
 
 class CustomButton(QPushButton):
-    """Custom styled button"""
-    def __init__(self, text, button_type="primary", parent=None):
+    """Custom styled button with proper PySide6 mouse event handling"""
+    def __init__(self, text, button_type="primary", parent=None, heigth=40):
         super().__init__(text, parent)
+        self.button_type = button_type
         self.setStyleSheet(get_button_style(button_type))
-        self.setMinimumHeight(40)
+        self.setMinimumHeight(heigth)
+        # Enable mouse tracking for proper hover detection
+        self.setMouseTracking(True)
+        self.setCursor(Qt.PointingHandCursor)
+        # Set focus policy to ensure proper event handling
+        self.setFocusPolicy(Qt.StrongFocus)
+    
+    def mouseMoveEvent(self, event):
+        """Handle mouse move events to ensure cursor updates"""
+        # Always show pointing hand cursor when mouse is over button
+        self.setCursor(Qt.PointingHandCursor)
+        super().mouseMoveEvent(event)
+    
+    def enterEvent(self, event):
+        """Handle mouse enter event"""
+        self.setCursor(Qt.PointingHandCursor)
+        super().enterEvent(event)
+    
+    def leaveEvent(self, event):
+        """Handle mouse leave event"""
+        self.setCursor(Qt.ArrowCursor)
+        super().leaveEvent(event)
 
 class CustomInput(QLineEdit):
     """Custom styled input field"""
@@ -738,6 +761,123 @@ class DialogComboBox(QComboBox):
             self.addItems(items)
         self.setStyleSheet(get_dialog_input_style())
         self.setFixedHeight(44)
+
+
+class DialogEditableComboBox(QComboBox):
+    """Dialog-styled editable combo box - allows selecting from list or typing new value"""
+    def __init__(self, items=None, placeholder="", auto_upper=True, parent=None):
+        super().__init__(parent)
+        self.setEditable(True)
+        self._auto_upper = auto_upper
+        self._initial_text = ""  # Store text before popup opens
+        self._popup_open = False  # Track if popup is open
+        
+        if items:
+            self.addItems(items)
+        if placeholder:
+            self.lineEdit().setPlaceholderText(placeholder)
+        self._apply_styles()
+        self.setFixedHeight(44)
+        
+        # Clear the default selection - start with empty
+        self.setCurrentIndex(-1)
+        self.lineEdit().clear()
+        
+        # Connect auto uppercase if enabled
+        if self._auto_upper:
+            self.lineEdit().textChanged.connect(self._to_upper)
+        
+        # Install event filter on line edit
+        self.lineEdit().installEventFilter(self)
+    
+    def eventFilter(self, obj, event):
+        """Handle keyboard events - open dropdown on down arrow without auto-selecting"""
+        if obj == self.lineEdit() and event.type() == QEvent.KeyPress:
+            if event.key() == Qt.Key_Down or event.key() == Qt.Key_Up:
+                if not self._popup_open:
+                    # Store current text and show popup without auto-selecting
+                    self._initial_text = self.lineEdit().text()
+                    self._popup_open = True
+                    self.setCurrentIndex(-1)
+                    # Block all signals to prevent auto-selection
+                    self.blockSignals(True)
+                    self.showPopup()
+                    self.blockSignals(False)
+                    # Keep blocking signals while popup is open
+                    self.setCurrentIndex(-1)
+                return True
+            elif event.key() == Qt.Key_Escape:
+                # Close popup and restore original text
+                if self._popup_open:
+                    self._popup_open = False
+                    self.blockSignals(True)
+                    self.lineEdit().setText(self._initial_text)
+                    self.setCurrentIndex(-1)
+                    self.hidePopup()
+                    self.blockSignals(False)
+                return True
+            elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                # Confirm selection from popup
+                if self._popup_open:
+                    self._popup_open = False
+                    self.blockSignals(False)
+                    self.hidePopup()
+                return True
+        
+        return super().eventFilter(obj, event)
+    
+    def showPopup(self):
+        """Override to block signals when popup opens"""
+        if self._popup_open:
+            self.blockSignals(True)
+        self.setCurrentIndex(-1)
+        super().showPopup()
+    
+    def hidePopup(self):
+        """Override to reset popup flag when popup closes"""
+        self.blockSignals(False)
+        self._popup_open = False
+        self.setCurrentIndex(-1)
+        super().hidePopup()
+    
+    def _apply_styles(self):
+        """Apply styles including dropdown list background"""
+        self.setStyleSheet(get_dialog_input_style() + f"""
+            QComboBox QAbstractItemView {{
+                background: {WHITE};
+                border: 1px solid {BORDER};
+                border-radius: 4px;
+                selection-background-color: {PRIMARY};
+                selection-color: {WHITE};
+                padding: 4px;
+            }}
+            QComboBox QAbstractItemView::item {{
+                padding: 8px 12px;
+                min-height: 30px;
+            }}
+            QComboBox QAbstractItemView::item:hover {{
+                background: {PRIMARY};
+            }}
+        """)
+    
+    def _to_upper(self, text: str):
+        """Convert text to uppercase while preserving cursor position."""
+        upper = text.upper()
+        if text != upper:
+            line_edit = self.lineEdit()
+            cursor_pos = line_edit.cursorPosition()
+            line_edit.blockSignals(True)
+            line_edit.setText(upper)
+            line_edit.setCursorPosition(cursor_pos)
+            line_edit.blockSignals(False)
+    
+    def text(self) -> str:
+        """Get the current text (typed or selected)"""
+        return self.currentText().strip()
+    
+    def setText(self, text: str):
+        """Set the current text"""
+        self.setCurrentText(text)
 
 
 class DialogSpinBox(QSpinBox):
@@ -1688,6 +1828,8 @@ from theme import (
     get_row_number_style, get_product_input_style, get_hsn_readonly_style,
     get_unit_label_style, get_circle_button_style, get_item_widget_normal_style,
     get_error_highlight_style, get_success_highlight_style,
+    get_item_row_even_style, get_item_row_odd_style, get_item_row_error_style,
+    get_stock_indicator_style, get_action_icon_button_style,
     SUCCESS, DANGER, PRIMARY, PRIMARY_HOVER
 )
 
@@ -1752,15 +1894,94 @@ def show_validation_error(parent, widget, title: str, message: str, duration_ms:
     QMessageBox.warning(parent, title, message)
 
 
+class ProductHighlightDelegate(QStyledItemDelegate):
+    """Delegate to highlight matching text in product dropdown."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.search_text = ""
+    
+    def set_search_text(self, text):
+        self.search_text = text.upper() if text else ""
+    
+    def paint(self, painter, option, index):
+        from PySide6.QtGui import QTextDocument, QAbstractTextDocumentLayout
+        from PySide6.QtCore import QRectF
+        
+        # Get the text to display
+        text = index.data(Qt.DisplayRole) or ""
+        
+        # Set up the style options
+        self.initStyleOption(option, index)
+        
+        painter.save()
+        
+        # Draw selection/hover background
+        if option.state & QStyle.State_Selected:
+            painter.fillRect(option.rect, QColor(PRIMARY))
+            text_color = "white"
+        elif option.state & QStyle.State_MouseOver:
+            painter.fillRect(option.rect, QColor("#EFF6FF"))
+            text_color = TEXT_PRIMARY
+        else:
+            text_color = TEXT_PRIMARY
+        
+        # Create HTML with highlighted text
+        if self.search_text and self.search_text in text.upper():
+            # Find and highlight matching text (case-insensitive)
+            upper_text = text.upper()
+            start = upper_text.find(self.search_text)
+            if start >= 0:
+                end = start + len(self.search_text)
+                highlighted = (
+                    f'<span style="color: {text_color};">'
+                    f'{text[:start]}'
+                    f'<span style="background-color: #FEF08A; color: #000; font-weight: bold;">'
+                    f'{text[start:end]}'
+                    f'</span>'
+                    f'{text[end:]}'
+                    f'</span>'
+                )
+            else:
+                highlighted = f'<span style="color: {text_color};">{text}</span>'
+        else:
+            highlighted = f'<span style="color: {text_color};">{text}</span>'
+        
+        # Render HTML
+        doc = QTextDocument()
+        doc.setHtml(f'<div style="padding: 8px 12px; font-size: 14px;">{highlighted}</div>')
+        
+        painter.translate(option.rect.topLeft())
+        doc.drawContents(painter)
+        
+        painter.restore()
+
+
 class InvoiceItemWidget(QFrame):
     """
     Widget representing a single invoice line item.
-    Contains product selection, quantity, rate, discount, tax, and total fields.
+    Contains product selection with dropdown, quantity, rate, discount, tax, and total fields.
+    Product selection uses QComboBox with QCompleter similar to party search.
+    
+    Improvements:
+    - Alternating row colors for better readability
+    - Keyboard navigation (Tab through fields, Enter to add new row)
+    - Stock display when selecting product
+    - Real-time duplicate product check while typing
+    - Validation with red border on errors
+    - Combined action buttons (icons)
+    - Ctrl+Delete for instant delete without confirmation
+    - Real-time validation with visual feedback
+    - MOQ (Minimum Order Quantity) support
     """
     
     # Signals
     item_changed = Signal()  # Emitted when any item data changes
     add_requested = Signal()  # Emitted when add button is clicked
+    remove_requested = Signal(object, bool)  # Emitted when remove is requested (widget, skip_confirm)
+    
+    # Standard field height for consistency
+    FIELD_HEIGHT = 34
     
     def __init__(self, products=None, parent_dialog=None, parent=None):
         super().__init__(parent)
@@ -1768,109 +1989,328 @@ class InvoiceItemWidget(QFrame):
         self.parent_dialog = parent_dialog
         self.selected_product = None
         self._row_number = 0
+        self._has_validation_error = False
+        self._is_duplicate = False  # Track if current product is duplicate
+        self._moq_warning_shown = False  # Track MOQ warning state
         
-        self.setStyleSheet(get_item_widget_normal_style())
+        # Build product data maps for quick lookup
+        self.product_data_map = {}  # name -> product data
+        self.product_display_map = {}  # display_text -> name
+        for p in self.products:
+            name = p.get('name', '').strip()
+            if name:
+                self.product_data_map[name] = p
+                # Create display text with price and stock info
+                rate = p.get('sales_rate', 0) or 0
+                stock = p.get('opening_stock', 0) or 0
+                stock_text = f"📦 {stock}" if stock > 0 else "❌ 0"
+                display_text = f"{name}  •  ₹{rate:,.2f}  •  {stock_text}"
+                self.product_display_map[display_text] = name
+        
+        # Set initial style (will be updated based on row number)
+        self.setStyleSheet(get_item_row_even_style())
         self.setFrameShape(QFrame.StyledPanel)
         
         self.setup_ui()
         self.connect_signals()
+        self.setup_product_completer()
     
     def setup_ui(self):
-        """Set up the item widget UI."""
+        """Set up the item widget UI with standardized field heights."""
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(8, 8, 8, 8)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(8, 4, 8, 4)
+        main_layout.setSpacing(4)
         
-        # Row number (read-only)
+        H = self.FIELD_HEIGHT  # Standard height for all fields
+        
+        # Row number (read-only) - matches "NO" header
         self.row_number_edit = QLineEdit("1")
         self.row_number_edit.setReadOnly(True)
         self.row_number_edit.setAlignment(Qt.AlignCenter)
-        self.row_number_edit.setFixedWidth(35)
+        self.row_number_edit.setFixedWidth(40)
+        self.row_number_edit.setFixedHeight(H)
         self.row_number_edit.setStyleSheet(get_row_number_style())
         main_layout.addWidget(self.row_number_edit)
         
-        # Product input
-        self.product_input = QLineEdit()
-        self.product_input.setPlaceholderText("Enter product name...")
-        self.product_input.setStyleSheet(get_product_input_style())
-        self.product_input.setMinimumWidth(200)
-        main_layout.addWidget(self.product_input, 2)
+        # Product ComboBox with search - matches "PRODUCT" header (480px total with stock)
+        self.product_input = QComboBox()
+        self.product_input.setEditable(True)
+        self.product_input.setInsertPolicy(QComboBox.NoInsert)
+        self.product_input.lineEdit().setPlaceholderText("🔍 Search product...")
+        self.product_input.setFixedWidth(420)
+        self.product_input.setFixedHeight(H)
         
-        # HSN Code (read-only, auto-filled)
+        # Style the combobox - no thick focus border
+        self.product_input.setStyleSheet(f"""
+            QComboBox {{
+                background: {WHITE};
+                border: 1px solid {BORDER};
+                border-radius: 4px;
+                padding: 4px 10px;
+                padding-right: 28px;
+                font-size: 13px;
+                color: {TEXT_PRIMARY};
+            }}
+            QComboBox:focus {{
+                border: 1px solid {PRIMARY};
+            }}
+            QComboBox:hover {{
+                border: 1px solid {PRIMARY_HOVER};
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                width: 24px;
+                border: none;
+                background: transparent;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 6px solid {TEXT_SECONDARY};
+                margin-right: 8px;}}
+        """)
+        
+        # Disable native completer - we'll use custom QCompleter
+        self.product_input.setCompleter(None)
+        
+        main_layout.addWidget(self.product_input)
+        
+        # Stock indicator (shows after product selection) - part of product column
+        # Always takes up space even when not visible to maintain alignment
+        self.stock_label = QLabel("")
+        self.stock_label.setFixedWidth(60)
+        self.stock_label.setFixedHeight(H - 10)
+        self.stock_label.setAlignment(Qt.AlignCenter)
+        # Use transparent style when empty instead of hiding
+        self.stock_label.setStyleSheet("background: transparent; border: none;")
+        main_layout.addWidget(self.stock_label)
+        
+        # HSN Code (read-only, auto-filled) - matches "HSN" header
         self.hsn_edit = QLineEdit()
         self.hsn_edit.setPlaceholderText("HSN")
         self.hsn_edit.setReadOnly(True)
-        self.hsn_edit.setFixedWidth(80)
+        self.hsn_edit.setFixedWidth(100)
+        self.hsn_edit.setFixedHeight(H)
+        self.hsn_edit.setAlignment(Qt.AlignCenter)
         self.hsn_edit.setStyleSheet(get_hsn_readonly_style())
         main_layout.addWidget(self.hsn_edit)
         
-        # Quantity
+        # Quantity - matches "QTY" header
         self.quantity_spin = QSpinBox()
         self.quantity_spin.setRange(1, 999999)
         self.quantity_spin.setValue(1)
         self.quantity_spin.setFixedWidth(70)
+        self.quantity_spin.setFixedHeight(H)
+        self.quantity_spin.setStyleSheet(self._get_spinbox_style())
         main_layout.addWidget(self.quantity_spin)
         
-        # Unit label
-        self.unit_label = QLabel("Piece")
+        # Unit label - matches "UNIT" header
+        self.unit_label = QLabel("Pcs")
         self.unit_label.setFixedWidth(60)
+        self.unit_label.setFixedHeight(H)
+        self.unit_label.setAlignment(Qt.AlignCenter)
         self.unit_label.setStyleSheet(get_unit_label_style())
         main_layout.addWidget(self.unit_label)
         
-        # Rate
+        # Rate - matches "RATE" header
         self.rate_spin = QDoubleSpinBox()
         self.rate_spin.setRange(0, 9999999.99)
         self.rate_spin.setDecimals(2)
         self.rate_spin.setValue(0)
-        self.rate_spin.setPrefix("₹ ")
+        self.rate_spin.setPrefix("₹")
         self.rate_spin.setFixedWidth(100)
+        self.rate_spin.setFixedHeight(H)
+        self.rate_spin.setStyleSheet(self._get_spinbox_style())
         main_layout.addWidget(self.rate_spin)
         
-        # Discount %
+        # Discount % - matches "DISC%" header
         self.discount_spin = QDoubleSpinBox()
         self.discount_spin.setRange(0, 100)
-        self.discount_spin.setDecimals(2)
+        self.discount_spin.setDecimals(1)
         self.discount_spin.setValue(0)
-        self.discount_spin.setSuffix(" %")
-        self.discount_spin.setFixedWidth(70)
+        self.discount_spin.setSuffix("%")
+        self.discount_spin.setFixedWidth(75)
+        self.discount_spin.setFixedHeight(H)
+        self.discount_spin.setStyleSheet(self._get_spinbox_style())
         main_layout.addWidget(self.discount_spin)
         
-        # Tax %
+        # Tax % - matches "TAX%" header
         self.tax_spin = QDoubleSpinBox()
         self.tax_spin.setRange(0, 100)
-        self.tax_spin.setDecimals(2)
+        self.tax_spin.setDecimals(1)
         self.tax_spin.setValue(18)  # Default GST rate
-        self.tax_spin.setSuffix(" %")
-        self.tax_spin.setFixedWidth(70)
+        self.tax_spin.setSuffix("%")
+        self.tax_spin.setFixedWidth(85)
+        self.tax_spin.setFixedHeight(H)
+        self.tax_spin.setStyleSheet(self._get_spinbox_style())
         main_layout.addWidget(self.tax_spin)
         
-        # Total amount (read-only display)
-        self.total_label = QLabel("₹ 0.00")
-        self.total_label.setFixedWidth(100)
+        # Total amount (read-only display) - matches "AMOUNT" header
+        self.total_label = QLabel("₹0.00")
+        self.total_label.setFixedWidth(110)
+        self.total_label.setFixedHeight(H)
         self.total_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.total_label.setStyleSheet(f"""
             QLabel {{
                 color: {TEXT_PRIMARY};
-                font-size: 14px;
+                font-size: 13px;
                 font-weight: 600;
-                padding: 4px;
+                padding: 4px 8px;
+                background: {BACKGROUND};
+                border: 1px solid {BORDER};
+                border-radius: 4px;
             }}
         """)
         main_layout.addWidget(self.total_label)
         
-        # Add button (+)
-        self.add_btn = QPushButton("+")
-        self.add_btn.setFixedSize(28, 28)
-        self.add_btn.setCursor(Qt.PointingHandCursor)
-        self.add_btn.setStyleSheet(get_circle_button_style(SUCCESS))
-        main_layout.addWidget(self.add_btn)
+        # Action buttons container (combined +/-) - matches empty header
+        action_container = QWidget()
+        action_container.setFixedWidth(80)
+        action_container.setStyleSheet("background: transparent;")
+        action_layout = QHBoxLayout(action_container)
+        action_layout.setContentsMargins(2, 0, 0, 0)
+        action_layout.setSpacing(8)
         
-        # Remove button (-)
-        self.remove_btn = QPushButton("-")
-        self.remove_btn.setFixedSize(28, 28)
+        # Add button (+) - smaller icon button
+        self.add_btn = QPushButton("+")
+        self.add_btn.setFixedSize(26, 26)
+        self.add_btn.setCursor(Qt.PointingHandCursor)
+        self.add_btn.setFocusPolicy(Qt.TabFocus)  # Allow keyboard focus for accessibility
+        self.add_btn.setStyleSheet(get_action_icon_button_style(SUCCESS))
+        self.add_btn.setToolTip("Add new item row (Enter)\n[Tab to focus]")
+        action_layout.addWidget(self.add_btn)
+        
+        # Remove button (-) - smaller icon button
+        self.remove_btn = QPushButton("−")
+        self.remove_btn.setFixedSize(26, 26)
         self.remove_btn.setCursor(Qt.PointingHandCursor)
-        self.remove_btn.setStyleSheet(get_circle_button_style(DANGER))
-        main_layout.addWidget(self.remove_btn)
+        self.remove_btn.setFocusPolicy(Qt.TabFocus)  # Allow keyboard focus for accessibility
+        self.remove_btn.setStyleSheet(get_action_icon_button_style(DANGER))
+        self.remove_btn.setToolTip("Remove this item (Del)\n[Tab to focus]")
+        action_layout.addWidget(self.remove_btn)
+        
+        main_layout.addWidget(action_container)
+    
+    def _get_spinbox_style(self):
+        """Get consistent spinbox style."""
+        return f"""
+            QSpinBox, QDoubleSpinBox {{
+                background: {WHITE};
+                border: 1px solid {BORDER};
+                border-radius: 6px;
+                padding: 6px 8px;
+                font-size: 14px;
+                color: {TEXT_PRIMARY};
+            }}
+            QSpinBox:focus, QDoubleSpinBox:focus {{
+                border: 2px solid {PRIMARY};
+            }}
+            QSpinBox::up-button, QSpinBox::down-button,
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+                width: 20px;
+                border: none;
+                background: transparent;
+            }}
+        """
+    
+    def setup_product_completer(self):
+        """Set up the product autocomplete with QCompleter."""
+        # Build display list with price info
+        display_names = list(self.product_display_map.keys())
+        # Also add plain names for direct matching
+        display_names.extend(self.product_data_map.keys())
+        
+        # Create completer
+        self.product_completer = QCompleter(display_names, self)
+        self.product_completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.product_completer.setFilterMode(Qt.MatchContains)
+        self.product_completer.setCompletionMode(QCompleter.PopupCompletion)
+        self.product_completer.setMaxVisibleItems(10)
+        
+        # Style the completer popup
+        self.product_completer.popup().setStyleSheet(f"""
+            QListView {{
+                background: {WHITE};
+                border: 2px solid {PRIMARY};
+                border-radius: 8px;
+                padding: 4px;
+                font-size: 14px;
+                outline: none;
+            }}
+            QListView::item {{
+                padding: 10px 14px;
+                min-height: 36px;
+                border: none;
+                border-radius: 4px;
+                margin: 2px 0;
+            }}
+            QListView::item:hover {{
+                background: #EFF6FF;
+            }}
+            QListView::item:selected {{
+                background: {PRIMARY};
+                color: {WHITE};
+            }}
+        """)
+        
+        # Set completer on line edit
+        self.product_input.lineEdit().setCompleter(self.product_completer)
+        
+        # Connect completer activation
+        self.product_completer.activated.connect(self._on_product_completer_activated)
+        
+        # Override showPopup to use completer
+        original_show_popup = self.product_input.showPopup
+        def custom_show_popup():
+            self.product_completer.setCompletionPrefix("")
+            self.product_completer.complete()
+            self._position_completer_popup()
+        self.product_input.showPopup = custom_show_popup
+    
+    def _position_completer_popup(self):
+        """Position the completer popup with dynamic screen-aware positioning.
+        This matches the party completer positioning approach.
+        """
+        try:
+            if not hasattr(self, 'product_completer'):
+                return
+                
+            popup = self.product_completer.popup()
+            
+            # Get the combobox position in global coordinates
+            combo_rect = self.product_input.rect()
+            global_pos = self.product_input.mapToGlobal(combo_rect.bottomLeft())
+            
+            # Set popup width (wider to show product info)
+            popup_width = max(self.product_input.width(), 400)
+            popup.setFixedWidth(popup_width)
+            
+            # Calculate position - use bottomLeft() so we start BELOW the search box
+            gap = 10  # Gap between search box and popup (same as party completer)
+            y_pos = global_pos.y() + gap
+            x_pos = global_pos.x()
+            
+            # Get screen geometry for bounds checking
+            screen = QApplication.screenAt(global_pos)
+            if screen:
+                screen_geometry = screen.availableGeometry()
+                popup_height = min(popup.sizeHint().height(), 300)  # Max 300px height
+                
+                # Check if popup would go below screen - position above instead
+                if y_pos + popup_height > screen_geometry.bottom():
+                    top_pos = self.product_input.mapToGlobal(combo_rect.topLeft())
+                    y_pos = top_pos.y() - popup_height - gap
+                
+                # Check if popup would go off right edge
+                if x_pos + popup_width > screen_geometry.right():
+                    x_pos = screen_geometry.right() - popup_width - 10
+            
+            # Move popup to calculated position
+            popup.move(x_pos, y_pos)
+        except Exception as e:
+            print(f"Position completer popup error: {e}")
     
     def connect_signals(self):
         """Connect widget signals to handlers."""
@@ -1880,48 +2320,462 @@ class InvoiceItemWidget(QFrame):
         self.discount_spin.valueChanged.connect(self.on_value_changed)
         self.tax_spin.valueChanged.connect(self.on_value_changed)
         
-        # Product selection
-        self.product_input.textChanged.connect(self.on_product_text_changed)
-        self.product_input.editingFinished.connect(self.on_product_selected)
+        # Real-time validation on value changes
+        self.quantity_spin.valueChanged.connect(self._validate_quantity_realtime)
+        self.rate_spin.valueChanged.connect(self._validate_rate_realtime)
+        
+        # Product text changes - real-time duplicate check
+        self.product_input.lineEdit().textEdited.connect(self._on_product_text_edited)
+        self.product_input.lineEdit().textEdited.connect(self._check_duplicate_realtime)
         
         # Add button
         self.add_btn.clicked.connect(self.add_requested.emit)
+        
+        # Install event filter for keyboard navigation on all editable widgets
+        self.product_input.lineEdit().installEventFilter(self)
+        self.product_input.installEventFilter(self)
+        self.quantity_spin.installEventFilter(self)
+        self.rate_spin.installEventFilter(self)
+        self.discount_spin.installEventFilter(self)
+        self.tax_spin.installEventFilter(self)
+    
+    def eventFilter(self, obj, event):
+        """Handle keyboard events for navigation and shortcuts.
+        
+        - Tab: Move to next field
+        - Enter: Move to next field (add new row only when on last field - tax)
+        - Down: Open product dropdown
+        - Ctrl+Delete: Instant delete without confirmation
+        - Delete: Trigger remove action with confirmation
+        """
+        try:
+            from PySide6.QtCore import QEvent
+            
+            is_product_input = (obj == self.product_input or obj == self.product_input.lineEdit())
+            
+            if event.type() == QEvent.KeyPress:
+                key = event.key()
+                modifiers = event.modifiers()
+                
+                # Ctrl+Delete: Instant delete without confirmation
+                if key == Qt.Key_Delete and modifiers & Qt.ControlModifier:
+                    self.remove_requested.emit(self, True)  # True = skip confirmation
+                    return True
+                
+                # Product input specific handling
+                if is_product_input:
+                    # Down arrow: open dropdown
+                    if key == Qt.Key_Down:
+                        if not self.product_completer.popup().isVisible():
+                            self.product_input.showPopup()
+                            return True
+                    
+                    # Tab or Enter: confirm selection and move to quantity
+                    elif key in (Qt.Key_Tab, Qt.Key_Return, Qt.Key_Enter):
+                        text = self.product_input.currentText().strip()
+                        if text:
+                            self._select_product_by_text(text)
+                            # Move focus to quantity
+                            self.quantity_spin.setFocus()
+                            self.quantity_spin.selectAll()
+                            return True
+                    
+                    # Escape: clear/close dropdown
+                    elif key == Qt.Key_Escape:
+                        if self.product_completer.popup().isVisible():
+                            self.product_completer.popup().hide()
+                            return True
+                
+                # Enter on quantity: move to rate
+                elif obj == self.quantity_spin and key in (Qt.Key_Return, Qt.Key_Enter):
+                    self.rate_spin.setFocus()
+                    self.rate_spin.selectAll()
+                    return True
+                
+                # Enter on rate: move to discount
+                elif obj == self.rate_spin and key in (Qt.Key_Return, Qt.Key_Enter):
+                    self.discount_spin.setFocus()
+                    self.discount_spin.selectAll()
+                    return True
+                
+                # Enter on discount: move to tax
+                elif obj == self.discount_spin and key in (Qt.Key_Return, Qt.Key_Enter):
+                    self.tax_spin.setFocus()
+                    self.tax_spin.selectAll()
+                    return True
+                
+                # Enter on tax field adds new row
+                elif obj == self.tax_spin and key in (Qt.Key_Return, Qt.Key_Enter):
+                    # Validate current row first
+                    if self.validate():
+                        self.add_requested.emit()
+                        return True
+                
+        except Exception as e:
+            print(f"Event filter error: {e}")
+        
+        return super().eventFilter(obj, event)
+    
+    def _on_product_text_edited(self, text):
+        """Handle product text editing for suggestions."""
+        try:
+            if text and len(text) >= 1:
+                # Position popup after typing
+                QTimer.singleShot(0, self._position_completer_popup)
+        except Exception as e:
+            print(f"Product text edited error: {e}")
+    
+    def _check_duplicate_realtime(self, text):
+        """Real-time duplicate check while typing product name.
+        Shows visual feedback if typing a product that's already added.
+        """
+        try:
+            if not text or len(text) < 2:
+                self._clear_duplicate_warning()
+                return
+            
+            text_upper = text.strip().upper()
+            
+            # Check if any existing row has a product matching this text
+            if not self.parent_dialog or not hasattr(self.parent_dialog, 'items_layout'):
+                return
+            
+            items_layout = self.parent_dialog.items_layout
+            for i in range(items_layout.count()):
+                widget = items_layout.itemAt(i).widget()
+                if widget and isinstance(widget, InvoiceItemWidget) and widget != self:
+                    if widget.selected_product:
+                        existing_name = widget.selected_product.get('name', '').upper()
+                        # Check if typing matches an existing product
+                        if existing_name and text_upper in existing_name:
+                            self._show_duplicate_warning(widget.selected_product.get('name', ''))
+                            return
+            
+            self._clear_duplicate_warning()
+        except Exception as e:
+            print(f"Real-time duplicate check error: {e}")
+    
+    def _show_duplicate_warning(self, existing_product_name: str):
+        """Show visual warning that product is already in invoice."""
+        self._is_duplicate = True
+        self.product_input.setStyleSheet(f"""
+            QComboBox {{
+                background: #FEF3C7;
+                border: 2px solid #F59E0B;
+                border-radius: 4px;
+                padding: 4px 10px;
+                padding-right: 28px;
+                font-size: 13px;
+                color: {TEXT_PRIMARY};
+            }}
+            QComboBox:focus {{
+                border: 2px solid #F59E0B;
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                width: 24px;
+                border: none;
+                background: transparent;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 6px solid #92400E;
+                margin-right: 8px;
+            }}
+        """)
+        self.product_input.setToolTip(f"⚠️ '{existing_product_name}' is already added. Consider updating quantity instead.")
+    
+    def _clear_duplicate_warning(self):
+        """Clear the duplicate warning styling."""
+        if self._is_duplicate:
+            self._is_duplicate = False
+            self.product_input.setStyleSheet(f"""
+                QComboBox {{
+                    background: {WHITE};
+                    border: 1px solid {BORDER};
+                    border-radius: 4px;
+                    padding: 4px 10px;
+                    padding-right: 28px;
+                    font-size: 13px;
+                    color: {TEXT_PRIMARY};
+                }}
+                QComboBox:focus {{
+                    border: 1px solid {PRIMARY};
+                }}
+                QComboBox:hover {{
+                    border: 1px solid {PRIMARY_HOVER};
+                }}
+                QComboBox::drop-down {{
+                    subcontrol-origin: padding;
+                    subcontrol-position: center right;
+                    width: 24px;
+                    border: none;
+                    background: transparent;
+                }}
+                QComboBox::down-arrow {{
+                    image: none;
+                    border-left: 5px solid transparent;
+                    border-right: 5px solid transparent;
+                    border-top: 6px solid {TEXT_SECONDARY};
+                    margin-right: 8px;
+                }}
+            """)
+            self.product_input.setToolTip("")
+    
+    def _validate_quantity_realtime(self, value):
+        """Real-time validation for quantity field.
+        Checks MOQ (Minimum Order Quantity) and shows visual feedback.
+        """
+        try:
+            if not self.selected_product:
+                return
+            
+            # Get MOQ from product data (default to 1 if not set)
+            moq = self.selected_product.get('moq', 1) or 1
+            moq = max(1, int(moq))  # Ensure at least 1
+            
+            # Check if quantity is below MOQ
+            if value < moq:
+                self._show_moq_warning(moq)
+            else:
+                self._clear_moq_warning()
+            
+            # Also check stock availability
+            stock = self.selected_product.get('opening_stock', 0) or 0
+            if stock > 0 and value > stock:
+                self._show_stock_warning(stock)
+            elif not self._moq_warning_shown:
+                self._clear_quantity_warning()
+                
+        except Exception as e:
+            print(f"Quantity validation error: {e}")
+    
+    def _show_moq_warning(self, moq: int):
+        """Show warning that quantity is below MOQ."""
+        self._moq_warning_shown = True
+        self.quantity_spin.setStyleSheet(f"""
+            QSpinBox {{
+                background: #FEF3C7;
+                border: 2px solid #F59E0B;
+                border-radius: 6px;
+                padding: 6px 8px;
+                font-size: 14px;
+                color: #92400E;
+            }}
+            QSpinBox:focus {{
+                border: 2px solid #F59E0B;
+            }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                width: 20px;
+                border: none;
+                background: transparent;
+            }}
+        """)
+        self.quantity_spin.setToolTip(f"⚠️ Minimum Order Quantity is {moq}")
+    
+    def _show_stock_warning(self, available_stock: int):
+        """Show warning that quantity exceeds available stock."""
+        self.quantity_spin.setStyleSheet(f"""
+            QSpinBox {{
+                background: #FEE2E2;
+                border: 2px solid #EF4444;
+                border-radius: 6px;
+                padding: 6px 8px;
+                font-size: 14px;
+                color: #991B1B;
+            }}
+            QSpinBox:focus {{
+                border: 2px solid #EF4444;
+            }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                width: 20px;
+                border: none;
+                background: transparent;
+            }}
+        """)
+        self.quantity_spin.setToolTip(f"⚠️ Only {available_stock} in stock!")
+    
+    def _clear_moq_warning(self):
+        """Clear MOQ warning."""
+        self._moq_warning_shown = False
+        self._clear_quantity_warning()
+    
+    def _clear_quantity_warning(self):
+        """Clear quantity field warning styling."""
+        self.quantity_spin.setStyleSheet(self._get_spinbox_style())
+        self.quantity_spin.setToolTip("")
+    
+    def _validate_rate_realtime(self, value):
+        """Real-time validation for rate field.
+        Shows visual feedback if rate is 0 or negative.
+        """
+        try:
+            if value <= 0:
+                self.rate_spin.setStyleSheet(f"""
+                    QDoubleSpinBox {{
+                        background: #FEE2E2;
+                        border: 2px solid #EF4444;
+                        border-radius: 6px;
+                        padding: 6px 8px;
+                        font-size: 14px;
+                        color: #991B1B;
+                    }}
+                    QDoubleSpinBox:focus {{
+                        border: 2px solid #EF4444;
+                    }}
+                    QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+                        width: 20px;
+                        border: none;
+                        background: transparent;
+                    }}
+                """)
+                self.rate_spin.setToolTip("⚠️ Rate must be greater than 0")
+            else:
+                self.rate_spin.setStyleSheet(self._get_spinbox_style())
+                self.rate_spin.setToolTip("")
+        except Exception as e:
+            print(f"Rate validation error: {e}")
+    
+    def _on_product_completer_activated(self, text):
+        """Handle product selection from completer dropdown."""
+        try:
+            self._select_product_by_text(text)
+            # Move focus to quantity after selection
+            QTimer.singleShot(50, lambda: self.quantity_spin.setFocus())
+        except Exception as e:
+            print(f"Product completer activation error: {e}")
+    
+    def _select_product_by_text(self, text):
+        """Select a product by its display text or name.
+        
+        Also shows stock indicator and checks for duplicate products.
+        """
+        try:
+            # Extract product name from display text
+            product_name = self.product_display_map.get(text, text)
+            
+            # If text contains price info separator, extract name
+            if "  •  " in product_name:
+                product_name = product_name.split("  •  ")[0].strip()
+            
+            # Find matching product
+            product_data = self.product_data_map.get(product_name)
+            
+            if product_data:
+                # Check for duplicate product in other rows
+                if self._check_duplicate_product(product_data.get('id')):
+                    QMessageBox.warning(
+                        self, "Duplicate Product",
+                        f"⚠️ '{product_name}' is already added to this invoice.\n\n"
+                        "Consider updating the quantity in the existing row instead."
+                    )
+                    # Still allow, but show warning
+                
+                self.selected_product = product_data
+                
+                # Set just the product name (without price)
+                self.product_input.blockSignals(True)
+                self.product_input.setCurrentText(product_name)
+                self.product_input.blockSignals(False)
+                
+                # Auto-fill fields
+                self.hsn_edit.setText(product_data.get('hsn_code', '') or '')
+                self.rate_spin.setValue(product_data.get('sales_rate', 0) or 0)
+                self.unit_label.setText(product_data.get('unit', 'Pcs') or 'Pcs')
+                
+                # Apply MOQ (Minimum Order Quantity) if set
+                moq = product_data.get('moq', 1) or 1
+                moq = max(1, int(moq))
+                if moq > 1:
+                    # Set quantity to MOQ if current value is less
+                    if self.quantity_spin.value() < moq:
+                        self.quantity_spin.setValue(moq)
+                    # Set minimum to MOQ
+                    self.quantity_spin.setMinimum(moq)
+                    self.quantity_spin.setToolTip(f"Minimum Order Quantity: {moq}")
+                else:
+                    self.quantity_spin.setMinimum(1)
+                    self.quantity_spin.setToolTip("")
+                
+                # Show stock indicator
+                self._update_stock_indicator(product_data)
+                
+                # Set tax rate based on parent dialog's tax type
+                tax_rate = product_data.get('tax_rate', 18) or 18
+                if self.parent_dialog:
+                    if hasattr(self.parent_dialog, '_tax_type') and self.parent_dialog._tax_type == "NON_GST":
+                        tax_rate = 0
+                    elif hasattr(self.parent_dialog, 'gst_combo'):
+                        if self.parent_dialog.gst_combo.currentText() == "Non-GST":
+                            tax_rate = 0
+                
+                self.tax_spin.setValue(tax_rate)
+                self.calculate_total()
+                
+                # Clear any validation error
+                self._clear_validation_error()
+                
+                # Visual feedback - green border briefly
+                self._show_selection_success()
+        except Exception as e:
+            print(f"Select product by text error: {e}")
+    
+    def _check_duplicate_product(self, product_id) -> bool:
+        """Check if the product is already added in another row.
+        
+        Returns:
+            True if duplicate found, False otherwise.
+        """
+        if not product_id or not self.parent_dialog:
+            return False
+        
+        try:
+            items_layout = self.parent_dialog.items_layout
+            for i in range(items_layout.count()):
+                widget = items_layout.itemAt(i).widget()
+                if widget and isinstance(widget, InvoiceItemWidget) and widget != self:
+                    if widget.selected_product and widget.selected_product.get('id') == product_id:
+                        return True
+        except Exception as e:
+            print(f"Duplicate check error: {e}")
+        
+        return False
+    
+    def _update_stock_indicator(self, product_data):
+        """Update the stock indicator label based on product stock."""
+        try:
+            stock = product_data.get('opening_stock', 0) or 0
+            
+            if stock > 0:
+                self.stock_label.setText(f"📦 {stock}")
+                self.stock_label.setStyleSheet(get_stock_indicator_style(True))
+                self.stock_label.setToolTip(f"Available stock: {stock}")
+            else:
+                self.stock_label.setText("❌ 0")
+                self.stock_label.setStyleSheet(get_stock_indicator_style(False))
+                self.stock_label.setToolTip("Out of stock!")
+            
+            # Stock label always visible to maintain alignment
+        except Exception as e:
+            print(f"Update stock indicator error: {e}")
+    
+    def _show_selection_success(self):
+        """Show brief visual feedback on successful selection."""
+        try:
+            original_style = self.product_input.styleSheet()
+            success_style = original_style.replace(f"border: 1px solid {BORDER}", "border: 2px solid #10B981")
+            self.product_input.setStyleSheet(success_style)
+            QTimer.singleShot(1500, lambda: self.product_input.setStyleSheet(original_style))
+        except:
+            pass
     
     def on_value_changed(self):
         """Handle changes to numeric values."""
         self.calculate_total()
         self.item_changed.emit()
-    
-    def on_product_text_changed(self, text):
-        """Handle product text changes for auto-complete suggestions."""
-        # Could implement auto-complete dropdown here
-        pass
-    
-    def on_product_selected(self):
-        """Handle product selection/entry completion."""
-        product_name = self.product_input.text().strip()
-        if not product_name:
-            return
-        
-        # Find matching product
-        for product in self.products:
-            if product.get('name', '').lower() == product_name.lower():
-                self.selected_product = product
-                self.hsn_edit.setText(product.get('hsn_code', ''))
-                self.rate_spin.setValue(product.get('sales_rate', 0))
-                self.unit_label.setText(product.get('unit', 'Piece'))
-                
-                # Set tax rate based on parent dialog's GST type
-                if self.parent_dialog and hasattr(self.parent_dialog, 'gst_combo'):
-                    if self.parent_dialog.gst_combo.currentText() == "Non-GST":
-                        self.tax_spin.setValue(0)
-                    else:
-                        self.tax_spin.setValue(product.get('tax_rate', 18))
-                else:
-                    self.tax_spin.setValue(product.get('tax_rate', 18))
-                
-                self.calculate_total()
-                break
     
     def calculate_total(self):
         """Calculate and display the line item total."""
@@ -1941,12 +2795,103 @@ class InvoiceItemWidget(QFrame):
         tax_amount = after_discount * (tax_percent / 100)
         total = after_discount + tax_amount
         
-        self.total_label.setText(f"₹ {total:,.2f}")
+        self.total_label.setText(f"₹{total:,.2f}")
+    
+    def set_tax_readonly(self, is_readonly: bool, set_to_zero: bool = False):
+        """Set tax field as read-only or editable.
+        
+        Args:
+            is_readonly: If True, tax field becomes read-only
+            set_to_zero: If True, also set tax value to 0
+        """
+        try:
+            self.tax_spin.setReadOnly(is_readonly)
+            
+            if is_readonly:
+                # Set to 0 for Non-GST
+                if set_to_zero:
+                    self.tax_spin.setValue(0)
+                # Style as read-only
+                self.tax_spin.setStyleSheet(f"""
+                    QDoubleSpinBox {{
+                        background: {BACKGROUND};
+                        border: 1px solid {BORDER};
+                        border-radius: 6px;
+                        padding: 6px 8px;
+                        font-size: 14px;
+                        color: {TEXT_SECONDARY};
+                    }}
+                    QDoubleSpinBox:focus {{
+                        border: 1px solid {BORDER};
+                    }}
+                    QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+                        width: 20px;
+                        border: none;
+                        background: transparent;
+                        display: none;
+                    }}
+                """)
+                self.tax_spin.setToolTip("Tax is locked for Non-GST invoices")
+            else:
+                # Restore editable style
+                self.tax_spin.setStyleSheet(self._get_spinbox_style())
+                self.tax_spin.setToolTip("")
+            
+            # Recalculate total after tax change
+            self.calculate_total()
+            self.item_changed.emit()
+            
+        except Exception as e:
+            print(f"Set tax readonly error: {e}")
     
     def set_row_number(self, number: int):
-        """Set the row number display."""
+        """Set the row number display and apply alternating row color."""
         self._row_number = number
         self.row_number_edit.setText(str(number))
+        
+        # Apply alternating row colors (odd/even)
+        if not self._has_validation_error:
+            if number % 2 == 0:
+                self.setStyleSheet(get_item_row_even_style())
+            else:
+                self.setStyleSheet(get_item_row_odd_style())
+    
+    def validate(self) -> bool:
+        """Validate the item row.
+        
+        Returns:
+            True if valid, False if there are validation errors.
+        """
+        product_name = self.product_input.currentText().strip()
+        
+        if not product_name:
+            self._show_validation_error("Product is required")
+            return False
+        
+        if self.rate_spin.value() <= 0:
+            self._show_validation_error("Rate must be greater than 0")
+            self.rate_spin.setFocus()
+            return False
+        
+        self._clear_validation_error()
+        return True
+    
+    def _show_validation_error(self, message: str = ""):
+        """Show validation error with red border on the row."""
+        self._has_validation_error = True
+        self.setStyleSheet(get_item_row_error_style())
+        if message:
+            self.setToolTip(f"⚠️ {message}")
+    
+    def _clear_validation_error(self):
+        """Clear validation error styling."""
+        self._has_validation_error = False
+        self.setToolTip("")
+        # Restore alternating row color
+        if self._row_number % 2 == 0:
+            self.setStyleSheet(get_item_row_even_style())
+        else:
+            self.setStyleSheet(get_item_row_odd_style())
     
     def get_item_data(self) -> dict:
         """
@@ -1956,9 +2901,19 @@ class InvoiceItemWidget(QFrame):
             dict: Item data including product, quantity, rate, discounts, tax, etc.
                   Returns None if no product is selected.
         """
-        product_name = self.product_input.text().strip()
-        if not product_name:
+        current_text = self.product_input.currentText().strip()
+        if not current_text:
             return None
+        
+        # Extract clean product name (without stock/price info)
+        # If current text is a display text (with stock), map it back to actual product name
+        if current_text in self.product_display_map:
+            product_name = self.product_display_map[current_text]
+        elif current_text in self.product_data_map:
+            product_name = current_text
+        else:
+            # If not found in maps, use as-is (might be a partial match or custom text)
+            product_name = current_text
         
         quantity = self.quantity_spin.value()
         rate = self.rate_spin.value()
@@ -1970,7 +2925,7 @@ class InvoiceItemWidget(QFrame):
         discount_amount = subtotal * (discount_percent / 100)
         taxable_amount = subtotal - discount_amount
         tax_amount = taxable_amount * (tax_percent / 100)
-        total = taxable_amount + tax_amount
+        amount = taxable_amount + tax_amount
         
         return {
             'product_name': product_name,
@@ -1984,7 +2939,7 @@ class InvoiceItemWidget(QFrame):
             'tax_percent': tax_percent,
             'tax_amount': tax_amount,
             'taxable_amount': taxable_amount,
-            'total': total,
+            'amount': amount,
         }
     
     def set_item_data(self, data: dict):
@@ -1995,7 +2950,7 @@ class InvoiceItemWidget(QFrame):
             data: Dictionary containing item data
         """
         if 'product_name' in data:
-            self.product_input.setText(data['product_name'])
+            self.product_input.setCurrentText(data['product_name'])
         if 'hsn_code' in data:
             self.hsn_edit.setText(data['hsn_code'])
         if 'unit' in data:
@@ -2010,3 +2965,71 @@ class InvoiceItemWidget(QFrame):
             self.tax_spin.setValue(data['tax_percent'])
         
         self.calculate_total()
+    
+    def set_product_by_data(self, product_data: dict):
+        """
+        Set product directly from product data dictionary.
+        Used by quick_add_product feature.
+        
+        Args:
+            product_data: Product dictionary with name, hsn_code, sales_rate, etc.
+        """
+        if not product_data:
+            return
+        
+        self.selected_product = product_data
+        name = product_data.get('name', '')
+        
+        self.product_input.blockSignals(True)
+        self.product_input.setCurrentText(name)
+        self.product_input.blockSignals(False)
+        
+        self.hsn_edit.setText(product_data.get('hsn_code', '') or '')
+        self.rate_spin.setValue(product_data.get('sales_rate', 0) or 0)
+        self.unit_label.setText(product_data.get('unit', 'Piece') or 'Piece')
+        
+        # Set tax rate based on parent dialog's tax type
+        tax_rate = product_data.get('tax_rate', 18) or 18
+        if self.parent_dialog:
+            if hasattr(self.parent_dialog, '_tax_type') and self.parent_dialog._tax_type == "NON_GST":
+                tax_rate = 0
+        
+        self.tax_spin.setValue(tax_rate)
+        self.calculate_total()
+        self.item_changed.emit()
+
+    def update_tax_for_type_change(self, tax_type: str):
+        """Update the tax rate when invoice tax type changes.
+        
+        Called when user switches between Same State, Other State, and Non-GST.
+        This ensures items already in the invoice get their tax updated.
+        
+        Args:
+            tax_type: One of 'SAME_STATE', 'OTHER_STATE', 'NON_GST'
+        """
+        try:
+            if not self.selected_product:
+                # No product selected, nothing to update
+                return
+            
+            # Get the product's base tax rate
+            base_tax_rate = self.selected_product.get('tax_rate', 18) or 18
+            
+            # Apply tax type logic
+            if tax_type == "NON_GST":
+                # Non-GST invoices have 0 tax
+                new_tax_rate = 0
+            else:
+                # GST invoices use product's tax rate
+                new_tax_rate = base_tax_rate
+            
+            # Update the tax spinner
+            self.tax_spin.blockSignals(True)
+            self.tax_spin.setValue(new_tax_rate)
+            self.tax_spin.blockSignals(False)
+            
+            # Recalculate with the new tax rate
+            self.calculate_total()
+            self.item_changed.emit()
+        except Exception as e:
+            print(f"Update tax for type change error: {e}")

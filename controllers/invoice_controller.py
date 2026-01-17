@@ -160,7 +160,7 @@ class InvoiceController:
             
             # Status filter
             if status_filter != "All":
-                invoice_status = invoice.get('status', 'Draft')
+                invoice_status = invoice.get('status', 'Unpaid')
                 if invoice_status != status_filter:
                     continue
             
@@ -305,7 +305,7 @@ class InvoiceController:
             invoice: Invoice dictionary
             
         Returns:
-            Status string ('Draft', 'Sent', 'Paid', 'Overdue', 'Cancelled')
+            Status string ('Paid', 'Partially Paid', 'Unpaid', 'Overdue', 'Cancelled')
         """
         # Check for explicit status
         explicit_status = invoice.get('status')
@@ -318,6 +318,10 @@ class InvoiceController:
         # Paid if no balance due
         if balance_due <= 0 and grand_total > 0:
             return 'Paid'
+        
+        # Partially Paid if some payment received but balance remains
+        if 0 < balance_due < grand_total and grand_total > 0:
+            return 'Partially Paid'
         
         # Check for overdue (older than 30 days with balance)
         invoice_date = invoice.get('date')
@@ -337,10 +341,10 @@ class InvoiceController:
             except (ValueError, TypeError):
                 pass
         
-        # Default to Sent if has value, Draft otherwise
+        # Default to Unpaid if has value
         if grand_total > 0:
-            return 'Sent'
-        return 'Draft'
+            return 'Unpaid'
+        return 'Unpaid'
     
     def get_invoice_status_color(self, status: str) -> Tuple[str, str]:
         """
@@ -353,13 +357,13 @@ class InvoiceController:
             Tuple of (text_color, background_color)
         """
         status_colors = {
-            'Draft': ("#6B7280", "#F3F4F6"),
-            'Sent': ("#3B82F6", "#EBF8FF"),
+            'Unpaid': ("#3B82F6", "#DBEAFE"),
+            'Partially Paid': ("#F59E0B", "#FEF3C7"),
             'Paid': ("#10B981", "#D1FAE5"),
             'Overdue': ("#EF4444", "#FEE2E2"),
-            'Cancelled': ("#6B7280", "#F3F4F6")
+            'Cancelled': ("#8B5CF6", "#EDE9FE")
         }
-        return status_colors.get(status, ("#6B7280", "#F3F4F6"))
+        return status_colors.get(status, ("#3B82F6", "#DBEAFE"))
 
 
 # Import required for period filtering
@@ -600,7 +604,8 @@ class InvoiceFormController:
         invoice_no: str, 
         party_id: int, 
         items: List[Dict],
-        is_new: bool = True
+        is_new: bool = True,
+        skip_duplicate_check: bool = False
     ) -> Tuple[bool, str, str]:
         """
         Validate invoice data before saving.
@@ -610,6 +615,7 @@ class InvoiceFormController:
             party_id: Party ID
             items: List of item dictionaries
             is_new: Whether this is a new invoice
+            skip_duplicate_check: Skip duplicate check (if already ensured unique)
             
         Returns:
             Tuple of (is_valid, error_message, field_name)
@@ -618,8 +624,8 @@ class InvoiceFormController:
         if not invoice_no or not invoice_no.strip():
             return False, "Invoice number is required", "invoice_no"
         
-        # Check for duplicate invoice number (only for new invoices)
-        if is_new and self.invoice_number_exists(invoice_no):
+        # Check for duplicate invoice number (only for new invoices, if not skipped)
+        if is_new and not skip_duplicate_check and self.invoice_number_exists(invoice_no):
             return False, f"Invoice number '{invoice_no}' already exists", "invoice_no"
         
         # Validate party
@@ -672,32 +678,102 @@ class InvoiceFormController:
             total_tax = sum(item.get('tax_amount', 0) for item in items)
             grand_total = subtotal - total_discount + total_tax + invoice_data.get('round_off', 0)
             
+            # Calculate CGST, SGST, IGST based on tax_type
+            tax_type = invoice_data.get('invoice_type', 'GST - Same State')
+            is_interstate = 'Other State' in tax_type
+            is_non_gst = 'Non-GST' in tax_type
+            
+            if is_non_gst:
+                # Non-GST invoice: no CGST, SGST, IGST
+                cgst_total = 0.0
+                sgst_total = 0.0
+                igst_total = 0.0
+            elif is_interstate:
+                # Interstate (IGST): all tax goes to IGST
+                cgst_total = 0.0
+                sgst_total = 0.0
+                igst_total = total_tax
+            else:
+                # Intrastate (CGST + SGST): split tax equally
+                cgst_total = total_tax / 2
+                sgst_total = total_tax / 2
+                igst_total = 0.0
+            
+            # Update invoice_data with calculated tax breakdown
             invoice_data['subtotal'] = subtotal
             invoice_data['total_discount'] = total_discount
             invoice_data['total_tax'] = total_tax
+            invoice_data['cgst'] = cgst_total
+            invoice_data['sgst'] = sgst_total
+            invoice_data['igst'] = igst_total
             invoice_data['grand_total'] = grand_total
-            invoice_data['balance_due'] = grand_total  # Initially full amount is due
             
-            if is_final:
-                invoice_data['status'] = 'FINAL'
+            # Calculate balance_due based on bill type
+            # CASH invoices: balance_due = 0 (fully paid immediately)
+            # CREDIT invoices: balance_due = grand_total (payment tracking needed)
+            bill_type = invoice_data.get('bill_type', 'CASH')
+            if bill_type == 'CASH':
+                invoice_data['balance_due'] = 0.0  # CASH: No balance due (fully paid)
+            else:
+                invoice_data['balance_due'] = grand_total  # CREDIT: Full amount is due
+            
+            # Compute status based on balance_due
+            # For CASH: balance_due = 0, so status should be 'Paid'
+            # For CREDIT: balance_due = grand_total, so status should be 'Unpaid'
+            balance_due = invoice_data.get('balance_due', 0)
+            if balance_due <= 0 and grand_total > 0:
+                computed_status = 'Paid'
+            elif 0 < balance_due < grand_total and grand_total > 0:
+                computed_status = 'Partially Paid'
+            else:
+                computed_status = 'Unpaid'
+            invoice_data['status'] = computed_status
             
             invoice_id = invoice_data.get('id')
             
             if invoice_id:
                 # Update existing invoice
-                db.update_invoice(invoice_id, invoice_data)
+                db.update_invoice(invoice_data)
                 # Delete old items and add new ones
                 if hasattr(db, 'delete_invoice_items'):
                     db.delete_invoice_items(invoice_id)
             else:
                 # Create new invoice
-                invoice_id = db.add_invoice(invoice_data)
+                invoice_id = db.add_invoice(
+                    invoice_no=invoice_data.get('invoice_no'),
+                    date=invoice_data.get('date'),
+                    party_id=invoice_data.get('party_id'),
+                    tax_type=invoice_data.get('invoice_type', 'GST - Same State'),
+                    subtotal=invoice_data.get('subtotal', 0),
+                    cgst=invoice_data.get('cgst', 0),
+                    sgst=invoice_data.get('sgst', 0),
+                    igst=invoice_data.get('igst', 0),
+                    round_off=invoice_data.get('round_off', 0),
+                    grand_total=invoice_data.get('grand_total', 0),
+                    status=invoice_data.get('status', 'Unpaid'),
+                    bill_type=invoice_data.get('bill_type', 'CASH'),
+                    discount=invoice_data.get('total_discount', 0),
+                    balance_due=invoice_data.get('balance_due', 0),
+                    notes=invoice_data.get('notes')
+                )
             
             # Save items
             if invoice_id:
                 for item in items:
-                    item['invoice_id'] = invoice_id
-                    db.add_invoice_item(item)
+                    db.add_invoice_item(
+                        invoice_id=invoice_id,
+                        product_id=item.get('product_id', 0),
+                        product_name=item.get('product_name', ''),
+                        hsn_code=item.get('hsn_code'),
+                        quantity=item.get('quantity', 0),
+                        unit=item.get('unit', 'Piece'),
+                        rate=item.get('rate', 0),
+                        discount_percent=item.get('discount_percent', 0),
+                        discount_amount=item.get('discount_amount', 0),
+                        tax_percent=item.get('tax_percent', 0),
+                        tax_amount=item.get('tax_amount', 0),
+                        amount=item.get('amount', 0)
+                    )
             
             return True, "Invoice saved successfully!", invoice_id
             

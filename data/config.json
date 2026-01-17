@@ -21,7 +21,7 @@
     "ui": {
         "theme": "default",
         "window_maximized": true,
-        "last_screen": "products"
+        "last_screen": "dashboard"
     },
     "database": {
         "path": "data/gst_billing.db",
@@ -29,92 +29,12 @@
         "backup_interval_days": 7
     },
     "invoice_draft": {
-        "party_name": "ANIL RATHOD",
-        "invoice_date": "2026-01-10",
+        "party_name": "AAMIR SHABHAI",
+        "invoice_date": "2026-01-16",
         "bill_type": "CASH",
         "invoice_type": "GST - Same State",
-        "internal_invoice_type": "TAX Local",
-        "items": [
-            {
-                "product_id": 15,
-                "product_name": "TYPE C CHARGER",
-                "hsn_no": "",
-                "quantity": 1.0,
-                "unit": "PCS",
-                "rate": 600.0,
-                "discount_percent": 0.0,
-                "discount_amount": 0.0,
-                "tax_percent": 0.0,
-                "tax_amount": 0.0,
-                "amount": 600.0
-            },
-            {
-                "product_id": 13,
-                "product_name": "128 GB SANDISK MEMORY CARD",
-                "hsn_no": "",
-                "quantity": 1.0,
-                "unit": "PCS",
-                "rate": 5.0,
-                "discount_percent": 0.0,
-                "discount_amount": 0.0,
-                "tax_percent": 0.0,
-                "tax_amount": 0.0,
-                "amount": 5.0
-            },
-            {
-                "product_id": 12,
-                "product_name": "LAPTOP CMOS CELL",
-                "hsn_no": "",
-                "quantity": 1.0,
-                "unit": "PCS",
-                "rate": 200.0,
-                "discount_percent": 0.0,
-                "discount_amount": 0.0,
-                "tax_percent": 18.0,
-                "tax_amount": 36.0,
-                "amount": 236.0
-            },
-            {
-                "product_id": 11,
-                "product_name": "DVR 16 CHANNE",
-                "hsn_no": "",
-                "quantity": 1.0,
-                "unit": "PCS",
-                "rate": 4500.0,
-                "discount_percent": 0.0,
-                "discount_amount": 0.0,
-                "tax_percent": 18.0,
-                "tax_amount": 810.0,
-                "amount": 5310.0
-            },
-            {
-                "product_id": 10,
-                "product_name": "IMOU WIFI CAMERA",
-                "hsn_no": "",
-                "quantity": 1.0,
-                "unit": null,
-                "rate": 1800.0,
-                "discount_percent": 0.0,
-                "discount_amount": 0.0,
-                "tax_percent": 18.0,
-                "tax_amount": 324.0,
-                "amount": 2124.0
-            },
-            {
-                "product_id": 8,
-                "product_name": "CCTV CAMERA 2MP",
-                "hsn_no": "",
-                "quantity": 5.0,
-                "unit": "PCS",
-                "rate": 1800.0,
-                "discount_percent": 0.0,
-                "discount_amount": 0.0,
-                "tax_percent": 18.0,
-                "tax_amount": 1620.0,
-                "amount": 10620.0
-            }
-        ],
+        "items": [],
         "notes": "",
-        "saved_at": "2026-01-10"
+        "saved_at": "2026-01-16"
     }
 }

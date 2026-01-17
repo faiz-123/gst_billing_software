@@ -147,6 +147,13 @@ class MainWindow(QMainWindow):
             maximized=self.isMaximized(),
             last_screen=config.get('ui.last_screen', 'dashboard')
         )
+        
+        # Close all child windows and dialogs
+        from PySide6.QtWidgets import QApplication
+        for widget in QApplication.topLevelWidgets():
+            if widget != self and widget.isVisible():
+                widget.close()
+        
         event.accept()
 
 def main():

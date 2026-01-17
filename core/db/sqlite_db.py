@@ -34,8 +34,10 @@ def _load_db_path() -> str:
 class Database:
     def __init__(self, path: Optional[str] = None):
         self.path = path or _load_db_path()
-        self.conn = sqlite3.connect(self.path, check_same_thread=False)
+        self.conn = sqlite3.connect(self.path, check_same_thread=False, timeout=20.0)
         self.conn.row_factory = sqlite3.Row
+        # Set busy timeout to wait up to 20 seconds on locked database
+        self.conn.execute("PRAGMA busy_timeout=20000")
         self._current_company_id = None  # Track current company for data isolation
         self.create_tables()
         self._ensure_schema()
@@ -51,10 +53,25 @@ class Database:
 
     # --- utilities ---
     def _execute(self, sql: str, params: tuple = ()):  # write ops
-        cur = self.conn.cursor()
-        cur.execute(sql, params)
-        self.conn.commit()
-        return cur
+        """Execute a write operation with automatic retry on database lock"""
+        max_retries = 5
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                cur = self.conn.cursor()
+                cur.execute(sql, params)
+                self.conn.commit()
+                return cur
+            except sqlite3.OperationalError as e:
+                if 'database is locked' in str(e):
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        raise Exception(f"Database is locked after {max_retries} retries: {str(e)}")
+                    import time
+                    time.sleep(0.2 * retry_count)  # Exponential backoff
+                else:
+                    raise
 
     def _query(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
         cur = self.conn.cursor()
@@ -157,9 +174,8 @@ class Database:
                 invoice_no TEXT NOT NULL,
                 date TEXT NOT NULL,
                 party_id INTEGER,
-                tax_type TEXT DEFAULT 'GST',
-                internal_type TEXT,
                 bill_type TEXT DEFAULT 'CASH',
+                tax_type TEXT DEFAULT 'GST - Same State',
                 subtotal REAL DEFAULT 0,
                 discount REAL DEFAULT 0,
                 cgst REAL DEFAULT 0,
@@ -168,7 +184,7 @@ class Database:
                 round_off REAL DEFAULT 0,
                 grand_total REAL DEFAULT 0,
                 balance_due REAL DEFAULT 0,
-                status TEXT DEFAULT 'Draft',
+                status TEXT DEFAULT 'Unpaid',
                 notes TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(company_id) REFERENCES companies(id),
@@ -279,6 +295,16 @@ class Database:
         if name not in cols:
             self._execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
+    def _drop_column(self, table: str, column_name: str):
+        """Drop a column from a table (SQLite 3.35.0+)"""
+        cols = set(self._table_columns(table))
+        if column_name in cols:
+            try:
+                self._execute(f"ALTER TABLE {table} DROP COLUMN {column_name}")
+                print(f"✅ Dropped column '{column_name}' from table '{table}'")
+            except Exception as e:
+                print(f"⚠️  Could not drop column '{column_name}' from '{table}': {e}")
+
     def _ensure_schema(self):
         # Add company_id to all relevant tables for data isolation
         for table in ['parties', 'products', 'invoices', 'payments', 'purchase_invoices']:
@@ -337,8 +363,7 @@ class Database:
             ("invoice_no", "TEXT"),
             ("date", "TEXT"),
             ("party_id", "INTEGER"),
-            ("tax_type", "TEXT DEFAULT 'GST'"),
-            ("internal_type", "TEXT"),
+            ("tax_type", "TEXT DEFAULT 'GST - Same State'"),
             ("bill_type", "TEXT DEFAULT 'CASH'"),
             ("subtotal", "REAL DEFAULT 0"),
             ("discount", "REAL DEFAULT 0"),
@@ -408,6 +433,9 @@ class Database:
                 self._ensure_column("companies", col, decl)
             except Exception:
                 pass
+        
+        # Drop deprecated columns
+        self._drop_column("invoices", "internal_type")
 
     # --- companies ---
     def add_company(self, name, gstin=None, mobile=None, email=None, address=None,
@@ -618,6 +646,19 @@ class Database:
     def delete_product(self, product_id: int):
         self._execute("DELETE FROM products WHERE id = ?", (product_id,))
 
+    def get_product_categories(self) -> list:
+        """Get all unique product categories for the current company"""
+        if self._current_company_id:
+            rows = self._query(
+                "SELECT DISTINCT category FROM products WHERE company_id = ? AND category IS NOT NULL AND category != '' ORDER BY category",
+                (self._current_company_id,)
+            )
+        else:
+            rows = self._query(
+                "SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND category != '' ORDER BY category"
+            )
+        return [row['category'] for row in rows]
+
     # --- stock management ---
     def update_product_stock(self, product_id: int, quantity_change: float, operation: str = 'add'):
         """
@@ -674,15 +715,15 @@ class Database:
                 print(f"DEBUG: update_product_stock returned: {result}")
 
     # --- invoices ---
-    def add_invoice(self, invoice_no, date, party_id, tax_type='GST', subtotal=0, cgst=0, sgst=0, igst=0, round_off=0, grand_total=0, status='Draft', internal_type=None, bill_type='CASH', discount=0, balance_due=0, notes=None):
+    def add_invoice(self, invoice_no, date, party_id, tax_type='GST - Same State', subtotal=0, cgst=0, sgst=0, igst=0, round_off=0, grand_total=0, status='Draft', bill_type='CASH', discount=0, balance_due=0, notes=None):
         cur = self._execute(
             """INSERT INTO invoices(
-                company_id, invoice_no, date, party_id, tax_type, internal_type, bill_type,
+                company_id, invoice_no, date, party_id, tax_type, bill_type,
                 subtotal, discount, cgst, sgst, igst, round_off, grand_total,
                 balance_due, status, notes
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                self._current_company_id, invoice_no, date, party_id, tax_type, internal_type, bill_type,
+                self._current_company_id, invoice_no, date, party_id, tax_type, bill_type,
                 float(subtotal or 0), float(discount or 0), float(cgst or 0), float(sgst or 0), float(igst or 0),
                 float(round_off or 0), float(grand_total or 0), float(balance_due or 0),
                 status, notes
@@ -701,7 +742,7 @@ class Database:
             return False
         self._execute(
             """UPDATE invoices SET 
-                invoice_no = ?, date = ?, party_id = ?, tax_type = ?, internal_type = ?, bill_type = ?,
+                invoice_no = ?, date = ?, party_id = ?, tax_type = ?, bill_type = ?,
                 subtotal = ?, discount = ?, cgst = ?, sgst = ?, igst = ?, round_off = ?,
                 grand_total = ?, balance_due = ?, status = ?, notes = ?
             WHERE id = ?""",
@@ -709,8 +750,7 @@ class Database:
                 invoice_data.get('invoice_no'),
                 invoice_data.get('date'),
                 invoice_data.get('party_id'),
-                invoice_data.get('tax_type', 'GST'),
-                invoice_data.get('internal_type'),
+                invoice_data.get('tax_type', 'GST - Same State'),
                 invoice_data.get('bill_type', 'CASH'),
                 float(invoice_data.get('subtotal') or 0),
                 float(invoice_data.get('discount') or 0),

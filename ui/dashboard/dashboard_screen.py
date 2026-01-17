@@ -479,7 +479,7 @@ class DashboardScreen(BaseScreen):
             pending = sum(
                 float(inv.get('grand_total', 0) or 0) 
                 for inv in invoices 
-                if (inv.get('status') or '').lower() in ['pending', 'unpaid', 'draft']
+                if (inv.get('status') or '').lower() in ['pending', 'unpaid']
             )
             
             # New invoices this week
@@ -594,7 +594,7 @@ class DashboardScreen(BaseScreen):
             for inv in invoices[:8]:
                 party_name = parties.get(inv.get('party_id'), 'N/A')
                 amount = f"₹{float(inv.get('grand_total', 0)):,.2f}"
-                status = inv.get('status', 'Draft')
+                status = inv.get('status', 'Unpaid')
                 result.append([
                     inv.get('invoice_no', 'N/A'),
                     inv.get('date', 'N/A'),

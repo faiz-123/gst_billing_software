@@ -155,6 +155,8 @@ class InvoicesScreen(BaseScreen):
         self._status_combo = QComboBox()
         self._status_combo.setStyleSheet(get_filter_combo_style())
         self._status_combo.addItem("All", "All")
+        self._status_combo.addItem("Unpaid", "Unpaid")
+        self._status_combo.addItem("Partially Paid", "Partially Paid")
         self._status_combo.addItem("Paid", "Paid")
         self._status_combo.addItem("Overdue", "Overdue")
         self._status_combo.addItem("Cancelled", "Cancelled")
@@ -433,7 +435,7 @@ class InvoicesScreen(BaseScreen):
         self._table.setItem(row, 4, amount_item)
         
         # Column 5: Status with color
-        status = invoice.get('status', 'Draft')
+        status = invoice.get('status', 'Unpaid')
         status_widget = self._create_status_cell(status)
         self._table.setCellWidget(row, 5, status_widget)
         
