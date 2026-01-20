@@ -284,7 +284,8 @@ class InvoicePDFGenerator:
             # Invoice details
             'invoice_no': invoice.get('invoice_no', ''),
             'invoice_date': formatted_date,
-            'terms': 'Credit',
+            'terms': invoice.get('bill_type', 'Credit'),
+            'tax_type': invoice.get('tax_type', 'GST'),
             'ref_no': '',
             'vehicle_no': '',
             'transport': '',
@@ -401,7 +402,7 @@ class InvoicePDFGenerator:
             # Invoice details
             'invoice_no': invoice.get('invoice_no', ''),
             'invoice_date': formatted_date,
-            'terms': 'Credit',
+            'terms': invoice.get('bill_type', 'Credit'),
             'ref_no': '',
             'vehicle_no': '',
             'transport': '',
@@ -426,9 +427,9 @@ class InvoicePDFGenerator:
             'amount_in_words': amount_words,
             
             # Bank details
-            'bank_name': 'BANK OF INDIA',
-            'bank_account': 'A/C NO:00-250271000001287',
-            'bank_ifsc': 'IFSC CODE: BKID0002503',
+            'bank_name': company.get('bank_name', 'BANK OF INDIA'),
+            'bank_account': company.get('bank_account', 'A/C NO:00-250271000001287'),
+            'bank_ifsc': company.get('bank_ifsc', 'IFSC CODE: BKID0002503'),
             
             # Terms
             'terms_conditions': company.get('terms', 'Subject to Vadodara - 390001 jurisdiction E.& O.E')

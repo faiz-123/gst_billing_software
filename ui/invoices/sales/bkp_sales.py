@@ -18,10 +18,10 @@ from PySide6.QtWidgets import (
     QTextEdit, QCheckBox, QSpinBox, QDoubleSpinBox, QTableWidget,
     QTableWidgetItem, QHeaderView, QDateEdit, QScrollArea, QSplitter,
     QAbstractItemView, QMenu, QListWidget, QFileDialog, QCompleter,
-    QStyledItemDelegate, QStyle, QApplication, QPlainTextEdit
+    QStyledItemDelegate, QStyle, QApplication
 )
 from PySide6.QtCore import Qt, QDate, Signal, QTimer, QRect, QSize, QStringListModel
-from PySide6.QtGui import QFont, QPixmap, QIcon, QColor, QKeySequence, QAction, QShortcut, QPainter, QTextDocument, QAbstractTextDocumentLayout, QKeyEvent
+from PySide6.QtGui import QFont, QPixmap, QIcon, QColor, QKeySequence, QAction, QShortcut, QPainter, QTextDocument, QAbstractTextDocumentLayout
 
 from widgets import (
     CustomButton, CustomTable, CustomInput, FormField, PartySelector, ProductSelector,
@@ -72,16 +72,7 @@ from theme import (
     # New styles for items section improvements
     get_empty_state_style, get_item_row_even_style, get_item_row_odd_style,
     get_item_row_error_style, get_quick_chip_recent_style, get_stock_indicator_style,
-    get_action_icon_button_style,
-    # Invoice totals section styles (NEW)
-    get_totals_row_label_style, get_totals_row_value_style,
-    get_subtotal_value_style, get_discount_value_style, get_tax_value_style,
-    get_tax_breakdown_style, get_other_charges_input_style,
-    get_grand_total_row_style, get_grand_total_label_enhanced_style,
-    get_grand_total_value_enhanced_style, get_paid_amount_input_style,
-    get_balance_due_style_dynamic, get_roundoff_row_style,
-    get_invoice_discount_input_style, get_totals_separator_style,
-    get_previous_balance_style
+    get_action_icon_button_style
 )
 from controllers.invoice_controller import invoice_form_controller
 
@@ -220,6 +211,9 @@ class InvoiceDialog(QDialog):
         self.products: List[Dict[str, Any]] = []
         self.parties: List[Dict[str, Any]] = []
         self.read_only: bool = read_only
+        # Auto-save timer
+        self._autosave_timer: Optional[QTimer] = None
+        self._has_unsaved_changes: bool = False
 
         # Load existing invoice if invoice_number is provided
         if invoice_number and not invoice_data:
@@ -247,7 +241,9 @@ class InvoiceDialog(QDialog):
         
         # Set initial focus on party search box for new invoices
         if not self.invoice_data and not self.read_only:
-            QTimer.singleShot(200, self.set_initial_focus)
+            QTimer.singleShot(150, self.set_initial_focus)
+            # Start auto-save for new invoices
+            QTimer.singleShot(200, self.setup_autosave)
 
     def load_existing_invoice(self, invoice_number: str) -> None:
         """
@@ -287,18 +283,7 @@ class InvoiceDialog(QDialog):
             
             # Set party
             if hasattr(self, 'party_search') and party:
-                party_name = party['name'].strip() if party.get('name') else ''
-                if party_name:
-                    # Set the lineEdit text directly (don't use setCurrentText since items aren't in combobox)
-                    self.party_search.lineEdit().blockSignals(True)
-                    self.party_search.lineEdit().setText(party_name)
-                    self.party_search.lineEdit().blockSignals(False)
-                    
-                    # Ensure party_search lineEdit is visible by clearing placeholder
-                    self.party_search.lineEdit().setPlaceholderText("")
-                    
-                    # Show party info card using the party data directly from invoice
-                    self._show_party_info(party)
+                self.party_search.setText(party['name'])
             
             # Set bill type if available
             if invoice.get('bill_type'):
@@ -334,12 +319,8 @@ class InvoiceDialog(QDialog):
                     self.items_layout.removeWidget(widget)
                     widget.deleteLater()
                 
-                # Add items from database (skip empty items)
+                # Add items from database
                 for item_data in items:
-                    # Skip empty items (no product selected)
-                    if not item_data.get('product_name', '').strip():
-                        continue
-                    
                     item_widget = InvoiceItemWidget(products=self.products, parent_dialog=self)
                     
                     # Set product name
@@ -361,7 +342,6 @@ class InvoiceDialog(QDialog):
                     if not self.read_only:
                         item_widget.add_requested.connect(self.add_item)
                         item_widget.remove_btn.clicked.connect(lambda checked, w=item_widget: self.remove_item(w))
-                        item_widget.remove_requested.connect(self._handle_remove_request)  # Ctrl+Delete support
                     item_widget.item_changed.connect(self.update_totals)
                     
                     # Add to layout (before the stretch)
@@ -370,10 +350,10 @@ class InvoiceDialog(QDialog):
                 # Update row numbers and totals
                 self.number_items()
                 self.update_totals()
-                
-                # Add one empty row for adding more items (only in edit mode, not read-only)
-                if not self.read_only:
-                    self.add_item()
+            
+            # Check if invoice is FINAL and disable editing if so
+            if invoice.get('status') == 'FINAL':
+                self.disable_editing_after_final_save(show_message=False)
             
         except Exception as e:
             QMessageBox.warning(self, "Warning", f"Error populating invoice data: {str(e)}")
@@ -389,10 +369,8 @@ class InvoiceDialog(QDialog):
             if hasattr(self, 'billtype_btn'):
                 self.billtype_btn.setEnabled(False)
             if hasattr(self, 'party_search'):
-                # Make lineEdit read-only instead of disabling the entire combobox
-                # This ensures text is visible even in read-only mode
-                self.party_search.lineEdit().setReadOnly(True)
-                self.party_search.setEnabled(False)  # Still disable dropdown button
+                self.party_search.setEnabled(False)
+                self.party_search.setStyleSheet(self.party_search.styleSheet() + f"background: {BACKGROUND};")
             # Disable tax type segmented buttons
             if hasattr(self, '_tax_buttons'):
                 for btn in self._tax_buttons.values():
@@ -409,7 +387,8 @@ class InvoiceDialog(QDialog):
                     if item_widget and hasattr(item_widget, 'product_input'):
                         # Disable all inputs in item widget
                         if hasattr(item_widget, 'product_input'):
-                            item_widget.product_input.setEnabled(False)  # QComboBox - use setEnabled
+                            item_widget.product_input.setReadOnly(True)
+                            item_widget.product_input.setStyleSheet(item_widget.product_input.styleSheet() + f"background: {BACKGROUND};")
                         if hasattr(item_widget, 'hsn_edit'):
                             item_widget.hsn_edit.setReadOnly(True)
                         if hasattr(item_widget, 'quantity_spin'):
@@ -481,42 +460,69 @@ class InvoiceDialog(QDialog):
         except Exception as e:
             print(f"Failed to setup auto-save: {e}")
 
-    def closeEvent(self, event) -> None:
-        """Handle dialog close - cleanup."""
+    def autosave_draft(self) -> None:
+        """Auto-save current invoice data as draft."""
         try:
-            # Cleanup any orphan webviews
-            if hasattr(self, '_pdf_webview') and self._pdf_webview:
-                self._pdf_webview.close()
-                self._pdf_webview.deleteLater()
-                self._pdf_webview = None
+            # Only save if there's meaningful data
+            party_text = self.party_search.text().strip() if hasattr(self, 'party_search') else ''
             
-            # Hide all orphan floating widgets (GST labels that aren't in layout)
-            for widget_name in ['cgst_label', 'sgst_label', 'igst_label', 'tax_breakdown_box']:
-                if hasattr(self, widget_name):
-                    widget = getattr(self, widget_name)
-                    if widget:
-                        widget.setVisible(False)
+            # Check if any items have been added
+            item_count = 0
+            for i in range(self.items_layout.count() - 1):
+                item_widget = self.items_layout.itemAt(i).widget()
+                if isinstance(item_widget, InvoiceItemWidget):
+                    if item_widget.get_item_data():
+                        item_count += 1
             
-            # Close any open child dialogs (preview, print, etc.)
-            for child in self.children():
-                if isinstance(child, QDialog) and child.isVisible():
-                    child.close()
+            # Only save if there's party or items
+            if party_text or item_count > 0:
+                draft_data = self.collect_draft_data()
+                # Save to config
+                try:
+                    from config import config
+                    config.set('invoice_draft', draft_data)
+                    self._has_unsaved_changes = False
+                    print(f"Draft auto-saved: {party_text or 'No party'}, {item_count} items")
+                except Exception as config_error:
+                    print(f"Could not save draft to config: {config_error}")
+        except Exception as e:
+            print(f"Auto-save draft failed: {e}")
+
+    def collect_draft_data(self) -> Dict[str, Any]:
+        """Collect current form data for draft saving."""
+        try:
+            items = []
+            for i in range(self.items_layout.count() - 1):
+                item_widget = self.items_layout.itemAt(i).widget()
+                if isinstance(item_widget, InvoiceItemWidget):
+                    item_data = item_widget.get_item_data()
+                    if item_data:
+                        items.append(item_data)
+            
+            return {
+                'party_name': self.party_search.text().strip() if hasattr(self, 'party_search') else '',
+                'invoice_date': self.invoice_date.date().toString('yyyy-MM-dd') if hasattr(self, 'invoice_date') else '',
+                'bill_type': self._bill_type if hasattr(self, '_bill_type') else 'CASH',
+                'invoice_type': self._get_tax_type(),
+                'internal_invoice_type': invoice_form_controller.map_invoice_type_to_internal(
+                    self._get_tax_type()
+                ),
+                'items': items,
+                'notes': self.notes.toPlainText() if hasattr(self, 'notes') and self.notes else '',
+                'saved_at': QDate.currentDate().toString('yyyy-MM-dd')
+            }
+        except Exception as e:
+            print(f"Error collecting draft data: {e}")
+            return {}
+
+    def closeEvent(self, event) -> None:
+        """Handle dialog close - stop auto-save timer."""
+        try:
+            if self._autosave_timer:
+                self._autosave_timer.stop()
         except Exception:
             pass
         super().closeEvent(event)
-
-    def reject(self) -> None:
-        """Handle dialog rejection (Cancel button or Escape key) - cleanup orphan widgets."""
-        try:
-            # Hide all orphan floating widgets to prevent them from appearing
-            for widget_name in ['cgst_label', 'sgst_label', 'igst_label', 'tax_breakdown_box']:
-                if hasattr(self, widget_name):
-                    widget = getattr(self, widget_name)
-                    if widget:
-                        widget.setVisible(False)
-        except Exception:
-            pass
-        super().reject()
 
     def init_window(self) -> None:
         """Initialize window properties and styling."""
@@ -544,205 +550,95 @@ class InvoiceDialog(QDialog):
     def setup_ui(self) -> None:
         """Setup enhanced dialog UI with modern design and better organization."""
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setSpacing(12)
-        self.main_layout.setContentsMargins(20, 20, 20, 20)
-        
-        # Setup content sections directly without scroll area
-        self.setup_content_sections(self.main_layout)
-        
-        # Add action buttons at the bottom (fixed)
+        self.main_layout.setSpacing(10)
+        self.main_layout.setContentsMargins(30, 30, 30, 30)  # Reduced bottom margin
+        self.setup_content_sections()
         self.setup_action_buttons()
-        
-        # Setup Tab navigation order for better UX flow
-        self.setup_tab_order()
-        
         self.apply_final_styling()
 
-    def setup_content_sections(self, layout) -> None:
-        """Setup the main content sections with enhanced layout (scrollable)."""
-        # Create header section
+    def setup_content_sections(self) -> None:
+        """Setup the main content sections with enhanced layout."""
+        self.content_splitter = QSplitter(Qt.Vertical)
         self.header_frame = self.create_header_section()
-        layout.addWidget(self.header_frame, 0)  # No stretch
-        
-        # Create items section
+        self.content_splitter.addWidget(self.header_frame)
         self.items_frame = self.create_items_section()
-        layout.addWidget(self.items_frame, 1)  # Stretch factor 1 - expand to fill space
-        
-        # Create totals section
+        self.content_splitter.addWidget(self.items_frame)
         self.totals_frame = self.create_totals_section()
-        layout.addWidget(self.totals_frame, 0)  # No stretch
-        
+        self.content_splitter.addWidget(self.totals_frame)
+        self.content_splitter.setSizes([180, 450, 150])
+        self.content_splitter.setCollapsible(0, False)
+        self.content_splitter.setCollapsible(1, False)
+        self.content_splitter.setCollapsible(2, False)
+        self.main_layout.addWidget(self.content_splitter, 1)  # Stretch factor 1 for splitter
         # Only add empty item row for new invoices (not in read-only mode or editing existing)
         if not self.read_only and not self.invoice_data:
             self.add_item()
 
-    def _apply_button_styling(self, button: CustomButton, height: int = 42, min_width: int = 110) -> None:
-        """Apply consistent button styling (Improvement #1: Reduce duplication)."""
-        button.setFixedHeight(height)
-        button.setMinimumWidth(min_width)
-
     def setup_action_buttons(self) -> None:
-        """Setup enhanced action buttons with improved styling and alignment.
-        
-        Improvements implemented:
-        1. Helper method to reduce style duplication
-        2. Read-only mode button visibility control
-        3. State management based on dialog mode
-        4. Consistent button widths via data-driven approach
-        5. Visual keyboard shortcut indicators in tooltips
-        6. Form validation state management
-        7. Context-aware help button
-        8. Loading/processing state feedback
-        9. Reset confirmation dialog
-        10. Button focus order for keyboard navigation
-        """
+        """Setup enhanced action buttons using CustomButton from common_widgets."""
         button_container = QFrame()
         button_container.setObjectName("buttonContainer")
         button_container.setStyleSheet(f"""
-            QFrame#buttonContainer {{
-                background: {WHITE};
-                border-top: 2px solid {BORDER};
-                border-radius: 0px;
-                padding: 15px 20px;
-            }}
+            QFrame#buttonContainer {{ background: {WHITE}; border: 1px solid {DANGER}; border-radius: 12px; }}
         """)
-        button_container.setMinimumHeight(60)
+        button_container.setMinimumHeight(70)
+        button_container.setMaximumHeight(80)
         button_layout = QHBoxLayout(button_container)
-        button_layout.setSpacing(10)
-        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(12)
+        # button_layout.setContentsMargins(20, 15, 20, 15)
         
-        # Improvement #4: Data-driven button widths (Consistent sizing)
-        button_widths = {
-            'help': 100,
-            'cancel': 110,
-            'reset': 110,
-            'save': 110,
-            'save_print': 140
-        }
-        height=35
+        # Utility buttons (left side) - wrapped in QFrame for background color
+        utility_frame = QFrame()
+        utility_frame.setObjectName("utilityFrame")
+        utility_frame.setStyleSheet(f"""
+            QFrame#utilityFrame {{ background: {BACKGROUND}; border: 1px solid {BORDER}; border-radius: 8px; padding: 5px; }}
+        """)
+        utility_layout = QHBoxLayout(utility_frame)
+        utility_layout.setSpacing(8)
+        utility_layout.setContentsMargins(10, 5, 10, 5)
         
-        # Help button (left side)
-        self.help_button = CustomButton("❓ Help", "secondary", heigth=25)
-        # self._apply_button_styling(self.help_button, height=35, min_width=button_widths['help'])
-        # Improvement #5: Enhanced tooltip with keyboard shortcut (visual indicator)
-        self.help_button.setToolTip("Get help with invoice creation\n⌨️ Shortcut: F1")
+        self.help_button = CustomButton("❓ Help", "secondary")
+        # self.help_button.setToolTip("Get help with invoice creation")
+        self.help_button.setCursor(Qt.PointingHandCursor)
         self.help_button.clicked.connect(self.show_help)
-        button_layout.addWidget(self.help_button)
+        utility_layout.addWidget(self.help_button)
         
-        # Separator stretch
+        button_layout.addWidget(utility_frame)
         button_layout.addStretch()
-
-        # Action buttons (right side) - aligned consistently
+        
+        # Action buttons (right side)
         action_layout = QHBoxLayout()
-        action_layout.setSpacing(10)
-        action_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Cancel button - Improvement #3: State management
-        self.cancel_button = CustomButton("✕ Cancel", "danger")
-        self._apply_button_styling(self.cancel_button, height=42, min_width=button_widths['cancel'])
-        # Improvement #5: Enhanced tooltip
-        cancel_tooltip = "Close without saving\n⌨️ Shortcut: Esc"
-        if self.read_only:
-            cancel_tooltip = "Close invoice view\n⌨️ Shortcut: Esc"
-        self.cancel_button.setToolTip(cancel_tooltip)
-        self.cancel_button.clicked.connect(self.on_cancel_clicked)
+        action_layout.setSpacing(8)
+        
+        # Cancel button
+        self.cancel_button = CustomButton("❌ Cancel", "danger")
+        self.cancel_button.setToolTip("Cancel and close without saving")
+        self.cancel_button.setCursor(Qt.PointingHandCursor)
+        self.cancel_button.clicked.connect(self.reject)
         action_layout.addWidget(self.cancel_button)
         
-        # Reset button - Improvement #9: Add confirmation for destructive action
-        # Color-coded as "warning" (orange) to indicate destructive action
-        self.reset_button = CustomButton("↻ Reset", "warning")
-        self._apply_button_styling(self.reset_button, height=42, min_width=button_widths['reset'])
-        self.reset_button.setToolTip("Clear all fields and start over\n⌨️ Shortcut: Ctrl+R")
+        # Reset button
+        self.reset_button = CustomButton("🔄 Reset", "secondary")
+        self.reset_button.setToolTip("Clear all values and reset to defaults")
+        self.reset_button.setCursor(Qt.PointingHandCursor)
         self.reset_button.clicked.connect(self.reset_form)
-        # Improvement #2: Hide in read-only mode
-        if self.read_only:
-            self.reset_button.hide()
         action_layout.addWidget(self.reset_button)
         
-        # Save button - Improvement #6: Form validation state management
-        self.save_button = CustomButton("💾 Save", "primary")
-        self._apply_button_styling(self.save_button, height=42, min_width=button_widths['save'])
-        self.save_button.setToolTip("Save invoice as draft\n⌨️ Shortcut: Ctrl+S")
-        self.save_button.clicked.connect(self.on_save_clicked)
-        # Improvement #2: Hide in read-only mode
-        if self.read_only:
-            self.save_button.hide()
-        action_layout.addWidget(self.save_button)
-        
-        # Save Print button - Improvement #3: Dynamic text based on mode
-        save_text = "🖨️ Update & Print" if self.invoice_data else "💾 Save & Print"
-        self.save_print_button = CustomButton(save_text, "success")
-        self._apply_button_styling(self.save_print_button, height=42, min_width=button_widths['save_print'])
-        save_print_tooltip = ("Save and print invoice\n⌨️ Shortcut: Ctrl+P" 
-                             if not self.invoice_data 
-                             else "Update and print invoice\n⌨️ Shortcut: Ctrl+P")
-        self.save_print_button.setToolTip(save_print_tooltip)
+        # Save Print button
+        save_text = "💾 Update & Print" if self.invoice_data else "💾 Save Print"
+        self.save_print_button = CustomButton(save_text, "primary")
+        self.save_print_button.setToolTip("Save invoice and open print preview")
+        self.save_print_button.setCursor(Qt.PointingHandCursor)
         self.save_print_button.clicked.connect(self.save_and_print)
-        # Improvement #2: Hide in read-only mode
-        if self.read_only:
-            self.save_print_button.hide()
         action_layout.addWidget(self.save_print_button)
         
         button_layout.addLayout(action_layout)
         self.main_layout.addWidget(button_container, 0)  # Stretch factor 0 - don't expand
-        
-        # Improvement #10: Setup button focus order for keyboard navigation
-        self.setup_button_focus_order()
-    
-    def setup_button_focus_order(self) -> None:
-        """Setup Tab navigation order for action buttons (Improvement #10)."""
-        try:
-            # Tab order: Cancel → Reset → Save → Save & Print → Help
-            if hasattr(self, 'cancel_button') and hasattr(self, 'reset_button'):
-                self.setTabOrder(self.cancel_button, self.reset_button)
-            if hasattr(self, 'reset_button') and hasattr(self, 'save_button'):
-                self.setTabOrder(self.reset_button, self.save_button)
-            if hasattr(self, 'save_button') and hasattr(self, 'save_print_button'):
-                self.setTabOrder(self.save_button, self.save_print_button)
-            if hasattr(self, 'save_print_button') and hasattr(self, 'help_button'):
-                self.setTabOrder(self.save_print_button, self.help_button)
-        except Exception as e:
-            print(f"Error setting button focus order: {e}")
-    
-    def on_cancel_clicked(self) -> None:
-        """Handle Cancel button click with proper label context (Improvement #3)."""
-        self.reject()
-    
-    def on_save_clicked(self) -> None:
-        """Handle Save button with loading state (Improvement #8)."""
-        # Improvement #8: Show loading state
-        self.save_button.setEnabled(False)
-        original_text = self.save_button.text()
-        self.save_button.setText("⏳ Saving...")
-        
-        try:
-            self.save_invoice()
-        finally:
-            # Restore button state
-            self.save_button.setEnabled(True)
-            self.save_button.setText(original_text)
 
     def apply_final_styling(self) -> None:
         """Apply final styling and setup additional features."""
         self.setAttribute(Qt.WA_TranslucentBackground, False)
-        
-        # Set dynamic window size (70% of screen)
-        screen = self.screen()
-        if screen:
-            screen_rect = screen.geometry()
-            width = int(screen_rect.width() * 0.75)  # 75% of screen width
-            height = int(screen_rect.height() * 0.80)  # 80% of screen height
-            self.resize(width, height)
-        else:
-            # Fallback size if screen not available
-            self.resize(1400, 900)
-        
-        # Center window on screen
-        self.move(
-            (screen_rect.width() - self.width()) // 2,
-            (screen_rect.height() - self.height()) // 2
-        )
-        
+        self.showMaximized()
         self.setup_keyboard_shortcuts()
         self.setup_validation()
 
@@ -784,67 +680,6 @@ class InvoiceDialog(QDialog):
         # Set initial balance due visibility based on default bill type
         if hasattr(self, '_bill_type'):
             self.on_bill_type_changed(self._bill_type)
-
-    def setup_tab_order(self) -> None:
-        """Setup Tab navigation order: Bill Type → Tax Type → Date → Party → Items.
-        
-        Creates a clear visual flow for users to navigate through invoice form.
-        Tab order: Bill Type → Tax Type → Date → Invoice Number → Party Search → First Item
-        """
-        try:
-            if not hasattr(self, 'billtype_btn'):
-                return
-            
-            # Build Tab order list starting with header fields
-            tab_order = []
-            
-            # 1. Bill Type button (first in order)
-            tab_order.append(self.billtype_btn)
-            
-            # 2. Tax Type buttons (if they exist)
-            if hasattr(self, 'tax_btn_same'):
-                tab_order.append(self.tax_btn_same)
-            if hasattr(self, 'tax_btn_other'):
-                tab_order.append(self.tax_btn_other)
-            if hasattr(self, 'tax_btn_nongst'):
-                tab_order.append(self.tax_btn_nongst)
-            
-            # 3. Invoice Date
-            if hasattr(self, 'invoice_date'):
-                tab_order.append(self.invoice_date)
-            
-            # 4. Invoice Number
-            if hasattr(self, 'invoice_number'):
-                tab_order.append(self.invoice_number)
-            
-            # 5. Party Search (main selection field)
-            if hasattr(self, 'party_search'):
-                tab_order.append(self.party_search)
-            
-            # 6. First item product field (if items exist)
-            if hasattr(self, 'items_layout'):
-                for i in range(self.items_layout.count() - 1):
-                    w = self.items_layout.itemAt(i).widget()
-                    if isinstance(w, InvoiceItemWidget):
-                        if hasattr(w, 'product_input'):
-                            tab_order.append(w.product_input)
-                            break  # Just add first item's product field
-            
-            # Set Tab order for the widgets
-            for i in range(len(tab_order) - 1):
-                self.setTabOrder(tab_order[i], tab_order[i + 1])
-            
-            # Add helpful Tab order guide in status or tooltips
-            if hasattr(self, 'billtype_btn'):
-                self.billtype_btn.setToolTip(
-                    self.billtype_btn.toolTip() + 
-                    "<br><br><b style='color: #3B82F6;'>📍 Tab Navigation:</b>" +
-                    "<br><span style='color: #6B7280;'>1️⃣ Bill Type (current)</span>" +
-                    "<br><span style='color: #6B7280;'>2️⃣ Tax Type → 3️⃣ Date → 4️⃣ Invoice No</span>" +
-                    "<br><span style='color: #6B7280;'>5️⃣ Party Selection → 6️⃣ Items</span>"
-                )
-        except Exception as e:
-            print(f"Setup Tab order error: {e}")
 
     def show_help(self) -> None:
         """Show help dialog with instructions and keyboard shortcuts."""
@@ -1042,7 +877,7 @@ class InvoiceDialog(QDialog):
         actions.addWidget(close_btn)
         container.addLayout(actions)
 
-        dlg.show()
+        dlg.exec()
 
     def print_invoice(self, html_content):
         """Print the invoice using the system's print dialog"""
@@ -1205,8 +1040,7 @@ class InvoiceDialog(QDialog):
             invoice_date = self.invoice_date.date().toString('yyyy-MM-dd')
             invoice_type = self._get_tax_type()
             bill_type = self._bill_type if hasattr(self, '_bill_type') else 'CASH'
-            # Round roundoff_amount to 2 decimal places to avoid floating point precision issues
-            round_off = round(getattr(self, 'roundoff_amount', 0.0), 2)
+            round_off = getattr(self, 'roundoff_amount', 0.0)
             notes = self.notes.toPlainText().strip() if hasattr(self, 'notes') and self.notes else None
             
             # Ensure unique invoice number for new invoices
@@ -1230,16 +1064,24 @@ class InvoiceDialog(QDialog):
                 invoice_data_dict['id'] = self.invoice_data.get('id') or self.invoice_data.get('invoice', {}).get('id')
             
             # Save via controller with FINAL status
-            success, message, invoice_id = invoice_form_controller.save_invoice(
+            result = invoice_form_controller.save_invoice(
                 invoice_data_dict,
                 items,
-                is_final=True
+                is_update=bool(self.invoice_data),
+                status='FINAL'
             )
             
-            if success:
-                return invoice_id
+            if result.success:
+                # Update invoice number display
+                if result.invoice_no and hasattr(self, 'invoice_number'):
+                    self.invoice_number.setText(result.invoice_no)
+                
+                # Disable editing after final save
+                self.disable_editing_after_final_save()
+                
+                return result.invoice_id
             else:
-                QMessageBox.critical(self, "Save Error", message)
+                QMessageBox.critical(self, "Save Error", result.message)
                 return None
             
         except Exception as e:
@@ -1515,10 +1357,9 @@ class InvoiceDialog(QDialog):
             from PySide6.QtCore import QUrl, QMarginsF, QSizeF
             from PySide6.QtGui import QPageLayout, QPageSize
             
-            # Create a hidden webview for rendering (with parent to prevent orphan window)
-            webview = QWebEngineView(self)
+            # Create a hidden webview for rendering
+            webview = QWebEngineView()
             webview.setMinimumSize(800, 600)
-            webview.hide()  # Keep hidden - only used for PDF generation
             
             # Configure settings for better rendering
             settings = webview.settings()
@@ -1930,54 +1771,43 @@ class InvoiceDialog(QDialog):
     def create_header_section(self):
         frame = QFrame()
         frame.setStyleSheet(get_section_frame_style(WHITE, 15))
-        frame.setMinimumHeight(160)  # Flexible instead of fixed 210px
-        frame.setMaximumHeight(240)
+        # Two row header with improved layout
+        frame.setFixedHeight(210)
 
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(20, 15, 20, 15)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 12, 20, 12)
+        layout.setSpacing(10)
 
-        # Clean label style with emojis for visual distinction
+        # Clean label style without emoji (buttons have their own)
         label_style = f"""
             QLabel {{
                 color: {TEXT_SECONDARY};
-                font-size: 11px;
-                font-weight: 700;
+                font-size: 12px;
+                font-weight: 600;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
             }}
         """
 
-        # ========== HEADER COMPACT/EXPANDED TOGGLE ==========
-        self._header_expanded = True  # Track expanded state
-        
         # ========== ROW 1: Bill Type, Tax Type, (stretch), Date, Invoice No ==========
         row1 = QHBoxLayout()
         row1.setSpacing(15)
-        row1.setContentsMargins(0, 0, 0, 0)
 
         # Bill Type - Toggle Button (CASH ↔ CREDIT)
         bill_box = QWidget()
         bill_box.setStyleSheet(get_transparent_container_style())
-        bill_box.setObjectName("billTypeBox")  # For toggle visibility
         bill_box_layout = QVBoxLayout(bill_box)
         bill_box_layout.setContentsMargins(0, 0, 0, 0)
         bill_box_layout.setSpacing(4)
-        bill_lbl = QLabel("💵 BILL TYPE")
+        bill_lbl = QLabel("BILL TYPE")
         bill_lbl.setStyleSheet(label_style)
-        bill_lbl.setToolTip("Select payment type\n\n⌨️  Shortcut: Alt+B to toggle CASH/CREDIT")
         bill_box_layout.addWidget(bill_lbl)
         
         # Create toggle button instead of combo box
         self.billtype_btn = QPushButton("💵 CASH")
         self.billtype_btn.setFixedHeight(42)
         self.billtype_btn.setCursor(Qt.PointingHandCursor)
-        self.billtype_btn.setToolTip(
-            "<b style='color: #3B82F6;'>💵 Bill Type Toggle</b><br><br>"
-            "<span style='color: #059669;'>✓ 💵 <b>CASH</b>: Payment received immediately</span><br>"
-            "<span style='color: #059669;'>✓ 📝 <b>CREDIT</b>: Payment due later (shows Balance Due)</span><br><br>"
-            "<span style='color: #6B7280;'><i>⌨️  Shortcut: Alt+B</i></span>"
-        )
+        self.billtype_btn.setToolTip("Click to toggle between CASH and CREDIT\n\n💵 CASH: Payment received immediately\n📝 CREDIT: Payment due later (shows Balance Due)")
         self.billtype_btn.setAutoDefault(False)  # Prevent Enter key from triggering
         self.billtype_btn.setDefault(False)  # Not the default button
         self._bill_type = "CASH"  # Internal state
@@ -1994,37 +1824,26 @@ class InvoiceDialog(QDialog):
         # Tax Type with Segmented Button Group
         gst_box = QWidget()
         gst_box.setStyleSheet(get_transparent_container_style())
-        gst_box.setObjectName("taxTypeBox")  # For toggle visibility
         gst_box_layout = QVBoxLayout(gst_box)
         gst_box_layout.setContentsMargins(0, 0, 0, 0)
         gst_box_layout.setSpacing(4)
-        gst_lbl = QLabel("📊 TAX TYPE")
+        gst_lbl = QLabel("TAX TYPE")
         gst_lbl.setStyleSheet(label_style)
-        gst_lbl.setToolTip("<b>Tax Classification</b><br><br>Select based on buyer location:<br>⌨️  Use arrow keys or number keys (1/2/3) to select")
         gst_box_layout.addWidget(gst_lbl)
         
-        # Create segmented button container with proper styling
+        # Create segmented button container
         self._tax_type = "SAME_STATE"  # Internal state: SAME_STATE, OTHER_STATE, NON_GST
         segment_container = QFrame()
         segment_container.setObjectName("taxTypeSegment")
         segment_container.setFixedHeight(42)
-        segment_container.setStyleSheet(f"""
-            QFrame#taxTypeSegment {{
-                background: {BACKGROUND};
-                border: 1px solid {BORDER};
-                border-radius: 6px;
-                padding: 0px;
-                margin: 0px;
-            }}
-        """)
         segment_layout = QHBoxLayout(segment_container)
-        segment_layout.setContentsMargins(2, 2, 2, 2)
+        segment_layout.setContentsMargins(0, 0, 0, 0)
         segment_layout.setSpacing(0)
         
         # Create three segment buttons
-        self.tax_btn_same = QPushButton("Same State")
-        self.tax_btn_other = QPushButton("Other State")
-        self.tax_btn_nongst = QPushButton("Non-GST")
+        self.tax_btn_same = QPushButton("🏠 Same")
+        self.tax_btn_other = QPushButton("🚚 Other")
+        self.tax_btn_nongst = QPushButton("❌ Non-GST")
         
         # Store buttons for easy access
         self._tax_buttons = {
@@ -2033,62 +1852,31 @@ class InvoiceDialog(QDialog):
             "NON_GST": self.tax_btn_nongst
         }
         
-        # Configure buttons with proper segmented styling
-        buttons_config = [
-            (self.tax_btn_same, "SAME_STATE", "🏠", "6px 0 0 6px"),
-            (self.tax_btn_other, "OTHER_STATE", "🚚", "0"),
-            (self.tax_btn_nongst, "NON_GST", "❌", "0 6px 6px 0")
-        ]
-        
-        for btn, key, emoji, border_radius in buttons_config:
-            btn.setFixedHeight(38)
+        # Configure buttons
+        for btn in [self.tax_btn_same, self.tax_btn_other, self.tax_btn_nongst]:
+            btn.setFixedHeight(40)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setAutoDefault(False)
             btn.setDefault(False)
-            btn.setFocusPolicy(Qt.NoFocus)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {WHITE};
-                    color: {TEXT_PRIMARY};
-                    border: 1px solid {BORDER};
-                    border-radius: {border_radius};
-                    padding: 6px 12px;
-                    font-size: 11px;
-                    font-weight: 600;
-                    outline: none;
-                }}
-                QPushButton:hover {{
-                    background: {PRIMARY_LIGHT};
-                    border: 1px solid {PRIMARY};
-                }}
-                QPushButton:pressed {{
-                    background: {PRIMARY};
-                    color: {WHITE};
-                    border: 1px solid {PRIMARY};
-                }}
-            """)
         
-        # Set tooltips with proper HTML formatting for visibility
+        # Set tooltips
         self.tax_btn_same.setToolTip(
-            "<b style='color: #3B82F6;'>🏠 Same State (Intra-State GST)</b><br><br>"
-            "<span style='color: #059669;'>✓ CGST + SGST applies</span><br>"
-            "<span style='color: #6B7280;'>• Buyer & seller in same state</span><br>"
-            "<span style='color: #6B7280;'>• Tax split between Central & State</span><br><br>"
-            "<span style='color: #6B7280;'><i>⌨️  Press 1 to select</i></span>"
+            "<b>🏠 Same State (Intra-State GST)</b><br><br>"
+            "• CGST + SGST applies<br>"
+            "• Buyer & seller in same state<br>"
+            "• Tax split between Central & State"
         )
         self.tax_btn_other.setToolTip(
-            "<b style='color: #F59E0B;'>🚚 Other State (Inter-State GST)</b><br><br>"
-            "<span style='color: #059669;'>✓ IGST applies</span><br>"
-            "<span style='color: #6B7280;'>• Buyer & seller in different states</span><br>"
-            "<span style='color: #6B7280;'>• Single integrated tax</span><br><br>"
-            "<span style='color: #6B7280;'><i>⌨️  Press 2 to select</i></span>"
+            "<b>🚚 Other State (Inter-State GST)</b><br><br>"
+            "• IGST applies<br>"
+            "• Buyer & seller in different states<br>"
+            "• Single integrated tax"
         )
         self.tax_btn_nongst.setToolTip(
-            "<b style='color: #6B7280;'>❌ Non-GST</b><br><br>"
-            "<span style='color: #059669;'>✓ No GST applicable</span><br>"
-            "<span style='color: #6B7280;'>• Exempt goods/services</span><br>"
-            "<span style='color: #6B7280;'>• Tax = 0%</span><br><br>"
-            "<span style='color: #6B7280;'><i>⌨️  Press 3 to select</i></span>"
+            "<b>❌ Non-GST</b><br><br>"
+            "• No GST applicable<br>"
+            "• Exempt goods/services<br>"
+            "• Tax = 0%"
         )
         
         # Connect click handlers
@@ -2097,54 +1885,16 @@ class InvoiceDialog(QDialog):
         self.tax_btn_nongst.clicked.connect(lambda: self._set_tax_type("NON_GST"))
         
         # Add buttons to layout
-        segment_layout.addWidget(self.tax_btn_same, 1)
-        segment_layout.addWidget(self.tax_btn_other, 1)
-        segment_layout.addWidget(self.tax_btn_nongst, 1)
+        segment_layout.addWidget(self.tax_btn_same)
+        segment_layout.addWidget(self.tax_btn_other)
+        segment_layout.addWidget(self.tax_btn_nongst)
         
         # Apply initial styling
         self._apply_tax_type_styles()
         
         gst_box_layout.addWidget(segment_container)
-        gst_box.setFixedWidth(280)  # Optimized width for better Row 1 spacing
+        gst_box.setFixedWidth(280)  # Wider for segmented buttons
         row1.addWidget(gst_box)
-
-        # Stretch to push Date and Invoice No to the right
-        row1.addStretch()
-
- # ========== ROW 1.5: Party Info Display (centered) ==========
-        party_info_container = QWidget()
-        party_info_container.setStyleSheet(get_transparent_container_style())
-        party_info_container_layout = QHBoxLayout(party_info_container)
-        party_info_container_layout.setContentsMargins(0, 0, 0, 0)
-        party_info_container_layout.setSpacing(0)
-        
-        # Add stretch on left side
-        party_info_container_layout.addStretch()
-        
-        # Party info display (shows details after selection) - Enhanced card style in center
-        self.party_info_label = QLabel("")
-        self.party_info_label.setTextFormat(Qt.RichText)  # Enable HTML rendering
-        self.party_info_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 13px;
-                color: {TEXT_PRIMARY};
-                padding: 8px 12px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #F0FDF4, stop:1 #ECFDF5);
-                border: 1px solid #86EFAC;
-                border-radius: 6px;
-                border-left: 4px solid #10B981;
-            }}
-        """)
-        self.party_info_label.setVisible(False)
-        self.party_info_label.setMinimumWidth(700)  # Increased for 2-line display
-        self.party_info_label.setMaximumWidth(900)  # Wider to accommodate phone + GSTIN + address on line 1
-        self.party_info_label.setWordWrap(True)  # Still allow wrapping but won't need it with wider width
-        party_info_container_layout.addWidget(self.party_info_label, 0)  # No stretch - keep centered
-        
-        # Add stretch on right side
-        party_info_container_layout.addStretch()
-        row1.addWidget(party_info_container)
-        # layout.addWidget(party_info_container)
 
         # Stretch to push Date and Invoice No to the right
         row1.addStretch()
@@ -2152,17 +1902,11 @@ class InvoiceDialog(QDialog):
         # Invoice Date (right corner)
         inv_date_box = QWidget()
         inv_date_box.setStyleSheet(get_transparent_container_style())
-        inv_date_box.setObjectName("invoiceDateBox")  # For toggle visibility
         inv_date_box_layout = QVBoxLayout(inv_date_box)
         inv_date_box_layout.setContentsMargins(0, 0, 0, 0)
         inv_date_box_layout.setSpacing(4)
-        inv_date_lbl = QLabel("📅 DATE")
+        inv_date_lbl = QLabel("DATE")
         inv_date_lbl.setStyleSheet(label_style)
-        inv_date_lbl.setToolTip(
-            "<b style='color: #3B82F6;'>📅 Invoice Date</b><br><br>"
-            "<span style='color: #6B7280;'>Date when invoice is created</span><br><br>"
-            "<span style='color: #6B7280;'><i>⌨️  Shortcut: Alt+D</i></span>"
-        )
         inv_date_box_layout.addWidget(inv_date_lbl)
         self.invoice_date = QDateEdit()
         self.invoice_date.setDate(QDate.currentDate())
@@ -2181,53 +1925,36 @@ class InvoiceDialog(QDialog):
         # Connect editingFinished to focus on product input after date
         self.invoice_date.editingFinished.connect(self._focus_first_product_input)
         inv_date_box_layout.addWidget(self.invoice_date)
-        inv_date_box.setFixedWidth(170)  # Increased from 150 to accommodate full date "dd-MM-yyyy"
+        inv_date_box.setFixedWidth(150)
         row1.addWidget(inv_date_box)
 
-        # Invoice Number (right corner) - editable for new invoices, read-only for existing
+        # Invoice Number (right corner) - prominent red styling
         inv_num_box = QWidget()
         inv_num_box.setStyleSheet(get_transparent_container_style())
-        inv_num_box.setObjectName("invoiceNumberBox")  # For toggle visibility
         inv_num_box_layout = QVBoxLayout(inv_num_box)
         inv_num_box_layout.setContentsMargins(0, 0, 0, 0)
         inv_num_box_layout.setSpacing(4)
-        inv_num_lbl = QLabel("📄 INVOICE NO")
+        inv_num_lbl = QLabel("INVOICE NO")
         inv_num_lbl.setStyleSheet(label_style)
-        inv_num_lbl.setToolTip(
-            "<b style='color: #3B82F6;'>📄 Invoice Number</b><br><br>"
-            "<span style='color: #059669;'>🔵 NEW:</span> <span style='color: #6B7280;'>Editable - auto-generated</span><br>"
-            "<span style='color: #6B7280;'>🔴 EXISTING:</span> <span style='color: #6B7280;'>Read-only - locked</span><br><br>"
-            "<span style='color: #6B7280;'><i>Unique identifier for this invoice</i></span>"
-        )
         inv_num_box_layout.addWidget(inv_num_lbl)
-        
         # Determine next invoice number via controller
         next_inv_no = invoice_form_controller.generate_next_invoice_number()
         self.invoice_number = QLineEdit(next_inv_no)
-        
-        # Make editable for new invoices, read-only for existing ones
-        if self.invoice_data:
-            self.invoice_number.setReadOnly(True)
-            self.invoice_number.setStyleSheet(get_invoice_number_input_style().replace("QLineEdit", "QLineEdit:read-only"))
-        else:
-            # For new invoices, allow editing
-            self.invoice_number.setReadOnly(False)
-            self.invoice_number.setStyleSheet(get_invoice_number_input_style())
-        
+        self.invoice_number.setReadOnly(True)
         self.invoice_number.setFixedHeight(42)
         self.invoice_number.setAlignment(Qt.AlignCenter)
+        self.invoice_number.setStyleSheet(get_invoice_number_input_style())
         inv_num_box_layout.addWidget(self.invoice_number)
-        inv_num_box.setFixedWidth(150)
+        inv_num_box.setFixedWidth(130)
         row1.addWidget(inv_num_box)
 
         layout.addLayout(row1)
 
-        # # ========== SEPARATOR LINE between Row 1 and Row 2 ==========
-        # separator = QFrame()
-        # separator.setFrameShape(QFrame.HLine)
-        # separator.setStyleSheet(f"background-color: {BORDER}; max-height: 1px; margin: 4px 0px;")
-        # layout.addWidget(separator)
-
+        # ========== SEPARATOR LINE between Row 1 and Row 2 ==========
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setStyleSheet(f"background-color: {BORDER}; max-height: 1px; margin: 4px 0px;")
+        layout.addWidget(separator)
 
         # ========== ROW 2: Select Party (full width) ==========
         row2 = QHBoxLayout()
@@ -2240,14 +1967,8 @@ class InvoiceDialog(QDialog):
         party_box_layout.setSpacing(4)
         party_header = QHBoxLayout()
         party_header.setSpacing(10)
-        party_label = QLabel("👥 SELECT PARTY / CUSTOMER")
+        party_label = QLabel("SELECT PARTY / CUSTOMER")
         party_label.setStyleSheet(label_style)
-        party_label.setToolTip(
-            "<b style='color: #3B82F6;'>👥 Party Selection</b><br><br>"
-            "<span style='color: #6B7280;'><i>⏱️ Recent:</i> Recently used parties shown first</span><br>"
-            "<span style='color: #6B7280;'><i>🔍 Search:</i> Type name, GSTIN, or phone</span><br><br>"
-            "<span style='color: #6B7280;'><i>⌨️  Press Enter to select<br>Esc to clear</i></span>"
-        )
         party_header.addWidget(party_label)
         add_party_link = QLabel("<a href='#' style='text-decoration: none;'>+ Add New Party</a>")
         add_party_link.setTextInteractionFlags(Qt.TextBrowserInteraction)
@@ -2263,13 +1984,6 @@ class InvoiceDialog(QDialog):
             }}
         """)
         add_party_link.setCursor(Qt.PointingHandCursor)
-        add_party_link.setToolTip(
-            "<b style='color: #3B82F6;'>➕ Add New Party</b><br><br>"
-            "<span style='color: #6B7280;'>Quick dialog to create new party</span><br>"
-            "<span style='color: #6B7280;'>without leaving the invoice form</span><br><br>"
-            "<span style='color: #059669;'>✓ Automatically selected after creation</span><br>"
-            "<span style='color: #6B7280;'><i>Returns to invoice immediately</i></span>"
-        )
         add_party_link.linkActivated.connect(self.open_quick_add_party_dialog)
         party_header.addWidget(add_party_link)
         party_header.addStretch()
@@ -2327,10 +2041,14 @@ class InvoiceDialog(QDialog):
             }}
         """)
         
+        # Get recent parties from invoices (last 5 unique parties used)
+        self.recent_party_ids = self._get_recent_party_ids()
+        
         # Populate party_data_map with balance info
         self.party_data_map = {}
         self.party_display_map = {}  # Maps display text to party name
-        all_display_names = []  # All parties in alphabetical order
+        recent_display_names = []  # For recent parties section
+        regular_display_names = []  # For regular parties
         
         for p in (self.parties or []):
             name = p.get('name', '').strip()
@@ -2352,13 +2070,38 @@ class InvoiceDialog(QDialog):
                 # Store calculated balance in party data for later use
                 p['_calculated_balance'] = balance
                 
-                # Display party name in search dropdown (balance shown in party info after selection)
+                # Display only party name in search dropdown (balance shown in party info after selection)
                 display_text = name
                 self.party_display_map[display_text] = name
-                all_display_names.append(display_text)
+                
+                # Separate recent from regular parties
+                party_id = p.get('id')
+                if party_id in self.recent_party_ids:
+                    recent_display_names.append((display_text, self.recent_party_ids.index(party_id)))
+                else:
+                    regular_display_names.append(display_text)
         
-        # Sort all parties alphabetically
-        all_display_names.sort()
+        # Sort recent parties by recency (most recent first)
+        recent_display_names.sort(key=lambda x: x[1])
+        recent_display_names = [x[0] for x in recent_display_names]
+        
+        # Build completer items list: Recent parties first (with ⏱️ prefix), then all parties
+        all_display_names = []
+        
+        # Add recent parties with prefix
+        for display_text in recent_display_names[:5]:
+            prefixed = f"⏱️ {display_text}"
+            all_display_names.append(prefixed)
+            self.party_display_map[prefixed] = self.party_display_map.get(display_text, display_text)
+        
+        # Add all regular parties
+        for display_text in regular_display_names:
+            all_display_names.append(display_text)
+        
+        # Also add recent items without prefix (for search matching)
+        for display_text in recent_display_names:
+            if display_text not in all_display_names:
+                all_display_names.append(display_text)
         
         # DON'T add items to combo box - we use QCompleter only for all selections
         # This ensures ONE consistent popup style for both typing and button click
@@ -2408,7 +2151,7 @@ class InvoiceDialog(QDialog):
         
         # Connect completer activation to selection handler
         self.party_completer.activated.connect(self._on_party_completer_activated)
-
+        
         def custom_show_popup():
             # Show all items by completing with empty prefix
             self.party_completer.setCompletionPrefix("")
@@ -2423,8 +2166,8 @@ class InvoiceDialog(QDialog):
 
         # Override showPopup to show QCompleter popup instead of native combo dropdown
         # This makes button click use the SAME popup as typing        
-        # Connect only to actual selection events (completer activation), NOT text changes
-        # This ensures on_party_selected is called only when user confirms selection
+        # Connect selection change to focus next field
+        self.party_search.currentTextChanged.connect(self.on_party_selected)
         
         # Install event filter for keyboard navigation (Tab to confirm, Escape to clear, Down to open)
         # Install on BOTH lineEdit and the combobox itself to catch all key events
@@ -2433,8 +2176,27 @@ class InvoiceDialog(QDialog):
         
         party_search_layout.addWidget(self.party_search, 1)  # Stretch factor 1 to expand
         
-        # Add party search container with full width (no side-by-side layout)
         party_box_layout.addWidget(party_search_container)
+        
+        # Party info display (shows details after selection) - Enhanced card style
+        self.party_info_label = QLabel("")
+        self.party_info_label.setTextFormat(Qt.RichText)  # Enable HTML rendering
+        self.party_info_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 13px;
+                color: {TEXT_PRIMARY};
+                padding: 8px 12px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #F0FDF4, stop:1 #ECFDF5);
+                border: 1px solid #86EFAC;
+                border-radius: 6px;
+                border-left: 4px solid #10B981;
+            }}
+        """)
+        self.party_info_label.setVisible(False)
+        self.party_info_label.setMinimumWidth(400)
+        self.party_info_label.setMaximumWidth(800)
+        self.party_info_label.setWordWrap(True)
+        party_box_layout.addWidget(self.party_info_label)
         
         # Validation error label (hidden by default)
         self.party_error_label = QLabel("")
@@ -2458,19 +2220,7 @@ class InvoiceDialog(QDialog):
         """Open a quick dialog to add a new party without leaving the invoice."""
         try:
             from ui.parties.party_form_dialog import PartyDialog
-            
-            # Get the text user typed in the search box
-            search_text = self.party_search.lineEdit().text().strip() if hasattr(self, 'party_search') else ""
-            
-            # Create and open the party dialog
             dialog = PartyDialog(self)
-            
-            # Pre-fill the party name field if user typed something
-            if search_text and hasattr(dialog, 'name_input'):
-                dialog.name_input.setText(search_text)
-                dialog.name_input.selectAll()  # Select all for easy editing
-                dialog.name_input.setFocus()  # Focus on the field
-            
             if dialog.exec() == QDialog.Accepted:
                 # Refresh parties list via controller
                 self.parties = invoice_form_controller.get_parties()
@@ -2534,7 +2284,7 @@ class InvoiceDialog(QDialog):
 
     def on_party_selected(self, text: str):
         """Handle party selection from the combo box.
-        Shows party info, updates UI, and automatically adds first item row.
+        Shows party info, updates UI, and moves focus to next field.
         """
         try:
             if not text or not text.strip():
@@ -2579,20 +2329,9 @@ class InvoiceDialog(QDialog):
                 self.party_search.setCurrentText(party_name)
                 self.party_search.blockSignals(False)
                 
-                # Auto-add first item row if no items exist
-                item_count = 0
-                for i in range(self.items_layout.count()):
-                    widget = self.items_layout.itemAt(i).widget()
-                    if isinstance(widget, InvoiceItemWidget):
-                        item_count += 1
-                
-                if item_count == 0:
-                    # Automatically add first item row
-                    QTimer.singleShot(200, self.add_item)
-                else:
-                    # Keep focus on party search so user can easily delete/clear if needed
-                    if hasattr(self, 'party_search'):
-                        QTimer.singleShot(150, lambda: self.party_search.lineEdit().setFocus())
+                # Keep focus on party search so user can easily delete/clear if needed
+                if hasattr(self, 'party_search'):
+                    QTimer.singleShot(150, lambda: self.party_search.lineEdit().setFocus())
             else:
                 # Check if it's a partial match (user is still typing)
                 matching_parties = [n for n in self.party_data_map.keys() 
@@ -2605,8 +2344,7 @@ class InvoiceDialog(QDialog):
 
     def _on_party_completer_activated(self, text: str):
         """Handle party selection from the completer dropdown.
-        Sets the text, shows party info, and automatically adds first empty item row.
-        Focus stays in party search field - user presses Enter to move to product search.
+        Sets the text and moves focus to next field.
         """
         try:
             if text and text.strip():
@@ -2614,9 +2352,16 @@ class InvoiceDialog(QDialog):
                 if text.startswith("──"):
                     return
                 
-                # Extract party name from display text
+                # Remove recent party prefix if present
                 clean_text = text.strip()
+                if clean_text.startswith("⏱️ "):
+                    clean_text = clean_text[3:]  # Remove "⏱️ " prefix
+                
+                # Extract party name from display text
                 party_name = self.party_display_map.get(clean_text, clean_text)
+                # Also check with prefix
+                if party_name == clean_text:
+                    party_name = self.party_display_map.get(text.strip(), clean_text)
                 
                 # If party name still has balance info, extract just the name
                 if "  [" in party_name:
@@ -2624,7 +2369,7 @@ class InvoiceDialog(QDialog):
                 
                 # Set just the party name in the combo box (not the display text with balance)
                 self.party_search.blockSignals(True)
-                self.party_search.lineEdit().setText(party_name)  # Set text directly
+                self.party_search.setCurrentText(party_name)
                 self.party_search.blockSignals(False)
                 
                 # Show party info
@@ -2638,37 +2383,12 @@ class InvoiceDialog(QDialog):
                         f"border: 2px solid {BORDER}",
                         f"border: 2px solid #10B981"
                     ))
-                    
-                    # ✅ AUTO-ADD FIRST ITEM ROW if no items exist
-                    item_count = 0
-                    for i in range(self.items_layout.count()):
-                        widget = self.items_layout.itemAt(i).widget()
-                        if isinstance(widget, InvoiceItemWidget):
-                            item_count += 1
-                    
-                    if item_count == 0:
-                        # Automatically add first empty item row
-                        QTimer.singleShot(200, self.add_item)
-                    
-                    # Keep focus on party search field - user presses Enter to move to product search
+                
+                # Keep focus on party search so user can easily delete/clear if needed
+                if hasattr(self, 'party_search'):
                     QTimer.singleShot(150, lambda: self.party_search.lineEdit().setFocus())
         except Exception as e:
             print(f"Party completer activation error: {e}")
-
-    def _focus_on_product_search(self):
-        """Focus on the first item's product search field."""
-        try:
-            # Find the first InvoiceItemWidget
-            for i in range(self.items_layout.count()):
-                widget = self.items_layout.itemAt(i).widget()
-                if isinstance(widget, InvoiceItemWidget):
-                    # Focus on the product_input field
-                    if hasattr(widget, 'product_input'):
-                        widget.product_input.lineEdit().setFocus()
-                        widget.product_input.lineEdit().selectAll()
-                    break
-        except Exception as e:
-            print(f"Error focusing on product search: {e}")
 
     def _on_party_text_edited(self, text: str):
         """Handle text editing in party search - position dropdown, validate, highlight matches, and show suggestions."""
@@ -2727,7 +2447,7 @@ class InvoiceDialog(QDialog):
             print(f"Party validation error: {e}")
 
     def _show_party_info(self, party_data: dict):
-        """Display party information below the search box in a card format with hover tooltip."""
+        """Display party information below the search box in a card format."""
         try:
             if not hasattr(self, 'party_info_label'):
                 return
@@ -2753,54 +2473,36 @@ class InvoiceDialog(QDialog):
             # Build rich info HTML for better display
             info_html = []
             
-            # Line 1: Phone | GSTIN | Address (all in one line with separators)
-            line1_parts = []
+            # Row 1: Phone and GSTIN
+            row1_parts = []
             if phone:
-                line1_parts.append(f"📞 {phone}")
+                row1_parts.append(f"📞 <b>{phone}</b>")
             if gstin:
-                line1_parts.append(f"🏷️ {gstin}")
+                row1_parts.append(f"🏷️ GSTIN: <b>{gstin}</b>")
+            if row1_parts:
+                info_html.append(" &nbsp;|&nbsp; ".join(row1_parts))
             
-            # Add address to line 1
+            # Row 2: Balance (with color coding)
+            if balance > 0:
+                info_html.append(f'<span style="color: #DC2626;">💰 Balance Due: <b>₹{balance:,.2f}</b></span>')
+            elif balance < 0:
+                info_html.append(f'<span style="color: #059669;">💚 Advance: <b>₹{abs(balance):,.2f}</b></span>')
+            
+            # Row 3: Address
             if address or city or state:
                 addr_parts = []
                 if address:
-                    addr_short = address[:30] + "..." if len(address) > 30 else address
+                    addr_short = address[:60] + "..." if len(address) > 60 else address
                     addr_parts.append(addr_short)
                 if city:
                     addr_parts.append(city)
                 if state:
                     addr_parts.append(state)
                 if addr_parts:
-                    line1_parts.append(f"📍 {', '.join(addr_parts)}")
-            
-            if line1_parts:
-                info_html.append(f"<span style='color: #059669;'>{' | '.join(line1_parts)}</span>")
-            
-            # Line 2: Balance Due (with color coding based on type)
-            if balance > 0:
-                info_html.append(f"<span style='color: #DC2626;'>💰 Balance Due: <b>₹{balance:,.2f}</b></span>")
-            elif balance < 0:
-                info_html.append(f"<span style='color: #059669;'>💚 Advance Credit: <b>₹{abs(balance):,.2f}</b></span>")
+                    info_html.append(f"📍 {', '.join(addr_parts)}")
             
             if info_html:
                 self.party_info_label.setText("<br>".join(info_html))
-                # Create detailed tooltip for hover
-                tooltip_parts = [f"<b style='color: #3B82F6; font-size: 14px;'>👥 {name}</b>"]
-                if phone:
-                    tooltip_parts.append(f"<br><b>📞 Phone:</b> <span style='color: #059669;'>{phone}</span>")
-                if gstin:
-                    tooltip_parts.append(f"<br><b>🏷️  GSTIN:</b> <span style='color: #059669;'>{gstin}</span>")
-                if address:
-                    tooltip_parts.append(f"<br><b>📍 Address:</b> <span style='color: #059669;'>{address}</span>")
-                if city:
-                    tooltip_parts.append(f"<br><b>🏘️  City:</b> <span style='color: #059669;'>{city}</span>")
-                if state:
-                    tooltip_parts.append(f"<br><b>🗺️  State:</b> <span style='color: #059669;'>{state}</span>")
-                if balance >= 0:
-                    tooltip_parts.append(f"<br><b style='color: #DC2626;'>💰 Balance Due:</b> <span style='color: #DC2626;'>₹{balance:,.2f}</span>")
-                else:
-                    tooltip_parts.append(f"<br><b style='color: #059669;'>💚 Advance Credit:</b> <span style='color: #059669;'>₹{abs(balance):,.2f}</span>")
-                self.party_info_label.setToolTip("".join(tooltip_parts))
                 self.party_info_label.setVisible(True)
             else:
                 self.party_info_label.setVisible(False)
@@ -2943,45 +2645,28 @@ class InvoiceDialog(QDialog):
                 if is_party_search and event.type() == QEvent.KeyPress:
                     # Down arrow key: open dropdown menu
                     if event.key() == Qt.Key_Down:
-                        print(f"[DEBUG] Down arrow pressed in party search Sales")
                         if not self.party_completer.popup().isVisible():
                             # Show all items in dropdown
                             self.party_search.showPopup()
                             return True
                         # If popup is visible, let default behavior navigate the list
                     
-                    # Tab or Enter key: confirm current selection and move to product search
+                    # Tab or Enter key: confirm current selection and move to date field
                     elif event.key() in (Qt.Key_Tab, Qt.Key_Return, Qt.Key_Enter):
-                        # If completer popup is visible and Enter is pressed, 
-                        # let QCompleter handle it - it will select the highlighted item and emit activated signal
-                        if self.party_completer.popup().isVisible() and event.key() in (Qt.Key_Return, Qt.Key_Enter):
-                            # Return False to let QCompleter process the Enter key
-                            # This will select the highlighted item and emit the activated signal
-                            # which calls _on_party_completer_activated automatically
-                            return False
-                        
-                        # For Tab key or when popup is not visible, validate and move to product search
-                        text = self.party_search.lineEdit().text().strip()  # Use lineEdit().text() for read-only compatibility
+                        text = self.party_search.currentText().strip()
                         if text:
                             # Check if it's a valid party
                             party_name = self.party_display_map.get(text, text)
                             if party_name in self.party_data_map:
-                                # If party not yet processed, process it now
-                                if not hasattr(self, '_party_selection_processed'):
-                                    self._on_party_completer_activated(text)
-                                    self._party_selection_processed = True
-                                else:
-                                    # Clear flag for next selection
-                                    self._party_selection_processed = False
-                                
-                                # Move focus to first item's product search
-                                self._focus_on_product_search()
-                                return True  # Block default behavior
+                                self._on_party_completer_activated(text)
+                                # Move focus to date field
+                                if hasattr(self, 'invoice_date'):
+                                    self.invoice_date.setFocus()
+                                return True  # Block default behavior, we handle focus ourselves
                             else:
                                 # Show error for invalid party
                                 self._show_party_error("Please select a valid party from the list")
                                 return True  # Block key
-                        return False  # Allow event to propagate if text is empty
                     
                     # Escape key: close dropdown first, then clear selection
                     elif event.key() == Qt.Key_Escape:
@@ -3034,7 +2719,7 @@ class InvoiceDialog(QDialog):
             popup.setFixedWidth(popup_width)
             
             # Calculate position - use bottomLeft() so we start BELOW the search box
-            gap = 10  # Small gap between search box and popup
+            gap = 25  # Small gap between search box and popup
             y_pos = global_pos.y() + gap
             x_pos = global_pos.x()
             
@@ -3176,7 +2861,7 @@ class InvoiceDialog(QDialog):
             print(f"Bill type change handler error: {e}")
 
     def _apply_billtype_style(self):
-        """Apply the correct style to bill type toggle button based on current state with improved styling."""
+        """Apply the correct style to bill type toggle button based on current state."""
         try:
             if not hasattr(self, 'billtype_btn'):
                 return
@@ -3184,50 +2869,38 @@ class InvoiceDialog(QDialog):
                 self.billtype_btn.setText("💵 CASH")
                 self.billtype_btn.setStyleSheet(f"""
                     QPushButton {{
-                        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #10B981, stop:1 #059669);
+                        background: #10B981;
                         color: {WHITE};
-                        border: 2px solid #059669;
                         border-radius: 6px;
-                        padding: 8px 14px;
-                        font-size: 13px;
+                        padding: 6px 12px;
+                        font-size: 14px;
                         font-weight: bold;
-                        outline: none;
+                        border: none;
                     }}
                     QPushButton:hover {{
-                        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #059669, stop:1 #047857);
-                    }}
-                    QPushButton:pressed {{
-                        background: #047857;
+                        background: #059669;
                     }}
                     QPushButton:disabled {{
                         background: #6EE7B7;
-                        color: #D1FAE5;
-                        border: 2px solid #A7F3D0;
                     }}
                 """)
             else:
                 self.billtype_btn.setText("📝 CREDIT")
                 self.billtype_btn.setStyleSheet(f"""
                     QPushButton {{
-                        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #EF4444, stop:1 #DC2626);
+                        background: #EF4444;
                         color: {WHITE};
-                        border: 2px solid #DC2626;
                         border-radius: 6px;
-                        padding: 8px 14px;
-                        font-size: 13px;
+                        padding: 6px 12px;
+                        font-size: 14px;
                         font-weight: bold;
-                        outline: none;
+                        border: none;
                     }}
                     QPushButton:hover {{
-                        background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #DC2626, stop:1 #B91C1C);
-                    }}
-                    QPushButton:pressed {{
-                        background: #B91C1C;
+                        background: #DC2626;
                     }}
                     QPushButton:disabled {{
                         background: #FCA5A5;
-                        color: #FEE2E2;
-                        border: 2px solid #FECACA;
                     }}
                 """)
         except Exception as e:
@@ -3253,134 +2926,116 @@ class InvoiceDialog(QDialog):
         try:
             self._tax_type = tax_type
             self._apply_tax_type_styles()
-            
-            # Update all item rows - set tax field read-only for Non-GST
-            # and recalculate tax amounts based on new tax type
+            # Update totals when tax type changes (for CGST/SGST/IGST display)
             if hasattr(self, 'items_layout'):
-                is_non_gst = (tax_type == "NON_GST")
-                for i in range(self.items_layout.count()):
-                    widget = self.items_layout.itemAt(i).widget()
-                    if widget and hasattr(widget, 'set_tax_readonly'):
-                        widget.set_tax_readonly(is_non_gst, set_to_zero=is_non_gst)
-                    
-                    # Update tax rate for each item based on new tax type
-                    if isinstance(widget, InvoiceItemWidget):
-                        widget.update_tax_for_type_change(tax_type)
-                
-                # Update totals when tax type changes
                 self.update_totals()
-            
             # Trigger invoice type change handler for item tax rates
             self.on_invoice_type_changed(self._get_tax_type())
         except Exception as e:
             print(f"Set tax type error: {e}")
 
     def _apply_tax_type_styles(self):
-        """Apply styles to tax type segment buttons based on current selection with proper segmentation."""
+        """Apply styles to tax type segment buttons based on current selection."""
         try:
             if not hasattr(self, '_tax_buttons'):
                 return
             
-            # Define colors for each type - all as tuples (bg_color, hover_color)
+            # Define colors for each type
             colors = {
-                "SAME_STATE": ("#3B82F6", "#2563EB"),   # Blue
-                "OTHER_STATE": ("#F59E0B", "#D97706"),  # Orange
-                "NON_GST": ("#6B7280", "#4B5563")       # Gray
+                "SAME_STATE": "#3B82F6",   # Blue
+                "OTHER_STATE": "#F59E0B",  # Orange/Amber
+                "NON_GST": "#6B7280"       # Gray
             }
+            
+            # Unselected style (light background, dark text)
+            unselected_style = f"""
+                QPushButton {{
+                    background: {WHITE};
+                    color: #374151;
+                    border: 1px solid {BORDER};
+                    padding: 4px 8px;
+                    font-size: 12px;
+                    font-weight: 500;
+                }}
+                QPushButton:hover {{
+                    background: #F3F4F6;
+                    border: 1px solid #9CA3AF;
+                }}
+            """
             
             for btn_type, btn in self._tax_buttons.items():
                 if btn_type == self._tax_type:
-                    # Selected style - use the appropriate color with gradient
-                    bg_color, hover_color = colors.get(btn_type, ("#3B82F6", "#2563EB"))
+                    # Selected style - use the appropriate color
+                    bg_color = colors.get(btn_type, PRIMARY)
+                    hover_colors = {
+                        "SAME_STATE": "#2563EB",
+                        "OTHER_STATE": "#D97706", 
+                        "NON_GST": "#4B5563"
+                    }
+                    hover_color = hover_colors.get(btn_type, PRIMARY_HOVER)
+                    
+                    # Determine border radius based on position
+                    if btn_type == "SAME_STATE":
+                        border_radius = "6px 0 0 6px"  # Left button
+                    elif btn_type == "NON_GST":
+                        border_radius = "0 6px 6px 0"  # Right button
+                    else:
+                        border_radius = "0"  # Middle button
                     
                     btn.setStyleSheet(f"""
                         QPushButton {{
-                            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {bg_color}, stop:1 {hover_color});
+                            background: {bg_color};
                             color: {WHITE};
                             border: none;
-                            padding: 6px 12px;
+                            border-radius: {border_radius};
+                            padding: 4px 8px;
                             font-size: 12px;
                             font-weight: bold;
-                            outline: none;
                         }}
                         QPushButton:hover {{
-                            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {hover_color}, stop:1 {hover_color});
-                        }}
-                        QPushButton:pressed {{
                             background: {hover_color};
                         }}
                     """)
                 else:
-                    # Unselected style - light gray with border
+                    # Unselected style with proper border radius
+                    if btn_type == "SAME_STATE":
+                        border_radius = "6px 0 0 6px"
+                    elif btn_type == "NON_GST":
+                        border_radius = "0 6px 6px 0"
+                    else:
+                        border_radius = "0"
+                    
                     btn.setStyleSheet(f"""
                         QPushButton {{
                             background: {WHITE};
-                            color: {TEXT_PRIMARY};
+                            color: #374151;
                             border: 1px solid {BORDER};
-                            padding: 6px 12px;
+                            border-radius: {border_radius};
+                            padding: 4px 8px;
                             font-size: 12px;
                             font-weight: 500;
-                            outline: none;
                         }}
                         QPushButton:hover {{
-                            background: {PRIMARY_LIGHT};
-                            border: 1px solid {PRIMARY};
-                            color: {PRIMARY};
-                        }}
-                        QPushButton:pressed {{
-                            background: {PRIMARY_LIGHT};
+                            background: #F3F4F6;
+                            border: 1px solid #9CA3AF;
                         }}
                     """)
         except Exception as e:
             print(f"Tax type style error: {e}")
 
-    def toggle_header_compact(self) -> None:
-        """Toggle between compact and expanded header modes."""
-        try:
-            self._header_expanded = not self._header_expanded
-            
-            # Get all box containers in header
-            boxes_to_toggle = [
-                'billTypeBox',
-                'taxTypeBox', 
-                'invoiceDateBox',
-                'invoiceNumberBox'
-            ]
-            
-            for box_name in boxes_to_toggle:
-                if hasattr(self, 'header_frame'):
-                    # Find widget by object name
-                    box_widget = self.header_frame.findChild(QWidget, box_name)
-                    if box_widget:
-                        box_widget.setVisible(self._header_expanded)
-            
-            # Adjust header height based on mode
-            if hasattr(self, 'header_frame'):
-                if self._header_expanded:
-                    self.header_frame.setMinimumHeight(160)
-                    self.header_frame.setMaximumHeight(240)
-                else:
-                    # Compact mode: only show party selection
-                    self.header_frame.setMinimumHeight(120)
-                    self.header_frame.setMaximumHeight(140)
-            
-        except Exception as e:
-            print(f"Error toggling header compact mode: {e}")
-
     def create_items_section(self):
         frame = QFrame()
         frame.setStyleSheet(get_section_frame_style(WHITE, 15))
+        # frame.setFixedHeight(420)  # Reduced height
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(5, 5, 5, 10)
 
         # Quick Products Section - Show recently used products as clickable chips
         quick_products_layout = QHBoxLayout()
         quick_products_layout.setSpacing(8)
-        quick_products_layout.setContentsMargins(8, 8, 8, 8)
-        quick_products_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        quick_products_layout.setContentsMargins(5, 5, 5, 5)
         
-        quick_label = QLabel("⚡ Quick Add Products:")
+        quick_label = QLabel("⚡ Quick Add:")
         quick_label.setStyleSheet(get_form_label_style(12, "bold", TEXT_SECONDARY))
         quick_products_layout.addWidget(quick_label)
         
@@ -3395,16 +3050,14 @@ class InvoiceDialog(QDialog):
         
         for i, product in enumerate(top_products):
             chip = QPushButton(product.get('name', '')[:20])  # Truncate long names
-            chip.setFixedHeight(32)
-            chip.setMinimumWidth(100)
+            chip.setFixedHeight(28)
             chip.setCursor(Qt.PointingHandCursor)
             chip.setFocusPolicy(Qt.NoFocus)  # Prevent keyboard focus - only mouse clicks
             
             # Show stock in tooltip
             stock = product.get('opening_stock', 0) or 0
-            price = product.get('sales_rate', 0) or 0
             stock_text = f"Stock: {stock}" if stock > 0 else "Out of Stock"
-            chip.setToolTip(f"Add {product.get('name', '')}\n₹{price:,.2f} | {stock_text}")
+            chip.setToolTip(f"Add {product.get('name', '')} - ₹{product.get('sales_rate', 0):,.2f}\n{stock_text}")
             
             # Use different style for recently used products
             is_recent = product.get('id') in recent_product_ids
@@ -3418,36 +3071,29 @@ class InvoiceDialog(QDialog):
         quick_products_layout.addStretch()
 
         # Items count badge at right corner of Quick Add row
-        items_label = QLabel("📦")
-        items_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 14px;")
+        items_label = QLabel("📦 Items:")
+        items_label.setStyleSheet(get_form_label_style(12, "bold", TEXT_SECONDARY))
         quick_products_layout.addWidget(items_label)
-        
         self.item_count_badge = QLabel("0")
-        self.item_count_badge.setFixedSize(48, 32)
-        self.item_count_badge.setAlignment(Qt.AlignCenter)
+        self.item_count_badge.setFixedSize(56, 46)
         self.item_count_badge.setStyleSheet(get_item_count_badge_style(0))
         quick_products_layout.addWidget(self.item_count_badge)
 
         layout.addLayout(quick_products_layout)
 
-        # Separator
-        separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
-        separator.setStyleSheet(f"background-color: {BORDER}; max-height: 1px;")
-        layout.addWidget(separator)
-
         # Column Headers - Clean design without emojis
         headers_layout = QHBoxLayout()
-        headers_layout.setSpacing(2)
-        headers_layout.setContentsMargins(8, 4, 8, 4)
+        headers_layout.setSpacing(4)
+        headers_layout.setContentsMargins(8, 0, 8, 0)
         
-        # Clean uppercase headers
-        # Widths match InvoiceItemWidget exactly
+        # Clean uppercase headers (no emojis)
+        # Widths match InvoiceItemWidget exactly:
+        # NO=40, PRODUCT=520+60(stock)=580, HSN=80, QTY=60, UNIT=55, RATE=90, DISC%=70, TAX%=70, AMOUNT=100, Actions=60
         headers = [
             "NO", "PRODUCT", "HSN", "QTY", "UNIT",
             "RATE", "DISC%", "TAX%", "AMOUNT", ""
         ]
-        widths = [40, 520, 100, 70, 60, 100, 75, 85, 110, 60]
+        widths = [40, 580, 80, 60, 55, 90, 70, 70, 100, 60]
         for header, width in zip(headers, widths):
             label = QLabel(header)
             label.setFixedWidth(width)
@@ -3457,598 +3103,255 @@ class InvoiceDialog(QDialog):
             headers_layout.addWidget(label)
         layout.addLayout(headers_layout)
         
-        # Empty state message (shown when no items) - Improved UX
-        self.empty_state_label = QLabel(
-            "📦 No items added yet\n"
-            "Click on a quick product above or search for products below to get started."
-        )
+        # Empty state message (shown when no items)
+        self.empty_state_label = QLabel("📦 No items added yet. Click 'Quick Add' above or search for a product to get started.")
         self.empty_state_label.setAlignment(Qt.AlignCenter)
-        self.empty_state_label.setStyleSheet(f"""
-            QLabel {{
-                color: {TEXT_MUTED};
-                font-size: 13px;
-                padding: 40px 20px;
-                background: {BACKGROUND};
-                border: 2px dashed {BORDER};
-                border-radius: 8px;
-                font-weight: 500;
-            }}
-        """)
-        self.empty_state_label.setMinimumHeight(120)
+        self.empty_state_label.setStyleSheet(get_empty_state_style())
+        self.empty_state_label.setFixedHeight(100)
         layout.addWidget(self.empty_state_label)
 
-        # Items scroll area with improved styling
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet(f"""
-            QScrollArea {{
-                border: 1px solid {BORDER};
-                border-radius: 6px;
-                background: {WHITE};
-            }}
-            QScrollBar:vertical {{
-                width: 8px;
-                background: {BACKGROUND};
-            }}
-            QScrollBar::handle:vertical {{
-                background: {BORDER};
-                border-radius: 4px;
-                min-height: 20px;
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background: {TEXT_SECONDARY};
-            }}
-        """)
-        
+        # scroll_area.setFixedHeight(380)  # Reduced scroll area height
+        scroll_area.setStyleSheet(get_transparent_scroll_area_style())
         self.items_widget = QWidget()
-        self.items_widget.setStyleSheet(f"background: {WHITE};")
         self.items_layout = QVBoxLayout(self.items_widget)
-        self.items_layout.setSpacing(0)
-        self.items_layout.setContentsMargins(0, 0, 0, 0)
+        self.items_layout.setSpacing(1)
+        self.items_layout.setContentsMargins(1, 1, 1, 1)
         self.items_layout.addStretch()
         scroll_area.setWidget(self.items_widget)
-        layout.addWidget(scroll_area, 1)  # Stretch to fill
+        layout.addWidget(scroll_area)
+        
+        # Subtotal row at bottom, aligned with Amount column
+        subtotal_row = QHBoxLayout()
+        subtotal_row.setSpacing(0)
+        subtotal_row.setContentsMargins(0, 5, 0, 0)
+        
+        # Add spacers to align with Amount column (No:100 + Product:500 + HSN:100 + Qty:100 + Unit:85 + Rate:110 + Disc:110 + Tax:110 = 1215)
+        spacer_widget = QWidget()
+        spacer_widget.setFixedWidth(1215)
+        subtotal_row.addWidget(spacer_widget)
+        
+        # Subtotal label aligned with Amount header
+        subtotal_label = QLabel("Subtotal:")
+        subtotal_label.setFixedWidth(110)
+        subtotal_label.setFixedHeight(25)
+        subtotal_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        subtotal_label.setStyleSheet(get_summary_label_style())
+        subtotal_row.addWidget(subtotal_label)
+        
+        # Subtotal value - simple style like totals section
+        self.items_subtotal_label = QLabel("₹0.00")
+        self.items_subtotal_label.setFixedWidth(110)
+        self.items_subtotal_label.setFixedHeight(25)
+        self.items_subtotal_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.items_subtotal_label.setStyleSheet(get_summary_value_style())
+        subtotal_row.addWidget(self.items_subtotal_label)
+        
+        # Action column spacer
+        action_spacer = QWidget()
+        action_spacer.setFixedWidth(110)
+        subtotal_row.addWidget(action_spacer)
+        
+        layout.addLayout(subtotal_row)
         
         return frame
 
     def create_totals_section(self):
-        """Create enhanced totals section with improved layout and features.
-        
-        Features:
-        - Visible subtotal row
-        - Invoice-level discount (% or flat)
-        - Other charges (shipping, packaging, etc.)
-        - Tax with expandable breakdown (CGST/SGST or IGST)
-        - Round-off as separate row
-        - Grand Total with visual separation
-        - Paid Amount field for CREDIT invoices
-        - Dynamic Balance Due with color-coded styling
-        - Amount in words
-        - Notes section
-        """
         frame = QFrame()
         frame.setStyleSheet(get_section_frame_style(WHITE, 12))
-        frame.setMinimumHeight(250)
+        frame.setMinimumHeight(150)  # Minimum height instead of fixed
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(15, 12, 15, 12)
-        layout.setSpacing(20)
 
-
-        # ========== LEFT SIDE: Notes & Amount in Words ==========
-        left_container = QVBoxLayout()
-        left_container.setSpacing(10)
-        
-        # Notes area with icon
-        add_note_link = QLabel("📝 <a href='add' style='text-decoration: none;'>Add Note</a>")
+        # Notes area: lazy add via text link
+        notes_container = QVBoxLayout()
+        notes_header = QHBoxLayout()
+        add_note_link = QLabel("<a href='add'>+Add Note</a>")
         add_note_link.setTextInteractionFlags(Qt.TextBrowserInteraction)
         add_note_link.setOpenExternalLinks(False)
-        add_note_link.setStyleSheet(f"""
-            QLabel {{
-                color: {PRIMARY};
-                font-size: 13px;
-                font-weight: 600;
-                border: none;
-                outline: none;
-                background: transparent;
-                padding: 0px;
-                margin: 0px;
-            }}
-            QLabel:hover {{
-                color: {PRIMARY_HOVER};
-            }}
-        """)
-        add_note_link.setCursor(Qt.PointingHandCursor)
-        
+        add_note_link.setStyleSheet(get_add_party_link_style())
         # Handler to create/show notes editor lazily
         def _handle_add_note_link(_):
             try:
                 if not hasattr(self, 'notes') or self.notes is None:
                     self.notes = QTextEdit()
-                    self.notes.setPlaceholderText("Add any additional information, terms, or special instructions...")
-                    self.notes.setStyleSheet(f"""
-                        QTextEdit {{
-                            border: 2px solid {BORDER}; 
-                            border-radius: 8px; 
-                            padding: 10px; 
-                            background: {WHITE}; 
-                            font-size: 13px;
-                            color: {TEXT_PRIMARY};
-                        }}
-                        QTextEdit:focus {{
-                            border: 2px solid {PRIMARY};
-                        }}
-                    """)
-                    self.notes.setFixedHeight(70)
-                    self.notes.setMaximumWidth(400)
-                    left_container.insertWidget(1, self.notes)
-                    add_note_link.setText("📝 <a href='hide' style='text-decoration: none;'>Hide Note</a>")
+                    self.notes.setPlaceholderText("Add any additional information or terms...")
+                    self.notes.setStyleSheet(f"border: 2px solid {BORDER}; border-radius: 8px; padding: 10px; background: {WHITE}; font-size: 13px;")
+                    self.notes.setFixedHeight(80)
+                    notes_container.insertWidget(1, self.notes)
                 else:
-                    if self.notes.isVisible():
-                        self.notes.setVisible(False)
-                        add_note_link.setText("📝 <a href='add' style='text-decoration: none;'>Add Note</a>")
-                    else:
-                        self.notes.setVisible(True)
-                        add_note_link.setText("📝 <a href='hide' style='text-decoration: none;'>Hide Note</a>")
+                    self.notes.setVisible(True)
             except Exception as e:
-                print(f"Failed to toggle notes editor: {e}")
-        
+                print(f"Failed to add notes editor: {e}")
         add_note_link.linkActivated.connect(_handle_add_note_link)
-        left_container.addWidget(add_note_link)
-
-        # Initialize notes as None
+        # Place the link at the left; stretch goes after to push remaining content to the right
+        notes_header.addWidget(add_note_link)
+        notes_header.addStretch()
+        notes_container.addLayout(notes_header)
+        # Initially, no notes editor is shown; created on demand via link
         if not hasattr(self, 'notes'):
             self.notes = None
         
-        # Amount in words section - more prominent with better styling
+        # Amount in words label - positioned below notes
         amount_words_container = QVBoxLayout()
-        amount_words_container.setSpacing(6)
+        amount_words_container.setSpacing(2)
         
-        amount_words_title = QLabel("💰 Amount in Words:")
-        amount_words_title.setStyleSheet(f"""
-            QLabel {{
-                color: {TEXT_SECONDARY};
-                font-size: 12px;
-                font-weight: bold;
-                border: none;
-                outline: none;
-                background: transparent;
-                padding: 0px;
-                margin: 0px;
-            }}
-        """)
+        amount_words_title = QLabel("💰 In Words:")
+        amount_words_title.setStyleSheet(get_form_label_style(11, "bold", TEXT_SECONDARY))
         amount_words_container.addWidget(amount_words_title)
         
         self.amount_in_words_label = QLabel("Zero Rupees Only")
         self.amount_in_words_label.setWordWrap(True)
         self.amount_in_words_label.setStyleSheet(f"""
             QLabel {{
-                font-size: 14px;
+                font-size: 12px;
                 font-style: italic;
-                font-weight: 500;
-                color: {PRIMARY_DARK};
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #EFF6FF, stop:1 #DBEAFE);
-                border-radius: 6px;
-                padding: 12px 14px;
+                color: {PRIMARY};
+                background: #EFF6FF;
+                border: 1px solid {BORDER};
+                border-radius: 4px;
+                padding: 6px 10px;
             }}
         """)
-        self.amount_in_words_label.setMinimumWidth(400)
-        self.amount_in_words_label.setMaximumWidth(600)
-        self.amount_in_words_label.setMinimumHeight(50)
+        self.amount_in_words_label.setMinimumWidth(280)
+        self.amount_in_words_label.setMaximumWidth(400)
+        self.amount_in_words_label.setMaximumHeight(50)
         amount_words_container.addWidget(self.amount_in_words_label)
         
-        left_container.addLayout(amount_words_container)
-        left_container.addStretch()
-        layout.addLayout(left_container)
+        notes_container.addLayout(amount_words_container)
+        notes_container.addStretch()
 
-        layout.addStretch()
-        # ========== RIGHT SIDE: Totals Grid ==========
-        totals_container = QVBoxLayout()
-        # totals_container.setAlignment(Qt.AlignRight)
-        totals_container.setSpacing(4)
-        
-        # Use Grid Layout for better alignment
-        from PySide6.QtWidgets import QGridLayout
-        self.totals_grid = QGridLayout()
-        self.totals_grid.setSpacing(6)
-        self.totals_grid.setContentsMargins(0, 0, 0, 0)
-        self.totals_grid.setAlignment(Qt.AlignRight)
+        layout.addLayout(notes_container, 2)
 
-        # Fixed widths for alignment
-        LABEL_WIDTH = 120
-        VALUE_WIDTH = 140
-        ROW_HEIGHT = 32
+        # Totals on the right
+        self.totals_layout = QFormLayout()  # Store reference for show/hide functionality
+        self.totals_layout.setSpacing(8)  # Better spacing between rows
         
-        row_idx = 0
-        
-        # ---- ROW 1: Subtotal ----
-        self.subtotal_row_label = QLabel("Subtotal:")
-        self.subtotal_row_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 13px;
-                font-weight: 500;
-                color: {TEXT_SECONDARY};
-                background: transparent;
-            }}
-        """)
-        self.subtotal_row_label.setFixedWidth(LABEL_WIDTH)
-        self.subtotal_row_label.setFixedHeight(ROW_HEIGHT)
-        self.subtotal_row_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.totals_grid.addWidget(self.subtotal_row_label, row_idx, 0)
-        
+        # Hidden subtotal label for backward compatibility (not displayed - shown in items section)
         self.subtotal_label = QLabel("₹0.00")
-        self.subtotal_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 13px;
-                font-weight: 600;
-                color: {TEXT_PRIMARY};
-                background: transparent;
-                padding: 4px 8px;
-            }}
-        """)
-        self.subtotal_label.setFixedWidth(VALUE_WIDTH)
-        self.subtotal_label.setFixedHeight(ROW_HEIGHT)
-        self.subtotal_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.totals_grid.addWidget(self.subtotal_label, row_idx, 1)
-        row_idx += 1
+        self.subtotal_label.setVisible(False)
         
-        # ---- ROW 2: Discount (visible when there's discount) ----
-        self.invoice_discount_row_label = QLabel("Discount:")
-        self.invoice_discount_row_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 13px;
-                font-weight: 500;
-                color: {TEXT_SECONDARY};
-                background: transparent;
-            }}
-        """)
-        self.invoice_discount_row_label.setFixedWidth(LABEL_WIDTH)
-        self.invoice_discount_row_label.setFixedHeight(ROW_HEIGHT)
-        self.invoice_discount_row_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.totals_grid.addWidget(self.invoice_discount_row_label, row_idx, 0)
-        
-        # Discount value display
+        # Discount label (visible only when discount > 0)
         self.discount_label = QLabel("-₹0.00")
-        self.discount_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 13px;
-                font-weight: 600;
-                color: {DANGER};
-                background: transparent;
-                padding: 4px 8px;
-            }}
-        """)
-        self.discount_label.setFixedWidth(VALUE_WIDTH)
-        self.discount_label.setFixedHeight(ROW_HEIGHT)
-        self.discount_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.totals_grid.addWidget(self.discount_label, row_idx, 1)
+        self.discount_label.setStyleSheet("font-size: 14px; color: red; border: none; background: transparent;")
+        self.totals_layout.addRow("Discount:", self.discount_label)
         
-        # Initially hide discount row (shown when there's discount)
-        self.invoice_discount_row_label.setVisible(False)
-        self.discount_label.setVisible(False)
-        row_idx += 1
-        
-        # ---- ROW 4: Tax ----
-        self.tax_row_label = QLabel("Tax:")
-        self.tax_row_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 13px;
-                font-weight: 500;
-                color: {TEXT_SECONDARY};
-                background: transparent;
-            }}
-        """)
-        self.tax_row_label.setFixedWidth(LABEL_WIDTH)
-        self.tax_row_label.setFixedHeight(ROW_HEIGHT)
-        self.tax_row_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.totals_grid.addWidget(self.tax_row_label, row_idx, 0)
-        
-        # Tax container with horizontal layout showing all tax info
+        # Tax row with breakdown box beside it
+        # Create a container for Tax amount + breakdown box
         tax_container = QWidget()
-        tax_container.setStyleSheet("background: transparent;")
-        tax_layout = QHBoxLayout(tax_container)
-        tax_layout.setContentsMargins(0, 0, 0, 0)
-        tax_layout.setSpacing(12)
+        tax_container.setStyleSheet("background: transparent; border: none;")
+        tax_container_layout = QHBoxLayout(tax_container)
+        tax_container_layout.setContentsMargins(0, 0, 0, 0)
+        tax_container_layout.setSpacing(8)
         
-        # Tax amount box
         self.tax_label = QLabel("₹0.00")
-        self.tax_label.setStyleSheet(f"""
+        self.tax_label.setStyleSheet("font-size: 14px; border: none; background: transparent;")
+        self.tax_label.setFixedWidth(80)
+        tax_container_layout.addWidget(self.tax_label)
+        
+        # Tax breakdown box (shows CGST+SGST or IGST)
+        self.tax_breakdown_box = QLabel("")
+        self.tax_breakdown_box.setStyleSheet(f"""
             QLabel {{
-                font-size: 13px;
-                font-weight: 600;
-                color: #059669;
-                background: #ECFDF5;
-                border: 1px solid #A7F3D0;
+                font-size: 11px;
+                color: {TEXT_PRIMARY};
+                background: {WHITE};
+                border: 1px solid {BORDER};
                 border-radius: 4px;
-                padding: 6px 12px;
+                padding: 3px 8px;
             }}
         """)
-        self.tax_label.setFixedWidth(VALUE_WIDTH)
-        self.tax_label.setFixedHeight(ROW_HEIGHT)
-        self.tax_label.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
-        self.tax_label.setWordWrap(False)
-        tax_layout.addWidget(self.tax_label)
+        self.tax_breakdown_box.setVisible(False)
+        tax_container_layout.addWidget(self.tax_breakdown_box)
+        tax_container_layout.addStretch()
         
-        # Tax breakdown label (CGST + SGST or IGST)
-        self.tax_breakdown_label = QLabel("")
-        self.tax_breakdown_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 12px;
-                font-weight: 500;
-                color: {TEXT_SECONDARY};
-                background: transparent;
-                padding: 2px 0px;
-            }}
-        """)
-        self.tax_breakdown_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        # self.tax_breakdown_label.setMinimumWidth(200)
-        tax_layout.addWidget(self.tax_breakdown_label)
-        # tax_layout.addStretch()
-        
-        self.totals_grid.addWidget(tax_container, row_idx, 1)
-        row_idx += 1
+        # Store reference to tax container row
+        self.tax_row_label = QLabel("Tax:")
+        self.tax_row_label.setStyleSheet("font-size: 14px; border-radius: 6px;; background: transparent;")
+        self.totals_layout.addRow(self.tax_row_label, tax_container)
         
         # Hidden GST breakdown labels (for backward compatibility - values still calculated)
         self.cgst_label = QLabel("₹0.00")
-        self.cgst_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 12px;
-                font-weight: 500;
-                color: {DANGER};
-                background: transparent;
-                padding: 2px 0px;
-            }}
-        """)
-        self.cgst_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        # self.cgst_label.setMinimumWidth(120)
         self.cgst_label.setVisible(False)
         self.sgst_label = QLabel("₹0.00")
         self.sgst_label.setVisible(False)
         self.igst_label = QLabel("₹0.00")
         self.igst_label.setVisible(False)
-        self.tax_breakdown_box = QLabel("")
-        self.tax_breakdown_box.setVisible(False)
         
-        # ---- SEPARATOR before Grand Total ----
-        separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
-        separator.setStyleSheet(f"background-color: {BORDER}; max-height: 1px;")
-        # self.totals_grid.addWidget(separator, row_idx, 0, 1, 2)
-        row_idx += 1
+        # Round-off row (hidden by default, shown when grand total has decimal)
+        self.roundoff_container = QWidget()
+        roundoff_layout = QHBoxLayout(self.roundoff_container)
+        roundoff_layout.setContentsMargins(0, 0, 0, 0)
+        roundoff_layout.setSpacing(5)
         
-        # ---- ROW 5: Grand Total (PROMINENT) ----
-        self.grand_total_row_label = QLabel("GRAND TOTAL:")
-        self.grand_total_row_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 14px;
-                font-weight: bold;
-                color: {PRIMARY};
-                background: transparent;
-            }}
-        """)
-        self.grand_total_row_label.setFixedWidth(LABEL_WIDTH)
-        self.grand_total_row_label.setFixedHeight(ROW_HEIGHT + 8)
-        self.grand_total_row_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.totals_grid.addWidget(self.grand_total_row_label, row_idx, 0)
-        
-        # Grand total with prominent styling - blue gradient box
-        self.grand_total_label = QLabel("₹0.00")
-        self.grand_total_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 16px;
-                font-weight: bold;
-                color: {WHITE};
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {PRIMARY}, stop:1 {PRIMARY_DARK});
-                border: 2px solid {PRIMARY_DARK};
-                border-radius: 6px;
-                padding: 8px 12px;
-            }}
-        """)
-        self.grand_total_label.setFixedWidth(VALUE_WIDTH)
-        self.grand_total_label.setFixedHeight(ROW_HEIGHT + 8)
-        self.grand_total_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.totals_grid.addWidget(self.grand_total_label, row_idx, 1)
-        row_idx += 1
-        
-        # ---- ROW 6: Balance Due (with dynamic color) ----
-        self.balance_row_label = QLabel("BALANCE DUE:")
-        self.balance_row_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 13px;
-                font-weight: bold;
-                color: #F59E0B;
-                background: transparent;
-            }}
-        """)
-        self.balance_row_label.setFixedWidth(LABEL_WIDTH)
-        self.balance_row_label.setFixedHeight(ROW_HEIGHT + 4)
-        self.balance_row_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.totals_grid.addWidget(self.balance_row_label, row_idx, 0)
-        
-        # Balance due with dynamic styling (changes color based on amount)
-        self.balance_label = QLabel("₹0.00")
-        self.balance_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 13px;
-                font-weight: bold;
-                color: #FFFFFF;
-                background: #F59E0B;
-                border: 1px solid #D97706;
-                border-radius: 4px;
-                padding: 6px 10px;
-            }}
-        """)
-        self.balance_label.setFixedWidth(VALUE_WIDTH)
-        self.balance_label.setFixedHeight(ROW_HEIGHT + 4)
-        self.balance_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.totals_grid.addWidget(self.balance_label, row_idx, 1)
-        
-        # Initially hide balance due row (shown for CREDIT)
-        self.balance_row_label.setVisible(False)
-        self.balance_label.setVisible(False)
-        row_idx += 1
-        
-        # ---- ROW 7: Roundoff (visible when grand_total has decimals) ----
-        self.roundoff_row_label = QLabel("Roundoff:")
-        self.roundoff_row_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 13px;
-                font-weight: 500;
-                color: {TEXT_SECONDARY};
-                background: transparent;
-            }}
-        """)
-        self.roundoff_row_label.setFixedWidth(LABEL_WIDTH)
-        self.roundoff_row_label.setFixedHeight(ROW_HEIGHT)
-        self.roundoff_row_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.totals_grid.addWidget(self.roundoff_row_label, row_idx, 0)
-        
-        # Roundoff value display with clickable link for options
-        self.roundoff_link = QLabel("<a href='options' style='text-decoration: none; color: #3B82F6;'>₹0.00 ▼</a>")
+        self.roundoff_link = QLabel("<a href='roundoff'>Round Off</a>")
         self.roundoff_link.setTextInteractionFlags(Qt.TextBrowserInteraction)
         self.roundoff_link.setOpenExternalLinks(False)
-        self.roundoff_link.setStyleSheet(f"""
-            QLabel {{
-                font-size: 13px;
-                font-weight: 600;
-                color: #3B82F6;
-                background: transparent;
-                padding: 4px 8px;
-            }}
-            QLabel:hover {{
-                color: #2563EB;
-            }}
-        """)
-        self.roundoff_link.setFixedWidth(VALUE_WIDTH)
-        self.roundoff_link.setFixedHeight(ROW_HEIGHT)
-        self.roundoff_link.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.roundoff_link.setCursor(Qt.PointingHandCursor)
-        self.roundoff_link.setToolTip("Click to round up/down")
+        self.roundoff_link.setStyleSheet("color: #2563EB; font-size: 12px; border: none;")
         self.roundoff_link.linkActivated.connect(self.show_roundoff_options)
-        self.totals_grid.addWidget(self.roundoff_link, row_idx, 1)
+        roundoff_layout.addWidget(self.roundoff_link)
         
-        # Initially hide roundoff row (shown when decimal exists)
-        self.roundoff_row_label.setVisible(False)
-        self.roundoff_link.setVisible(False)
+        self.roundoff_value_label = QLabel("₹0.00")
+        self.roundoff_value_label.setStyleSheet("font-size: 14px; border: none; background: transparent;")
+        roundoff_layout.addWidget(self.roundoff_value_label)
+        
+        self.roundoff_container.setVisible(False)
+        
+        # Store round-off amount
         self.roundoff_amount = 0.0
-        row_idx += 1
         
-        # ---- ROW 8: Paid Amount (visible only for CREDIT invoices) ----
-        self.paid_row_label = QLabel("Paid Amount:")
-        self.paid_row_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 13px;
-                font-weight: 500;
-                color: {TEXT_SECONDARY};
-                background: transparent;
-            }}
-        """)
-        self.paid_row_label.setFixedWidth(LABEL_WIDTH)
-        self.paid_row_label.setFixedHeight(ROW_HEIGHT)
-        self.paid_row_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.totals_grid.addWidget(self.paid_row_label, row_idx, 0)
+        # Grand Total row with roundoff beside it
+        grand_total_container = QWidget()
+        grand_total_container.setStyleSheet("background: transparent; border: none;")
+        grand_total_container_layout = QHBoxLayout(grand_total_container)
+        grand_total_container_layout.setContentsMargins(0, 0, 0, 0)
+        grand_total_container_layout.setSpacing(8)
         
-        # Paid amount input field with currency prefix
+        self.grand_total_label = QLabel("₹0.00")
+        self.grand_total_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {PRIMARY}; background: {BACKGROUND}; padding: 6px 10px; border-radius: 6px;")
+        self.grand_total_label.setMinimumWidth(120)
+        grand_total_container_layout.addWidget(self.grand_total_label)
+        
+        # Add roundoff container beside grand total
+        grand_total_container_layout.addWidget(self.roundoff_container)
+        grand_total_container_layout.addStretch()
+        
+        self.totals_layout.addRow("Grand Total:", grand_total_container)
+        
+        from PySide6.QtWidgets import QDoubleSpinBox
         self.paid_amount_spin = QDoubleSpinBox()
         self.paid_amount_spin.setRange(0, 999999999)
         self.paid_amount_spin.setDecimals(2)
         self.paid_amount_spin.setPrefix("₹")
-        self.paid_amount_spin.setValue(0)
         self.paid_amount_spin.setStyleSheet(f"""
             QDoubleSpinBox {{
-                border: 2px solid {BORDER};
-                border-radius: 6px;
-                padding: 6px 10px;
+                font-size: 14px;
+                border: 1px solid {BORDER};
+                border-radius: 4px;
+                padding: 4px;
                 background: {WHITE};
-                font-size: 13px;
-                color: {TEXT_PRIMARY};
             }}
             QDoubleSpinBox:focus {{
                 border: 2px solid {PRIMARY};
             }}
         """)
-        self.paid_amount_spin.setFixedWidth(VALUE_WIDTH)
-        self.paid_amount_spin.setFixedHeight(ROW_HEIGHT)
+        self.paid_amount_spin.setFixedWidth(140)
+        self.paid_amount_spin.setFixedHeight(30)
+        self.paid_amount_spin.setValue(0)
+        # totals_layout.addRow("Paid Amount:", self.paid_amount_spin)
+        # Balance label - same size as Grand Total
+        self.balance_label = QLabel("₹0.00")
+        self.balance_label.setMinimumWidth(120)
+        self.balance_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #EF4444; background: #FEF2F2; padding: 6px 10px; border-radius: 6px;")
+        # Store reference to balance due row for show/hide functionality
+        self.balance_due_row = self.totals_layout.rowCount()
+        self.totals_layout.addRow("Balance Due:", self.balance_label)
+        # Update balance when paid amount changes
         self.paid_amount_spin.valueChanged.connect(self.update_balance_due)
-        self.totals_grid.addWidget(self.paid_amount_spin, row_idx, 1)
-        
-        # Initially hide paid amount row (shown only for CREDIT)
-        self.paid_row_label.setVisible(False)
-        self.paid_amount_spin.setVisible(False)
-        row_idx += 1
-        
-        # Note: Discount row and other charge rows are already properly added to the grid above.
-        # These old container variables are kept only for backward compatibility.
-        # They should NOT be set to visible() as they're orphan widgets.
-        
-        # Backward compatibility: Create invoice discount spin (not used in new grid layout)
-        self.invoice_discount_spin = QDoubleSpinBox()
-        self.invoice_discount_spin.setVisible(False)
-        self.invoice_discount_type = QComboBox()
-        self.invoice_discount_type.setVisible(False)
-        
-        # Backward compatibility: Other charges fields
-        self.other_charges_row_label = QLabel("")
-        self.other_charges_row_label.setVisible(False)
-        self.other_charges_spin = QDoubleSpinBox()
-        self.other_charges_spin.setVisible(False)
-        self.other_charges_type_label = QLabel("")
-        self.other_charges_type_label.setVisible(False)
-        
-        # Backward compatibility: Roundoff value label
-        self.roundoff_value_label = QLabel("₹0.00")
-        self.roundoff_value_label.setVisible(False)
-        
-        # Also create items_subtotal_label for backward compatibility
-        self.items_subtotal_label = QLabel("₹0.00")
-        self.items_subtotal_label.setVisible(False)
-        
-        totals_container.addLayout(self.totals_grid)
-        totals_container.addStretch()
-        
-        layout.addLayout(totals_container, 1)
-        
+        layout.addStretch(1)
+        layout.addLayout(self.totals_layout, 1)
         return frame
-
-    def _toggle_discount_row(self, link=None):
-        """Toggle visibility of invoice-level discount row - disabled in simplified mode"""
-        pass
-
-    def _toggle_charges_row(self, link=None):
-        """Toggle visibility of other charges row - disabled in simplified mode"""
-        pass
-
-    def _show_charge_label_popup(self, link=None):
-        """Show popup to select charge type label"""
-        try:
-            menu = QMenu(self)
-            menu.setStyleSheet(get_context_menu_style())
-            
-            charge_types = ["Shipping", "Packaging", "Handling", "Delivery", "Service Charge", "Other"]
-            for charge_type in charge_types:
-                action = QAction(charge_type, self)
-                action.triggered.connect(lambda checked, ct=charge_type: self._set_charge_label(ct))
-                menu.addAction(action)
-            
-            # Show at cursor position
-            menu.exec_(QApplication.instance().activeWindow().cursor().pos())
-        except Exception as e:
-            print(f"Show charge label popup error: {e}")
-
-    def _set_charge_label(self, label: str):
-        """Set the label for other charges"""
-        try:
-            self.other_charges_type_label.setText(f"({label})")
-            self.other_charges_type_label.setVisible(True)
-            self.other_charges_row_label.setText(f"(+) {label}:")
-        except Exception as e:
-            print(f"Set charge label error: {e}")
-
-    def _on_invoice_discount_changed(self):
-        """Handle invoice-level discount changes"""
-        try:
-            self.update_totals()
-        except Exception as e:
-            print(f"Invoice discount change error: {e}")
 
     def show_roundoff_options(self, link=None):
         """Show popup with round-off options (up/down)"""
@@ -4091,18 +3394,17 @@ class InvoiceDialog(QDialog):
     def apply_roundoff(self, roundoff_amount, final_total):
         """Apply the selected round-off amount"""
         try:
-            # Round to 2 decimal places to avoid floating point precision issues
-            self.roundoff_amount = round(roundoff_amount, 2)
+            self.roundoff_amount = roundoff_amount
             
-            if self.roundoff_amount > 0:
-                self.roundoff_value_label.setText(f"+₹{self.roundoff_amount:.2f}")
-                self.roundoff_value_label.setStyleSheet(get_roundoff_value_style())
-            elif self.roundoff_amount < 0:
-                self.roundoff_value_label.setText(f"-₹{abs(self.roundoff_amount):.2f}")
-                self.roundoff_value_label.setStyleSheet(get_roundoff_value_style())
+            if roundoff_amount > 0:
+                self.roundoff_value_label.setText(f"+₹{roundoff_amount:.2f}")
+                self.roundoff_value_label.setStyleSheet(get_roundoff_value_style(roundoff_amount))
+            elif roundoff_amount < 0:
+                self.roundoff_value_label.setText(f"-₹{abs(roundoff_amount):.2f}")
+                self.roundoff_value_label.setStyleSheet(get_roundoff_value_style(roundoff_amount))
             else:
                 self.roundoff_value_label.setText("₹0.00")
-                self.roundoff_value_label.setStyleSheet(get_roundoff_value_style())
+                self.roundoff_value_label.setStyleSheet(get_roundoff_value_style(roundoff_amount))
             
             # Update grand total with rounded value
             self.grand_total_label.setText(f"₹{final_total:,.2f}")
@@ -4120,78 +3422,21 @@ class InvoiceDialog(QDialog):
             print(f"Error applying roundoff: {e}")
 
     def update_balance_due(self):
-        """Update balance due with dynamic color-coded styling based on amount."""
-        try:
-            grand_total = 0.0
             try:
-                grand_total = float(self.grand_total_label.text().replace('₹', '').replace(',', ''))
+                grand_total = 0.0
+                try:
+                    grand_total = float(self.grand_total_label.text().replace('₹','').replace(',',''))
+                except Exception:
+                    pass
+                paid = self.paid_amount_spin.value()
+                balance = max(0, grand_total - paid)
+                self.balance_label.setText(f"₹{balance:,.2f}")
             except Exception:
-                pass
-            
-            paid = self.paid_amount_spin.value()
-            balance = max(0, grand_total - paid)
-            
-            # Update balance label text
-            if balance <= 0:
-                balance_text = "✓ PAID"
-                balance_color_bg = "#10B981"  # Green - Paid
-                balance_color_border = "#059669"
-                balance_color_text = WHITE
-                label_color = "#059669"
-            elif balance < 100:
-                # Small balance - Light orange
-                balance_text = f"₹{balance:,.2f}"
-                balance_color_bg = "#FCD34D"
-                balance_color_border = "#F59E0B"
-                balance_color_text = "#78350F"
-                label_color = "#D97706"
-            elif balance < 1000:
-                # Medium balance - Orange
-                balance_text = f"₹{balance:,.2f}"
-                balance_color_bg = "#F59E0B"
-                balance_color_border = "#D97706"
-                balance_color_text = WHITE
-                label_color = "#D97706"
-            else:
-                # Large balance - Red
-                balance_text = f"₹{balance:,.2f}"
-                balance_color_bg = "#EF4444"
-                balance_color_border = "#DC2626"
-                balance_color_text = WHITE
-                label_color = "#DC2626"
-            
-            # Update balance label with dynamic styling
-            self.balance_label.setText(balance_text)
-            self.balance_label.setStyleSheet(f"""
-                QLabel {{
-                    font-size: 13px;
-                    font-weight: bold;
-                    color: {balance_color_text};
-                    background: {balance_color_bg};
-                    border: 1px solid {balance_color_border};
-                    border-radius: 4px;
-                    padding: 6px 10px;
-                }}
-            """)
-            
-            # Update balance row label color to match
-            self.balance_row_label.setStyleSheet(f"""
-                QLabel {{
-                    font-size: 13px;
-                    font-weight: bold;
-                    color: {label_color};
-                    background: transparent;
-                    padding: 4px 0;
-                }}
-            """)
-                
-        except Exception as e:
-            print(f"Update balance due error: {e}")
-            self.balance_label.setText("₹0.00")
+                self.balance_label.setText("₹0.00")
 
     # Items management
     def quick_add_product(self, product_data):
-        """Quickly add a product to the invoice from the quick-select chips with duplicate detection."""
+        """Quickly add a product to the invoice from the quick-select chips"""
         try:
             # Check if party is selected first
             if hasattr(self, 'party_search'):
@@ -4200,28 +3445,6 @@ class InvoiceDialog(QDialog):
                     highlight_error(self.party_search, "Please select a party first")
                     self.party_search.setFocus()
                     return
-            
-            product_id = product_data.get('id')
-            product_name = product_data.get('name', '')
-            
-            # Check if this product already exists in any row
-            existing_item_widget = None
-            for i in range(self.items_layout.count() - 1):
-                widget = self.items_layout.itemAt(i).widget()
-                if isinstance(widget, InvoiceItemWidget):
-                    if hasattr(widget, 'product_input') and widget.product_input.currentText().strip() == product_name:
-                        existing_item_widget = widget
-                        break
-            
-            # If product exists, increment quantity instead of adding new row
-            if existing_item_widget:
-                # Increment quantity by 1
-                current_qty = existing_item_widget.quantity_spin.value()
-                existing_item_widget.quantity_spin.setValue(current_qty + 1)
-                
-                # Show brief highlight with feedback
-                highlight_success(existing_item_widget, f"📌 Qty increased to {current_qty + 1}")
-                return
             
             # Check if there's an empty first row that we can fill instead of creating new
             first_item_widget = None
@@ -4239,7 +3462,6 @@ class InvoiceDialog(QDialog):
                 item_widget = InvoiceItemWidget(products=self.products, parent_dialog=self)
                 item_widget.add_requested.connect(self.add_item)
                 item_widget.remove_btn.clicked.connect(lambda: self.remove_item(item_widget))
-                item_widget.remove_requested.connect(self._handle_remove_request)  # Ctrl+Delete support
                 item_widget.item_changed.connect(self.update_totals)
                 item_widget.setStyleSheet(get_item_widget_normal_style())
                 # Add to layout
@@ -4249,12 +3471,10 @@ class InvoiceDialog(QDialog):
             item_widget.set_product_by_data(product_data)
             
             # Set tax based on invoice type
-            if hasattr(self, '_tax_type') and self._tax_type == "NON_GST":
+            if hasattr(self, 'gst_combo') and self.gst_combo.currentText() == "Non-GST":
                 item_widget.tax_spin.setValue(0)
-                item_widget.set_tax_readonly(True, set_to_zero=False)  # Already set to 0 above
             else:
                 item_widget.tax_spin.setValue(product_data.get('tax_rate', 18))
-                item_widget.set_tax_readonly(False)  # Make editable for GST invoices
             
             # Calculate total for the item
             item_widget.calculate_total()
@@ -4276,14 +3496,6 @@ class InvoiceDialog(QDialog):
 
     def add_item(self) -> None:
         """Add a new invoice item row with validation."""
-        # Check if party is selected first
-        if hasattr(self, 'party_search'):
-            party_text = self.party_search.text().strip()
-            if not party_text:
-                highlight_error(self.party_search, "Please select a party first")
-                self.party_search.setFocus()
-                return
-        
         # Check if the last item row has a product selected before adding new row
         if self.items_layout.count() > 1:  # There's at least one item row (plus stretch)
             last_item_widget = None
@@ -4307,15 +3519,8 @@ class InvoiceDialog(QDialog):
         # Wire row-level ➕ to add another item row
         item_widget.add_requested.connect(self.add_item)
         item_widget.remove_btn.clicked.connect(lambda: self.remove_item(item_widget))
-        item_widget.remove_requested.connect(self._handle_remove_request)  # Ctrl+Delete support
         item_widget.item_changed.connect(self.update_totals)
         self.items_layout.insertWidget(self.items_layout.count() - 1, item_widget)
-        
-        # Apply tax readonly state based on current tax type
-        if hasattr(self, '_tax_type') and self._tax_type == "NON_GST":
-            item_widget.set_tax_readonly(True, set_to_zero=True)
-        else:
-            item_widget.set_tax_readonly(False)
         
         # Assign row numbers after insertion (this also sets alternating colors)
         self.number_items()
@@ -4325,40 +3530,25 @@ class InvoiceDialog(QDialog):
         # Auto-scroll to show the new row and set focus
         QTimer.singleShot(50, lambda: self.scroll_to_new_item(item_widget))
 
-    def _handle_remove_request(self, item_widget: InvoiceItemWidget, skip_confirm: bool = False) -> None:
-        """Handle remove request from item widget (supports Ctrl+Delete instant delete).
+    def remove_item(self, item_widget: InvoiceItemWidget) -> None:
+        """
+        Remove an invoice item row after confirmation.
         
         Args:
             item_widget: The InvoiceItemWidget to remove.
-            skip_confirm: If True, skip confirmation dialog (Ctrl+Delete).
-        """
-        self.remove_item(item_widget, skip_confirm=skip_confirm)
-
-    def remove_item(self, item_widget: InvoiceItemWidget, skip_confirm: bool = False) -> None:
-        """
-        Remove an invoice item row.
-        
-        Args:
-            item_widget: The InvoiceItemWidget to remove.
-            skip_confirm: If True, skip confirmation dialog (for Ctrl+Delete instant delete).
         """
         if self.items_layout.count() <= 2:
             QMessageBox.warning(self, "Cannot Remove", "🚫 At least one item is required for the invoice!")
             return
-        
-        # Skip confirmation if Ctrl+Delete was used
-        if not skip_confirm:
-            reply = QMessageBox.question(self, "Remove Item", "❓ Are you sure you want to remove this item?\n\n💡 Tip: Use Ctrl+Delete for instant delete.",
-                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if reply != QMessageBox.Yes:
-                return
-        
-        self.items_layout.removeWidget(item_widget)
-        item_widget.deleteLater()
-        # Re-number items after removal (also updates alternating colors)
-        self.number_items()
-        self.update_totals()
-        self._update_empty_state()
+        reply = QMessageBox.question(self, "Remove Item", "❓ Are you sure you want to remove this item?",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.items_layout.removeWidget(item_widget)
+            item_widget.deleteLater()
+            # Re-number items after removal (also updates alternating colors)
+            self.number_items()
+            self.update_totals()
+            self._update_empty_state()
 
     def _update_empty_state(self):
         """Show/hide empty state message based on whether items exist."""
@@ -4405,37 +3595,21 @@ class InvoiceDialog(QDialog):
                 pass
 
     def number_items(self):
-        """Update the read-only row number textbox in each item row (1-based) with alternating row colors."""
+        """Update the read-only row number textbox in each item row (1-based)."""
         try:
             row = 1
             for i in range(self.items_layout.count() - 1):  # exclude the stretch at the end
                 w = self.items_layout.itemAt(i).widget()
                 if isinstance(w, InvoiceItemWidget) and hasattr(w, 'set_row_number'):
                     w.set_row_number(row)
-                    
-                    # Apply alternating row colors for better readability
-                    if row % 2 == 0:
-                        # Even row - light background
-                        w.setStyleSheet(get_item_row_even_style())
-                    else:
-                        # Odd row - white background
-                        w.setStyleSheet(get_item_row_odd_style())
-                    
                     row += 1
         except Exception as e:
             print(f"Error numbering items: {e}")
 
     def update_totals(self) -> None:
-        """Update all totals, tax breakdowns, and balance due calculations.
-        
-        Enhanced to handle:
-        - Invoice-level discount (% or flat amount)
-        - Other charges (shipping, packaging, etc.)
-        - Round-off visibility
-        - Dynamic row visibility based on bill type
-        """
+        """Update all totals, tax breakdowns, and balance due calculations."""
         try:
-            subtotal, total_item_discount, total_tax, item_count = 0, 0, 0, 0
+            subtotal, total_discount, total_tax, item_count = 0, 0, 0, 0
             total_cgst, total_sgst, total_igst = 0, 0, 0
             
             # Get current tax type selection (normalized)
@@ -4445,7 +3619,6 @@ class InvoiceDialog(QDialog):
             is_interstate = ('Other State' in tax_type)
             is_non_gst = ('Non-GST' in tax_type)
             
-            # Calculate item-level totals
             for i in range(self.items_layout.count() - 1):
                 item_widget = self.items_layout.itemAt(i).widget()
                 if isinstance(item_widget, InvoiceItemWidget):
@@ -4455,210 +3628,123 @@ class InvoiceDialog(QDialog):
                         rate = item_data['rate']
                         item_subtotal = quantity * rate
                         subtotal += item_subtotal
-                        total_item_discount += item_data['discount_amount']
+                        total_discount += item_data['discount_amount']
                         total_tax += item_data['tax_amount']
                         item_count += 1
                         
                         # Calculate GST breakdown for this item
                         tax_amount = item_data['tax_amount']
-                        if tax_amount > 0 and not is_non_gst:
+                        if tax_amount > 0 and not is_non_gst:  # Only calculate GST breakdown if there's tax and not Non-GST
                             if is_interstate:
+                                # Inter-state: All tax goes to IGST
                                 total_igst += tax_amount
                             else:
+                                # Intra-state: Split between CGST and SGST
                                 cgst_amount = tax_amount / 2
                                 sgst_amount = tax_amount / 2
                                 total_cgst += cgst_amount
                                 total_sgst += sgst_amount
             
-            # Calculate invoice-level discount
-            invoice_discount = 0.0
-            if hasattr(self, 'invoice_discount_spin') and hasattr(self, 'invoice_discount_type'):
-                discount_value = self.invoice_discount_spin.value()
-                if discount_value > 0:
-                    if self.invoice_discount_type.currentText() == "%":
-                        # Percentage discount on (subtotal - item_discount)
-                        taxable_amount = subtotal - total_item_discount
-                        invoice_discount = (taxable_amount * discount_value) / 100
-                    else:
-                        # Flat amount discount
-                        invoice_discount = discount_value
-            
-            # Total discount = item-level + invoice-level
-            total_discount = total_item_discount + invoice_discount
-            
-            # Get other charges
-            other_charges = 0.0
-            if hasattr(self, 'other_charges_spin'):
-                other_charges = self.other_charges_spin.value()
-            
-            # Calculate grand total
-            # Formula: Subtotal - Total Discount + Tax + Other Charges + Round-off
-            grand_total_before_roundoff = subtotal - total_discount + total_tax + other_charges
-            
-            # Apply round-off if set
-            roundoff = getattr(self, 'roundoff_amount', 0.0)
-            grand_total = grand_total_before_roundoff + roundoff
-            
-            # ========== UPDATE UI LABELS ==========
+            grand_total = subtotal - total_discount + total_tax
             
             # Update items section subtotal label
             if hasattr(self, 'items_subtotal_label'):
                 self.items_subtotal_label.setText(f"₹{subtotal:,.2f}")
             
-            # Update subtotal in totals section (now visible!)
+            # Update all totals labels
             self.subtotal_label.setText(f"₹{subtotal:,.2f}")
-            
-            # Update discount label (shows total discount)
             self.discount_label.setText(f"-₹{total_discount:,.2f}")
-            
-            # Show/hide discount row (visible when there's any discount)
-            has_discount = (total_discount > 0)
-            if hasattr(self, 'invoice_discount_row_label'):
-                self.invoice_discount_row_label.setVisible(has_discount)
-            if hasattr(self, 'discount_label'):
-                self.discount_label.setVisible(has_discount)
-            
-            # Update GST breakdown labels
-            self.cgst_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 12px;
-                font-weight: 500;
-                color: {DANGER};
-                background: transparent;
-                padding: 2px 0px;
-            }}
-                """)
             self.cgst_label.setText(f"₹{total_cgst:,.2f}")
             self.sgst_label.setText(f"₹{total_sgst:,.2f}")
             self.igst_label.setText(f"₹{total_igst:,.2f}")
             self.tax_label.setText(f"₹{total_tax:,.2f}")
-            
-            # Update tax row label based on invoice type
-            if hasattr(self, 'tax_row_label'):
-                if is_interstate and not is_non_gst:
-                    self.tax_row_label.setText("Tax/IGST:")
-                else:
-                    self.tax_row_label.setText("Tax:")
-            
-            # Update tax breakdown label beside tax value
-            if hasattr(self, 'tax_breakdown_label'):
-                if not is_non_gst and total_tax > 0:
-                    if is_interstate:
-                        self.tax_breakdown_label.setText("")
-                        # self.tax_breakdown_label.setText(f"IGST: <span style='color: #059669; font-weight: 600;'>₹{total_igst:,.2f}</span>")
-                    else:
-                        # HTML format with colors: CGST: ₹X.XX + SGST: ₹Y.YY (with colored amounts)
-                        cgst_colored = f"<span style='color: #059669; font-weight: 600;'>₹{total_cgst:,.2f}</span>"
-                        sgst_colored = f"<span style='color: #059669; font-weight: 600;'>₹{total_sgst:,.2f}</span>"
-                        label_text = f"CGST: {cgst_colored}<br>SGST: {sgst_colored}"
-                        self.tax_breakdown_label.setText(label_text)
-                    self.tax_breakdown_label.setTextFormat(Qt.RichText)
-                else:
-                    self.tax_breakdown_label.setText("")
-            
-            # Update grand total
             self.grand_total_label.setText(f"₹{grand_total:,.2f}")
             
-            # Update amount in words
+            # Update tax breakdown box beside Tax amount
+            if hasattr(self, 'tax_breakdown_box'):
+                if not is_non_gst and total_tax > 0:
+                    if is_interstate:
+                        # Show IGST breakdown with HTML formatting (secondary text for label, primary text for price)
+                        self.tax_breakdown_box.setText(f"<span style='color: {TEXT_SECONDARY};'>IGST:</span> <span style='color: {TEXT_PRIMARY};'>₹{total_igst:,.2f}</span>")
+                    else:
+                        # Show CGST + SGST breakdown with HTML formatting
+                        self.tax_breakdown_box.setText(f"<span style='color: {TEXT_SECONDARY};'>CGST:</span> <span style='color: {TEXT_PRIMARY};'>₹{total_cgst:,.2f}</span> + <span style='color: {TEXT_SECONDARY};'>SGST:</span> <span style='color: {TEXT_PRIMARY};'>₹{total_sgst:,.2f}</span>")
+                    self.tax_breakdown_box.setVisible(True)
+                else:
+                    self.tax_breakdown_box.setVisible(False)
+            
+            # Update amount in words via controller
             if hasattr(self, 'amount_in_words_label'):
                 self.amount_in_words_label.setText(
                     invoice_form_controller.number_to_words_indian(grand_total)
                 )
             
-            # ========== VISIBILITY LOGIC ==========
+            # Check if grand total has decimal (for round-off)
+            has_decimal = (grand_total % 1) != 0
+            if hasattr(self, 'roundoff_container'):
+                self.roundoff_container.setVisible(has_decimal and grand_total > 0)
             
             # Get bill type for Balance Due visibility
             bill_type = self._bill_type if hasattr(self, '_bill_type') else 'CASH'
             is_credit = (bill_type == 'CREDIT')
             
-            # Determine if Tax row should be visible:
-            # - For Non-GST invoices: ALWAYS HIDE (regardless of products or tax)
-            # - For GST invoices: show if there's tax
-            has_products = (item_count > 0)
-            has_tax = (total_tax > 0 and not is_non_gst)
-            # Safe floating-point decimal check: round to 2 decimals first, then check for fractional part
-            has_decimal = round(grand_total_before_roundoff, 2) % 1 != 0
+            # ========== VISIBILITY LOGIC ==========
+            # 1) CASH, No Tax, No Disc → Grand Total only
+            # 2) CREDIT, No Tax, No Disc → Grand Total + Balance Due
+            # 3) CREDIT, Tax, No Disc → Tax (with breakdown) + Grand Total + Balance Due
+            # 4) CREDIT, Tax, Disc → Disc + Tax (with breakdown) + Grand Total + Balance Due
             
-            # Show/hide Tax row (hide completely for Non-GST, or for GST with no tax)
+            has_tax = (total_tax > 0 and not is_non_gst)
+            has_discount = (total_discount > 0)
+            
+            # Show/hide Discount row
+            if hasattr(self, 'discount_label'):
+                # Find and hide discount row in form layout
+                for i in range(self.totals_layout.rowCount()):
+                    label_item = self.totals_layout.itemAt(i, QFormLayout.LabelRole)
+                    field_item = self.totals_layout.itemAt(i, QFormLayout.FieldRole)
+                    if label_item and label_item.widget():
+                        label_text = label_item.widget().text()
+                        if label_text == "Discount:":
+                            label_item.widget().setVisible(has_discount)
+                            if field_item and field_item.widget():
+                                field_item.widget().setVisible(has_discount)
+            
+            # Show/hide Tax row (with breakdown box)
             if hasattr(self, 'tax_row_label'):
                 self.tax_row_label.setVisible(has_tax)
-            if hasattr(self, 'tax_label'):
-                self.tax_label.setVisible(has_tax)
-            if hasattr(self, 'tax_breakdown_label'):
-                self.tax_breakdown_label.setVisible(has_tax)
+                # Find tax container in form layout
+                for i in range(self.totals_layout.rowCount()):
+                    label_item = self.totals_layout.itemAt(i, QFormLayout.LabelRole)
+                    field_item = self.totals_layout.itemAt(i, QFormLayout.FieldRole)
+                    if label_item and label_item.widget() == self.tax_row_label:
+                        if field_item and field_item.widget():
+                            field_item.widget().setVisible(has_tax)
             
-            # Show/hide CGST/SGST/IGST breakdown rows
-            if has_tax and not is_non_gst:
-                if is_interstate:
-                    # Show IGST only
-                    if hasattr(self, 'cgst_row_label'):
-                        self.cgst_row_label.setVisible(False)
-                        self.cgst_label.setVisible(False)
-                    if hasattr(self, 'sgst_row_label'):
-                        self.sgst_row_label.setVisible(False)
-                        self.sgst_label.setVisible(False)
-                    if hasattr(self, 'igst_row_label'):
-                        self.igst_row_label.setVisible(True)
-                        self.igst_label.setVisible(True)
-                else:
-                    # Show CGST and SGST
-                    if hasattr(self, 'cgst_row_label'):
-                        self.cgst_row_label.setVisible(True)
-                        self.cgst_label.setVisible(True)
-                    if hasattr(self, 'sgst_row_label'):
-                        self.sgst_row_label.setVisible(True)
-                        self.sgst_label.setVisible(True)
-                    if hasattr(self, 'igst_row_label'):
-                        self.igst_row_label.setVisible(False)
-                        self.igst_label.setVisible(False)
-            else:
-                # Hide all GST breakdown rows
-                if hasattr(self, 'cgst_row_label'):
-                    self.cgst_row_label.setVisible(False)
-                    self.cgst_label.setVisible(False)
-                if hasattr(self, 'sgst_row_label'):
-                    self.sgst_row_label.setVisible(False)
-                    self.sgst_label.setVisible(False)
-                if hasattr(self, 'igst_row_label'):
-                    self.igst_row_label.setVisible(False)
-                    self.igst_label.setVisible(False)
-            
-            # Show/hide Round-off row (when grand total has decimal)
-            if hasattr(self, 'roundoff_row_label') and hasattr(self, 'roundoff_link'):
-                show_roundoff = has_decimal and grand_total_before_roundoff > 0
-                self.roundoff_row_label.setVisible(show_roundoff)
-                self.roundoff_link.setVisible(show_roundoff)
-                
-                # Update roundoff value if visible
-                if show_roundoff:
-                    roundoff_amount = getattr(self, 'roundoff_amount', 0.0)
-                    if roundoff_amount >= 0:
-                        roundoff_display = f"<a href='options' style='text-decoration: none; color: #10B981;'>+₹{roundoff_amount:.2f} ▼</a>"
-                    else:
-                        roundoff_display = f"<a href='options' style='text-decoration: none; color: #EF4444;'>-₹{abs(roundoff_amount):.2f} ▼</a>"
-                    self.roundoff_link.setText(roundoff_display)
-            
-            # Show/hide Paid Amount and Balance Due rows (only for CREDIT)
-            if hasattr(self, 'paid_row_label'):
-                self.paid_row_label.setVisible(is_credit)
-                self.paid_amount_spin.setVisible(is_credit)
-            
-            if hasattr(self, 'balance_row_label'):
-                self.balance_row_label.setVisible(is_credit)
-                self.balance_label.setVisible(is_credit)
+            # Show/hide Balance Due row (only for CREDIT)
+            for i in range(self.totals_layout.rowCount()):
+                label_item = self.totals_layout.itemAt(i, QFormLayout.LabelRole)
+                field_item = self.totals_layout.itemAt(i, QFormLayout.FieldRole)
+                if label_item and label_item.widget():
+                    label_text = label_item.widget().text()
+                    if label_text == "Balance Due:":
+                        label_item.widget().setVisible(is_credit)
+                        if field_item and field_item.widget():
+                            field_item.widget().setVisible(is_credit)
             
             # Update item count badge
             if hasattr(self, 'item_count_badge'):
                 self.item_count_badge.setText(str(item_count))
+                # Change badge color based on item count
+                if item_count == 0:
+                    badge_color = TEXT_SECONDARY
+                elif item_count >= 5:
+                    badge_color = SUCCESS
+                else:
+                    badge_color = PRIMARY
                 self.item_count_badge.setStyleSheet(get_item_count_badge_style(item_count))
             
-            # Show/hide empty state label (hide when there are items, show when no items)
-            if hasattr(self, 'empty_state_label'):
-                self.empty_state_label.setVisible(item_count == 0)
-            
-            # Update balance due
             self.update_balance_due()
-            
         except Exception as e:
             print(f"Error updating totals: {e}")
 
@@ -4695,8 +3781,7 @@ class InvoiceDialog(QDialog):
             item_widget = self.items_layout.itemAt(i).widget()
             if isinstance(item_widget, InvoiceItemWidget):
                 item_data = item_widget.get_item_data()
-                # Only include items with valid product data (skip empty rows)
-                if item_data and item_data.get('product_name', '').strip():
+                if item_data:
                     items.append(item_data)
         
         if not items:
@@ -4716,16 +3801,10 @@ class InvoiceDialog(QDialog):
             QMessageBox.warning(self, "Error", "Invoice number cannot be empty!")
             return
         
-        # For new invoices, ensure the invoice number is unique
+        # Validate via controller
         is_new = not self.invoice_data
-        if is_new:
-            invoice_no = invoice_form_controller.ensure_unique_invoice_number(invoice_no)
-            if hasattr(self, 'invoice_number'):
-                self.invoice_number.setText(invoice_no)
-        
-        # Validate via controller (skip duplicate check since we already ensured uniqueness)
         is_valid, error_msg, field_name = invoice_form_controller.validate_invoice_data(
-            invoice_no, party_data.get('id'), items, is_new, skip_duplicate_check=is_new
+            invoice_no, party_data.get('id'), items, is_new
         )
         
         if not is_valid:
@@ -4749,25 +3828,30 @@ class InvoiceDialog(QDialog):
             'invoice_type': self._get_tax_type(),
             'bill_type': self._bill_type if hasattr(self, '_bill_type') else 'CASH',
             'notes': notes_text,
-            'round_off': round(getattr(self, 'roundoff_amount', 0.0), 2),
+            'round_off': getattr(self, 'roundoff_amount', 0.0),
         }
         
         if self.invoice_data:
             invoice_data_dict['id'] = self.invoice_data.get('id') or self.invoice_data.get('invoice', {}).get('id')
         
         # Save via controller
-        success, message, invoice_id = invoice_form_controller.save_invoice(
+        result = invoice_form_controller.save_invoice(
             invoice_data_dict,
             items,
-            is_final=False
+            is_update=not is_new,
+            status='Draft'
         )
         
-        if success:
+        if result.success:
+            # Update invoice number display if it was changed
+            if result.invoice_no and hasattr(self, 'invoice_number'):
+                self.invoice_number.setText(result.invoice_no)
+            
             highlight_success(self.invoice_number)
-            QMessageBox.information(self, "Success", f"✅ {message}")
+            QMessageBox.information(self, "Success", f"✅ {result.message}")
             self.accept()
         else:
-            QMessageBox.critical(self, "Error", f"❌ {message}")
+            QMessageBox.critical(self, "Error", f"❌ {result.message}")
 
     def reset_form(self) -> None:
         """Reset all form fields to defaults and update date to today."""
@@ -4825,9 +3909,8 @@ class InvoiceDialog(QDialog):
                             self.items_layout.removeWidget(widget)
                             widget.deleteLater()
                 
-                # Don't add a new item - wait for party selection
-                # The empty state will be shown automatically
-                self._update_empty_state()
+                # Add one new empty item
+                self.add_item()
             
             # Update totals display
             self.update_totals()
@@ -4849,25 +3932,5 @@ class InvoiceDialog(QDialog):
             
         except Exception as e:
             QMessageBox.critical(self, "Reset Error", f"Failed to reset invoice: {str(e)}")
-
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        """
-        Override keyPressEvent to prevent Enter from closing the dialog.
-        Enter/Return should only trigger actions if explicitly handled by focused widget.
-        """
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-            # Check if focused widget is a button - if not, ignore the key
-            focused_widget = self.focusWidget()
-            if isinstance(focused_widget, (QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox)):
-                # These widgets should handle Enter normally, don't pass to parent
-                event.accept()
-                return
-            # For other widgets, consume the event to prevent dialog closing
-            event.accept()
-            return
-        
-        # Let other keys pass through normally
-        super().keyPressEvent(event)
-
 
 

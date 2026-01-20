@@ -154,12 +154,6 @@ def show_html_preview_dialog(parent, html_content, invoice_id):
         print_btn.clicked.connect(lambda: print_invoice(preview_dialog))
         header_layout.addWidget(print_btn)
         
-        # Open in Browser button
-        browser_btn = QPushButton("🌐 Open in Browser")
-        browser_btn.setStyleSheet(btn_style)
-        browser_btn.clicked.connect(lambda: open_html_in_browser(html_content, invoice_no))
-        header_layout.addWidget(browser_btn)
-        
         # Close button
         close_btn = QPushButton("❌ Close")
         close_btn.setStyleSheet(f"""
@@ -203,23 +197,6 @@ def show_html_preview_dialog(parent, html_content, invoice_id):
         
     except Exception as e:
         QMessageBox.critical(parent, "Preview Error", f"Failed to show preview: {str(e)}")
-
-
-def open_html_in_browser(html_content, invoice_no):
-    """Open HTML content in default browser"""
-    try:
-        # Save HTML to temp file
-        temp_dir = tempfile.gettempdir()
-        html_path = os.path.join(temp_dir, f"Invoice_{invoice_no}.html")
-        
-        with open(html_path, 'w', encoding='utf-8') as f:
-            f.write(html_content)
-        
-        # Open in default browser
-        webbrowser.open(f'file://{html_path}')
-        
-    except Exception as e:
-        print(f"Error opening in browser: {str(e)}")
 
 
 def save_invoice_as_pdf(preview_dialog):

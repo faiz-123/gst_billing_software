@@ -544,6 +544,7 @@ class InvoicesScreen(BaseScreen):
         """Handle double-click on table row."""
         row = item.row()
         if row < len(self._all_invoices):
+            pass
             # Get invoice from filtered view (need to apply filters again to match)
             filtered = self._controller.filter_invoices(
                 invoices=self._all_invoices,
@@ -603,7 +604,6 @@ class InvoicesScreen(BaseScreen):
             if not invoice_data:
                 self._show_error("Error", f"Could not load invoice data for ID: {invoice_id}")
                 return
-            
             # Open InvoiceDialog in read-only mode
             dialog = InvoiceDialog(self, invoice_data=invoice_data, read_only=True)
             dialog.exec()

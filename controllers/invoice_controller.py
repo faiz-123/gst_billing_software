@@ -11,7 +11,7 @@ This controller handles:
 - Data formatting for UI consumption
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 from datetime import datetime, date
 
@@ -780,6 +780,203 @@ class InvoiceFormController:
         except Exception as e:
             print(f"Error saving invoice: {e}")
             return False, f"Error saving invoice: {str(e)}", None
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # Totals Calculation (Moved from UI layer)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    def compute_invoice_totals(
+        self, 
+        items_data: List[Dict],
+        invoice_state: Dict
+    ) -> Dict[str, Any]:
+        """
+        Compute all invoice totals, tax breakdowns, and visibility rules.
+        
+        This method encapsulates ALL business logic for calculating totals,
+        ensuring consistency and keeping UI layer free of calculations.
+        
+        Args:
+            items_data: List of item dictionaries from UI (quantity, rate, tax, discount, etc.)
+            invoice_state: Dictionary with invoice configuration:
+                - tax_type: 'SAME_STATE', 'OTHER_STATE', 'NON_GST'
+                - bill_type: 'CASH' or 'CREDIT'
+                - invoice_discount_value: float
+                - invoice_discount_type: '%' or '₹'
+                - other_charges: float
+                - roundoff: float
+        
+        Returns:
+            Dictionary with:
+                - All computed amounts (subtotal, discount, tax, grand_total, etc.)
+                - Visibility flags (show_tax, show_cgst_sgst, show_igst, show_roundoff, etc.)
+                - Formatted text for labels (tax_row_label, tax_breakdown_html, amount_in_words)
+        """
+        try:
+            # Initialize accumulators
+            subtotal = 0.0
+            total_item_discount = 0.0
+            total_tax = 0.0
+            total_cgst = 0.0
+            total_sgst = 0.0
+            total_igst = 0.0
+            item_count = 0
+            
+            # Determine tax state
+            tax_type = invoice_state.get('tax_type', 'SAME_STATE')
+            is_interstate = 'OTHER_STATE' in tax_type
+            is_non_gst = 'NON_GST' in tax_type
+            bill_type = invoice_state.get('bill_type', 'CASH')
+            is_credit = bill_type == 'CREDIT'
+            
+            # ========== CALCULATE ITEM-LEVEL TOTALS ==========
+            
+            for item in items_data:
+                quantity = item.get('quantity', 0)
+                rate = item.get('rate', 0)
+                item_subtotal = quantity * rate
+                subtotal += item_subtotal
+                
+                item_discount = item.get('discount_amount', 0)
+                item_tax = item.get('tax_amount', 0)
+                
+                total_item_discount += item_discount
+                total_tax += item_tax
+                item_count += 1
+                
+                # Calculate GST breakdown (only for GST invoices)
+                if item_tax > 0 and not is_non_gst:
+                    if is_interstate:
+                        total_igst += item_tax
+                    else:
+                        # Split equally between CGST and SGST
+                        cgst_amount = item_tax / 2
+                        sgst_amount = item_tax / 2
+                        total_cgst += cgst_amount
+                        total_sgst += sgst_amount
+            
+            # ========== CALCULATE INVOICE-LEVEL DISCOUNT ==========
+            
+            invoice_discount = 0.0
+            discount_type = invoice_state.get('invoice_discount_type', '₹')
+            discount_value = invoice_state.get('invoice_discount_value', 0.0)
+            
+            if discount_value > 0:
+                if discount_type == '%':
+                    # Percentage discount on (subtotal - item_discount)
+                    taxable_amount = subtotal - total_item_discount
+                    invoice_discount = (taxable_amount * discount_value) / 100
+                else:
+                    # Flat amount discount
+                    invoice_discount = discount_value
+            
+            total_discount = total_item_discount + invoice_discount
+            
+            # ========== CALCULATE GRAND TOTAL ==========
+            
+            other_charges = invoice_state.get('other_charges', 0.0)
+            roundoff = invoice_state.get('roundoff', 0.0)
+            
+            # Formula: Subtotal - Total Discount + Tax + Other Charges + Round-off
+            grand_total_before_roundoff = subtotal - total_discount + total_tax + other_charges
+            grand_total = grand_total_before_roundoff + roundoff
+            
+            # ========== DETERMINE VISIBILITY FLAGS ==========
+            
+            # Tax row visibility: show if there's tax (unless Non-GST)
+            show_tax = total_tax > 0 and not is_non_gst
+            
+            # GST breakdown visibility: show only when tax is present and invoice is GST
+            show_cgst_sgst = show_tax and not is_interstate and not is_non_gst
+            show_igst = show_tax and is_interstate and not is_non_gst
+            
+            # Discount row visibility: show when there's any discount
+            show_discount = total_discount > 0
+            
+            # Round-off row visibility: show when grand total has decimals
+            has_decimal = round(grand_total_before_roundoff, 2) % 1 != 0
+            show_roundoff = has_decimal and grand_total_before_roundoff > 0
+            
+            # Credit fields visibility: only for CREDIT bill type
+            show_credit_fields = is_credit
+            
+            # ========== GENERATE FORMATTED TEXT LABELS ==========
+            
+            # Tax row label
+            if is_interstate and not is_non_gst:
+                tax_row_label = "Tax/IGST:"
+            else:
+                tax_row_label = "Tax:"
+            
+            # Tax breakdown HTML (shown below tax value)
+            tax_breakdown_html = ""
+            if show_tax and not is_non_gst:
+                if is_interstate:
+                    # For interstate, just show IGST value (no breakdown needed)
+                    tax_breakdown_html = ""
+                else:
+                    # For intrastate, show CGST and SGST breakdown in HTML
+                    cgst_colored = f"<span style='color: #059669; font-weight: 600;'>₹{total_cgst:,.2f}</span>"
+                    sgst_colored = f"<span style='color: #059669; font-weight: 600;'>₹{total_sgst:,.2f}</span>"
+                    tax_breakdown_html = f"CGST: {cgst_colored}<br>SGST: {sgst_colored}"
+            
+            # Amount in words (Indian format)
+            amount_in_words = self.number_to_words_indian(grand_total)
+            
+            # ========== RETURN COMPUTED TOTALS ==========
+            
+            return {
+                # Amounts
+                'subtotal': subtotal,
+                'total_item_discount': total_item_discount,
+                'invoice_discount': invoice_discount,
+                'total_discount': total_discount,
+                'total_tax': total_tax,
+                'total_cgst': total_cgst,
+                'total_sgst': total_sgst,
+                'total_igst': total_igst,
+                'other_charges': other_charges,
+                'roundoff': roundoff,
+                'grand_total_before_roundoff': grand_total_before_roundoff,
+                'grand_total': grand_total,
+                'item_count': item_count,
+                
+                # Visibility flags
+                'show_discount': show_discount,
+                'show_tax': show_tax,
+                'show_cgst_sgst': show_cgst_sgst,
+                'show_igst': show_igst,
+                'show_roundoff': show_roundoff,
+                'show_credit_fields': show_credit_fields,
+                
+                # Formatted text labels
+                'tax_row_label': tax_row_label,
+                'tax_breakdown_html': tax_breakdown_html,
+                'amount_in_words': amount_in_words,
+            }
+            
+        except Exception as e:
+            print(f"Error computing invoice totals: {e}")
+            # Return minimal safe structure on error
+            return {
+                'subtotal': 0.0,
+                'total_discount': 0.0,
+                'total_tax': 0.0,
+                'total_cgst': 0.0,
+                'total_sgst': 0.0,
+                'total_igst': 0.0,
+                'grand_total': 0.0,
+                'item_count': 0,
+                'show_discount': False,
+                'show_tax': False,
+                'show_cgst_sgst': False,
+                'show_igst': False,
+                'show_roundoff': False,
+                'show_credit_fields': False,
+                'tax_row_label': 'Tax:',
+                'tax_breakdown_html': '',
+                'amount_in_words': 'Zero Rupees Only',
+            }
     
     # ─────────────────────────────────────────────────────────────────────────
     # Helper Methods

@@ -23,6 +23,7 @@ from ui.invoices.sales.sales_invoice_list_screen import InvoicesScreen
 from ui.invoices.purchase.purchase_invoice_list_screen import PurchasesScreen
 from ui.payments.payment_list_screen import PaymentsScreen
 from ui.receipts.receipt_list_screen import ReceiptsScreen
+from ui.reports.reports_screen import ReportsScreen
 
 class MainWindow(QMainWindow):
     def __init__(self, company_name="GST Billing"):
@@ -66,7 +67,8 @@ class MainWindow(QMainWindow):
             'invoices': InvoicesScreen(),
             'purchases': PurchasesScreen(),
             'receipts': ReceiptsScreen(),
-            'payments': PaymentsScreen()
+            'payments': PaymentsScreen(),
+            'reports': ReportsScreen()
         }
         
         # Add screens to stack
@@ -83,6 +85,7 @@ class MainWindow(QMainWindow):
         self.sidebar.add_menu_item("Parties", "👥", lambda: self.navigate_to('parties'))
         self.sidebar.add_menu_item("Receipts", "💰", lambda: self.navigate_to('receipts'))
         self.sidebar.add_menu_item("Payments", "💸", lambda: self.navigate_to('payments'))
+        self.sidebar.add_menu_item("Reports", "📊", lambda: self.navigate_to('reports'))
         
         self.sidebar.add_stretch()
         
@@ -121,7 +124,8 @@ class MainWindow(QMainWindow):
             'products': 'Products',
             'parties': 'Parties',
             'receipts': 'Receipts',
-            'payments': 'Payments'
+            'payments': 'Payments',
+            'reports': 'Reports'
         }
         
         target_text = screen_button_map.get(screen_name)
