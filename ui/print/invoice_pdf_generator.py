@@ -22,19 +22,17 @@ def _get_project_root():
 
 
 class InvoicePDFGenerator:
-    """Professional GST invoice PDF generator using HTML/CSS templates"""
+    """Professional invoice PDF generator using unified HTML/CSS template for both GST and Non-GST"""
     
     def __init__(self):
         project_root = _get_project_root()
-        self.gst_template_path = os.path.join(project_root, 'templates', 'invoice.html')
-        self.non_gst_template_path = os.path.join(project_root, 'templates', 'invoice_non_gst.html')
-        self.template_path = self.gst_template_path  # Default
+        # Use unified template for both GST and Non-GST invoices
+        self.unified_template_path = os.path.join(project_root, 'templates', 'invoice_unified.html')
+        self.template_path = self.unified_template_path
     
     def get_template_path(self, invoice_type):
-        """Get the appropriate template path based on invoice type"""
-        if invoice_type and invoice_type.upper() in ['NON-GST', 'NON GST', 'NONGST']:
-            return self.non_gst_template_path
-        return self.gst_template_path
+        """Get the unified template path - always returns unified template"""
+        return self.unified_template_path
     
     def generate_invoice_pdf(self, invoice_id, auto_open_browser=True):
         """Generate PDF for the given invoice ID
@@ -281,6 +279,9 @@ class InvoicePDFGenerator:
             'company_contact': f"Ph. : {company.get('phone', '0265-2423031, 8511597157')} E mail : {company.get('email', '')}",
             'company_gstin': company.get('gstin', '24AADPP6173E1ZT'),
             
+            # Invoice type flag for template differentiation
+            'is_gst': True,
+            
             # Invoice details
             'invoice_no': invoice.get('invoice_no', ''),
             'invoice_date': formatted_date,
@@ -321,9 +322,9 @@ class InvoicePDFGenerator:
             'amount_in_words': amount_words,
             
             # Bank details
-            'bank_name': 'BANK OF INDIA',
-            'bank_account': 'A/C NO:00-250271000001287',
-            'bank_ifsc': 'IFSC CODE: BKID0002503',
+            'bank_name': company.get('bank_name', 'BANK OF INDIA'),
+            'bank_account': company.get('bank_account', 'A/C NO:00-250271000001287'),
+            'bank_ifsc': company.get('bank_ifsc', 'IFSC CODE: BKID0002503'),
             
             # Terms
             'terms_conditions': company.get('terms', 'Subject to Vadodara - 390001 jurisdiction E.& O.E')
@@ -398,11 +399,16 @@ class InvoicePDFGenerator:
             'company_name': company.get('name', 'SUPER POWER BATTERIES (INDIA)'),
             'company_address': company.get('address', 'A-12, Gangotri Appartment, R. V. Desai Road, Vadodara - 390001 Gujarat'),
             'company_contact': f"Ph. : {company.get('phone', '0265-2423031, 8511597157')} E mail : {company.get('email', '')}",
+            'company_gstin': company.get('gstin', '24AADPP6173E1ZT'),
+            
+            # Invoice type flag for template differentiation
+            'is_gst': False,
             
             # Invoice details
             'invoice_no': invoice.get('invoice_no', ''),
             'invoice_date': formatted_date,
             'terms': invoice.get('bill_type', 'Credit'),
+            'tax_type': invoice.get('tax_type', 'NON-GST'),
             'ref_no': '',
             'vehicle_no': '',
             'transport': '',
@@ -412,6 +418,7 @@ class InvoicePDFGenerator:
             'buyer_address': party.get('address', ''),
             'buyer_location': buyer_location,
             'buyer_contact': party.get('mobile', ''),
+            'buyer_gstin': '',
             
             # Items
             'items': processed_items,
