@@ -85,6 +85,11 @@ class BaseListScreen(BaseScreen):
         # Setup UI (standard layout for all screens)
         self._setup_ui()
     
+    def showEvent(self, event):
+        """Refresh data when screen becomes visible - common for all list screens."""
+        super().showEvent(event)
+        self._load_data()
+    
     def _setup_ui(self):
         """
         Set up the standard UI layout - IDENTICAL for all list screens
@@ -360,8 +365,12 @@ class BaseListScreen(BaseScreen):
         except Exception as e:
             logger.error(f"Error in search debounce: {str(e)}", exc_info=True)
     
-    def _on_filter_changed(self):
-        """Handle filter change - reload data"""
+    def _on_filter_changed(self, *args):
+        """Handle filter change - reload data
+        
+        Args:
+            *args: Accept any arguments from signal (combo index, date, etc.)
+        """
         try:
             logger.info(f"Filter changed")
             self._load_data(reset_page=True)
@@ -388,6 +397,40 @@ class BaseListScreen(BaseScreen):
             "Export",
             "📤 Export functionality will be available soon!"
         )
+    
+    def _on_refresh_clicked(self):
+        """Handle refresh button click - clears filters and reloads data"""
+        logger.info("Refresh button clicked - clearing filters")
+        if hasattr(self, '_filter_widget') and self._filter_widget:
+            self._filter_widget.reset_filters()
+            self._filter_widget.clear_search()
+        self._load_data(reset_page=True)
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # Common Filter Getters - Subclasses can use these directly
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    def _get_search_text(self) -> str:
+        """Get current search text safely - common pattern for all screens"""
+        if hasattr(self, '_filter_widget') and self._filter_widget:
+            return self._filter_widget.get_search_text().strip()
+        return ""
+    
+    def _get_filter_value(self, combo_attr: str, default: str = "All") -> str:
+        """Get current filter combo value safely
+        
+        Args:
+            combo_attr: Attribute name of the combo (e.g., '_status_combo')
+            default: Default value if combo not found
+            
+        Returns:
+            Current combo value or default
+        """
+        if hasattr(self, combo_attr):
+            combo = getattr(self, combo_attr)
+            if combo:
+                return combo.currentData() or default
+        return default
     
     # ─────────────────────────────────────────────────────────────────────────
     # Public Interface

@@ -22,6 +22,15 @@ WHITE = "#FFFFFF"            # Pure white
 
 # ---------------- Accent Colors ----------------
 PURPLE = "#9333EA"           # Purple accent color
+PURPLE_LIGHT = "#EDE9FE"     # Light purple for backgrounds
+
+# ---------------- Purchase Theme Colors (Amber/Orange) ----------------
+PURCHASE_PRIMARY = "#F59E0B"        # Amber - main purchase color
+PURCHASE_PRIMARY_HOVER = "#D97706"  # Darker amber for hover states
+PURCHASE_BG_LIGHT = "#FFFBEB"       # Light amber background
+PURCHASE_BORDER_ACCENT = "#FCD34D"  # Amber border accent
+PURCHASE_TEXT_DARK = "#92400E"      # Dark amber text
+WARNING_LIGHT = "#FEF3C7"           # Light amber/yellow for warning backgrounds
 
 # ---------------- Extended Colors for Invoice Dialog ----------------
 TEXT_DARK = "#111827"        # Alias for dark text

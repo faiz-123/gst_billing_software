@@ -16,6 +16,9 @@ _create_table_section() 90% similar Create ListTableHelper
 _load_data() 85% similar Generic data loading pattern
 _populate_table() 85% similar ListTableHelper encapsulation
 
+Migrate screens to use ListTableHelper for _populate_table() (5 screens)
+Optionally migrate to inherit from BaseListScreen instead of BaseScreen
+
 strict Rule:
 Rule1: Do not create any docs, .txt, .md, .py files for refrence
 Rule 2: follow folder structure

@@ -15,11 +15,13 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 from theme import (
-    TEXT_PRIMARY, TEXT_SECONDARY, WARNING, DANGER,
+    TEXT_PRIMARY, TEXT_SECONDARY, WARNING, DANGER, SUCCESS, PRIMARY,
+    WARNING_LIGHT, SUCCESS_LIGHT, DANGER_LIGHT, PRIMARY_LIGHT,
     FONT_SIZE_SMALL,
     get_normal_font, get_bold_font
 )
 
+from widgets import TableActionButton
 from core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -207,3 +209,96 @@ class ListTableHelper:
         # Custom color from config
         if 'color' in config and config['color']:
             cell.setForeground(QColor(config['color']))
+    
+    def create_action_buttons(self, actions: list) -> 'QWidget':
+        """Create action buttons widget for table row - eliminates duplication across screens
+        
+        Args:
+            actions: List of action button configs, each dict with:
+                - 'text': Button text
+                - 'tooltip': Button tooltip
+                - 'bg_color': Background color (optional, default '#EEF2FF')
+                - 'hover_color': Hover color (optional, default PRIMARY)
+                - 'size': Tuple (width, height) (optional)
+                - 'callback': Click callback function
+                
+        Returns:
+            QWidget containing action buttons
+        """
+        from PySide6.QtWidgets import QWidget, QHBoxLayout
+        from theme import PRIMARY
+        
+        widget = QWidget()
+        widget.setStyleSheet("background: transparent; border: none;")
+        
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+        layout.setAlignment(Qt.AlignCenter)
+        
+        for action in actions:
+            button = TableActionButton(
+                text=action.get('text', 'Action'),
+                tooltip=action.get('tooltip', ''),
+                bg_color=action.get('bg_color', '#EEF2FF'),
+                hover_color=action.get('hover_color', PRIMARY),
+                size=action.get('size', (60, 32))
+            )
+            
+            if 'callback' in action and callable(action['callback']):
+                button.clicked.connect(action['callback'])
+            
+            layout.addWidget(button)
+        
+        return widget
+    
+    def create_status_badge(self, status: str, color_map: dict = None) -> 'QWidget':
+        """Create status badge widget - eliminates duplication across screens
+        
+        Args:
+            status: Status text to display
+            color_map: Dict mapping status -> (text_color, bg_color)
+                Default supports: Completed, Pending, Failed, Paid, Unpaid, etc.
+                
+        Returns:
+            QWidget containing styled status badge
+        """
+        from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel
+        
+        # Default color map using theme colors
+        default_colors = {
+            'Completed': (SUCCESS, SUCCESS_LIGHT),
+            'Paid': (SUCCESS, SUCCESS_LIGHT),
+            'Pending': (WARNING, WARNING_LIGHT),
+            'Unpaid': (WARNING, WARNING_LIGHT),
+            'Partially Paid': (PRIMARY, PRIMARY_LIGHT),
+            'Failed': (DANGER, DANGER_LIGHT),
+            'Cancelled': (DANGER, DANGER_LIGHT),
+            'Overdue': (DANGER, DANGER_LIGHT),
+        }
+        
+        colors = color_map or default_colors
+        text_color, bg_color = colors.get(status, (TEXT_PRIMARY, "#F3F4F6"))
+        
+        widget = QWidget()
+        widget.setStyleSheet("background: transparent; border: none;")
+        
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setAlignment(Qt.AlignCenter)
+        
+        label = QLabel(status)
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet(f"""
+            QLabel {{
+                color: {text_color};
+                background: {bg_color};
+                padding: 4px 12px;
+                border-radius: 10px;
+                font-size: 12px;
+                font-weight: 600;
+            }}
+        """)
+        layout.addWidget(label)
+        
+        return widget

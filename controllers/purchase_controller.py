@@ -19,6 +19,10 @@ from core.db.sqlite_db import db
 from core.logger import get_logger, log_performance, UserActionLogger
 from core.error_handler import ErrorHandler, handle_errors
 from core.exceptions import InvoiceException
+from theme import (
+    PRIMARY, PRIMARY_LIGHT, SUCCESS, SUCCESS_LIGHT, WARNING, WARNING_LIGHT,
+    GRAY_500, GRAY_100
+)
 
 logger = get_logger(__name__)
 
@@ -359,12 +363,12 @@ class PurchaseController:
             Tuple of (text_color, background_color)
         """
         status_colors = {
-            'Unpaid': ("#6366F1", "#EEF2FF"),
-            'Partial Paid': ("#F59E0B", "#FEF3C7"),
-            'Paid': ("#10B981", "#D1FAE5"),
-            'Cancelled': ("#6B7280", "#F3F4F6")
+            'Unpaid': (PRIMARY, PRIMARY_LIGHT),
+            'Partial Paid': (WARNING, WARNING_LIGHT),
+            'Paid': (SUCCESS, SUCCESS_LIGHT),
+            'Cancelled': (GRAY_500, GRAY_100)
         }
-        return status_colors.get(status, ("#6B7280", "#F3F4F6"))
+        return status_colors.get(status, (GRAY_500, GRAY_100))
 
 
 # Singleton instance for convenience

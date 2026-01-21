@@ -62,13 +62,10 @@ class PartyController:
             List of party dictionaries
         """
         try:
-            company_id = db.get_current_company_id()
-            logger.debug(f"Fetching all parties for company_id: {company_id}")
+            logger.debug("Fetching all parties")
             
-            if company_id:
-                parties = db.get_parties_by_company(company_id) or []
-            else:
-                parties = db.get_parties() or []
+            # db.get_parties() already handles company filtering internally
+            parties = db.get_parties() or []
             
             logger.info(f"Successfully fetched {len(parties)} parties")
             return parties

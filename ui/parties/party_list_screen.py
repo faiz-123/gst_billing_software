@@ -1,30 +1,16 @@
 """
-Parties List Screen - Refactored to use global theme, widgets, services
-Includes pagination, logging, company isolation, and performance optimizations
+Parties List Screen - Refactored to inherit from BaseListScreen
+Uses common list patterns: pagination, filtering, table population, error handling
 """
 
-from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel,
-    QComboBox, QFrame, QTableWidgetItem,
-    QMessageBox, QDialog, QSpinBox, QPushButton
-)
-from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QWidget, QDialog
+from PySide6.QtCore import Qt, Signal
 
-# Theme imports - use only available exports
-from theme import (
-    PRIMARY, WHITE, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
-    SUCCESS, DANGER, WARNING, PURPLE,
-    FONT_SIZE_SMALL, FONT_SIZE_NORMAL,
-    get_normal_font, get_bold_font,
-    get_filter_combo_style
-)
+# Theme imports
+from theme import PRIMARY, SUCCESS, DANGER, WARNING, PURPLE, PRIMARY_LIGHT, DANGER_LIGHT
 
 # Widget imports
-from widgets import (
-    StatCard, ListTable, TableFrame, TableActionButton,
-    SearchInputContainer, RefreshButton, ListHeader, StatsContainer, FilterWidget
-)
+from widgets import StatCard, ListTable, TableFrame, StatsContainer, FilterWidget
 
 # Core imports
 from core.enums import PartyType
@@ -33,76 +19,51 @@ from core.logger import get_logger
 
 # Error handler import
 from ui.error_handler import UIErrorHandler
-from core.services import party_service
 
-# UI imports
-from ui.base import BaseScreen, PaginationWidget
+# Controller import (NOT service or db directly)
+from controllers.party_controller import party_controller
+
+# UI imports - inherit from BaseListScreen
+from ui.base.base_list_screen import BaseListScreen
+from ui.base.list_table_helper import ListTableHelper
 from ui.parties.party_form_dialog import PartyDialog
 
 logger = get_logger(__name__)
 
 
-class PartiesScreen(BaseScreen):
-    """Main screen for managing parties (customers and suppliers)"""
+class PartiesScreen(BaseListScreen):
+    """Main screen for managing parties (customers and suppliers)
+    
+    Inherits from BaseListScreen which provides:
+    - Standard UI layout (_setup_ui)
+    - Generic data loading pattern (_load_data)
+    - Pagination support
+    - Search debouncing
+    - Error handling
+    """
     
     party_updated = Signal()
     
-    # Pagination constant
-    ITEMS_PER_PAGE = 49  # Adjusted to match actual visible rows
-    DEBOUNCE_DELAY = 500  # ms
-    
     def __init__(self, parent=None):
+        # Initialize base class - this calls _setup_ui() automatically
         super().__init__(title="Parties", parent=parent)
         self.setObjectName("PartiesScreen")
-        logger.debug("Initializing PartiesScreen")
-        
-        # Data caching
-        self._all_parties = []
-        self._filtered_parties = []
-        self._is_loading = False
-        
-        # Pagination widget (will manage _current_page, _total_pages)
-        self.pagination_widget = None
-        
-        # Debounce timer for search
-        self._search_debounce_timer = QTimer()
-        self._search_debounce_timer.setSingleShot(True)
-        self._search_debounce_timer.timeout.connect(self._on_search_debounce)
-        
-        self._setup_ui()
-        self._load_parties()
     
-    def _setup_ui(self):
-        """Set up the main UI layout using BaseScreen's main_layout"""
-        # Hide the default title label and content frame from BaseScreen
-        self.title_label.hide()
-        self.content_frame.hide()
-        
-        # Use the main_layout from BaseScreen
-        self.main_layout.setContentsMargins(24, 24, 24, 24)
-        self.main_layout.setSpacing(20)
-        
-        # Header section
-        self.main_layout.addWidget(self._create_header())
-        
-        # Stats section
-        self.main_layout.addWidget(self._create_stats_section())
-        
-        # Filters section
-        self.main_layout.addWidget(self._create_filters_section())
-        
-        # Table section (with stretching)
-        self.main_layout.addWidget(self._create_table_section(), 1)
-        
-        # Pagination controls section
-        self.main_layout.addWidget(self._create_pagination_controls())
+    # ─────────────────────────────────────────────────────────────────────────
+    # BaseListScreen Configuration Overrides
+    # ─────────────────────────────────────────────────────────────────────────
     
-    def _create_header(self) -> QWidget:
-        """Create header with title and add button"""
-        header = ListHeader("Parties", "+ Add Party")
-        header.add_clicked.connect(self._on_add_party)
-        header.export_clicked.connect(self._on_export_clicked)
-        return header
+    def _get_add_button_text(self) -> str:
+        """Return text for add button"""
+        return "+ Add Party"
+    
+    def _get_entity_name(self) -> str:
+        """Return singular entity name for pagination"""
+        return "party"
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # UI Section Overrides (Required by BaseListScreen)
+    # ─────────────────────────────────────────────────────────────────────────
     
     def _create_stats_section(self) -> QWidget:
         """Create statistics cards section with icons"""
@@ -152,7 +113,7 @@ class PartiesScreen(BaseScreen):
         
         # Stretch and refresh button
         self._filter_widget.add_stretch()
-        self._filter_widget.add_refresh_button(lambda: self._load_parties(reset_page=True))
+        self._filter_widget.add_refresh_button(self._on_refresh_clicked)
         
         # Connect filter changes
         self._filter_widget.filters_changed.connect(self._on_filter_changed)
@@ -164,13 +125,13 @@ class PartiesScreen(BaseScreen):
         # Create table frame container
         table_frame = TableFrame()
         
-        # Create table with headers
-        self.table = ListTable(headers=[
+        # Create table with headers (use _table for consistency with other screens)
+        self._table = ListTable(headers=[
             "#", "Name", "Type", "GSTIN", "Mobile", "Balance", "Balance Type", "Edit", "Delete"
         ])
         
         # Configure column widths
-        self.table.configure_columns([
+        self._table.configure_columns([
             {"width": 50, "resize": "fixed"},      # #
             {"resize": "stretch"},                  # Name
             {"width": 100, "resize": "fixed"},     # Type
@@ -182,96 +143,58 @@ class PartiesScreen(BaseScreen):
             {"width": 80, "resize": "fixed"},      # Delete (increased)
         ])
         
-        table_frame.set_table(self.table)
+        # Initialize ListTableHelper for populating the table
+        self._table_helper = ListTableHelper(self._table, self.ITEMS_PER_PAGE)
+        
+        # Define column configurations for table population
+        self._column_configs = [
+            {'type': 'row_number'},
+            {'key': 'name', 'type': 'text', 'bold': True, 'align': Qt.AlignLeft},
+            {'key': 'party_type', 'type': 'text', 'align': Qt.AlignCenter, 
+             'formatter': lambda v: v.title() if v else ''},
+            {'key': 'gstin', 'type': 'text', 'formatter': lambda v: v or '-'},
+            {'key': 'mobile', 'type': 'text', 'formatter': lambda v: v or '-'},
+            {'key': 'opening_balance', 'type': 'currency', 'bold': True, 'align': Qt.AlignCenter},
+            {'key': 'balance_type', 'type': 'balance_type', 'align': Qt.AlignCenter,
+             'formatter': lambda v: v.upper() if v else '-'},
+            {'type': 'button', 'text': 'Edit', 'tooltip': 'Edit Party',
+             'bg_color': PRIMARY_LIGHT, 'hover_color': PRIMARY, 'size': (60, 32)},
+            {'type': 'button', 'text': 'Del', 'tooltip': 'Delete Party',
+             'bg_color': DANGER_LIGHT, 'hover_color': DANGER, 'size': (60, 32)},
+        ]
+        
+        table_frame.set_table(self._table)
         
         return table_frame
     
-    def _create_pagination_controls(self) -> QWidget:
-        """Create pagination controls using the reusable PaginationWidget
+    # ─────────────────────────────────────────────────────────────────────────
+    # Data Loading Overrides (Required by BaseListScreen)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    def _fetch_all_data(self) -> list:
+        """Fetch all parties from controller
         
         Returns:
-            PaginationWidget for pagination controls
+            List of all parties
         """
-        self.pagination_widget = PaginationWidget(
-            items_per_page=self.ITEMS_PER_PAGE,
-            entity_name="party",
-            parent=self
-        )
-        
-        # Connect signals
-        self.pagination_widget.page_changed.connect(self._on_pagination_page_changed)
-        
-        logger.debug("Pagination widget created and configured")
-        return self.pagination_widget
+        return party_controller.get_all_parties()
     
-    def _load_parties(self, reset_page: bool = False):
-        """Load parties from database and populate table with pagination
+    def filter_data(self, all_data: list) -> list:
+        """Apply filters to parties list
         
         Args:
-            reset_page: Reset to page 1 when called after filter change
+            all_data: List of all parties
+            
+        Returns:
+            Filtered list of parties
         """
-        if self._is_loading:
-            logger.debug("Load already in progress, skipping")
-            return
+        search_text = self.get_safe_filter_value(
+            self._filter_widget.get_search_text() if hasattr(self, '_filter_widget') else ""
+        )
+        party_type = self.type_combo.currentData() if hasattr(self, 'type_combo') else "all"
+        balance_type = self.balance_combo.currentData() if hasattr(self, 'balance_combo') else "all"
         
-        try:
-            self._is_loading = True
-            logger.debug("Loading parties from database")
-            
-            if reset_page and self.pagination_widget:
-                self.pagination_widget.reset_to_page_one()
-            
-            # Get filter values with validation
-            search_text = self._get_safe_filter_value(self._filter_widget.get_search_text() if hasattr(self, '_filter_widget') else "")
-            party_type = self.type_combo.currentData() if hasattr(self, 'type_combo') else "all"
-            balance_type = self.balance_combo.currentData() if hasattr(self, 'balance_combo') else "all"
-            
-            # Get parties from service (all parties first for caching)
-            self._all_parties = party_service.get_parties()
-            logger.info(f"🔄 Fetched {len(self._all_parties)} TOTAL parties from database")
-            
-            if len(self._all_parties) == 0:
-                logger.warning("⚠️  No parties returned from database!")
-            
-            # Apply filters
-            self._filtered_parties = self._apply_filters(
-                self._all_parties, 
-                search_text, 
-                party_type, 
-                balance_type
-            )
-            logger.debug(f"🔍 After filtering: {len(self._filtered_parties)} parties (from {len(self._all_parties)} total)")
-            
-            # Calculate pagination (ALWAYS based on filtered count)
-            total_pages = (len(self._filtered_parties) + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
-            total_pages = max(1, total_pages)  # At least 1 page
-            current_page = self.pagination_widget.get_current_page() if self.pagination_widget else 1
-            
-            # Update pagination widget state
-            if self.pagination_widget:
-                self.pagination_widget.set_pagination_state(
-                    current_page=current_page,
-                    total_pages=total_pages,
-                    total_items=len(self._filtered_parties)
-                )
-            
-            # Update stats with ALL parties (NOT filtered - this is the key!)
-            logger.info(f"📊 STATS: Showing stats for {len(self._all_parties)} TOTAL parties")
-            logger.info(f"📊 PAGINATION: Showing page {current_page} of {total_pages} ({len(self._filtered_parties)} after filters)")
-            self._update_stats(self._all_parties)
-            
-            # Populate table with current page (filtered data)
-            page_data = self._get_current_page_data()
-            logger.debug(f"📄 Populating table with {len(page_data)} parties for page {current_page}")
-            self._populate_table(page_data)
-            
-            logger.info(f"Party list loaded successfully. Page {current_page}/{total_pages}")
-            
-        except Exception as e:
-            logger.error(f"Error loading parties: {str(e)}", exc_info=True)
-            UIErrorHandler.show_error("Error", f"Failed to load parties: {str(e)}")
-        finally:
-            self._is_loading = False
+        return self._apply_filters(all_data, search_text, party_type, balance_type)
     
     def _apply_filters(self, parties: list, search_text: str, party_type: str, balance_type: str) -> list:
         """Apply filters to parties list with validation
@@ -380,94 +303,38 @@ class PartiesScreen(BaseScreen):
             logger.error(f"Error updating stats: {str(e)}", exc_info=True)
     
     def _populate_table(self, parties: list):
-        """Populate table with party data
+        """Populate table with party data using ListTableHelper
         
         Args:
             parties: List of parties for current page (should be up to 49)
         """
-        self.table.setRowCount(0)
-        
         # Get current page from pagination widget
         current_page = self.pagination_widget.get_current_page() if self.pagination_widget else 1
         
-        # Calculate starting row number based on current page
-        start_row_num = (current_page - 1) * self.ITEMS_PER_PAGE + 1
+        logger.debug(f"Populating table with {len(parties)} parties using ListTableHelper")
         
-        logger.debug(f"Populating table with {len(parties)} parties, starting row num: {start_row_num}")
+        # Use ListTableHelper to populate the table
+        self._table_helper.populate(
+            data=parties,
+            column_configs=self._column_configs,
+            current_page=current_page
+        )
         
-        for page_idx, party in enumerate(parties):
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setRowHeight(row, 50)
-            
-            # Calculate absolute row number across all pages
-            absolute_row_num = start_row_num + page_idx
-            
-            # Column 0: Row number (#)
-            num_item = QTableWidgetItem(str(absolute_row_num))
-            num_item.setTextAlignment(Qt.AlignCenter)
-            num_item.setForeground(QColor(TEXT_SECONDARY))
-            self.table.setItem(row, 0, num_item)
-            
-            # Column 1: Name with bold font (larger size)
-            name_item = QTableWidgetItem(party.get('name', ''))
-            name_item.setFont(get_bold_font(FONT_SIZE_NORMAL))
-            name_item.setData(Qt.UserRole, party.get('id'))
-            self.table.setItem(row, 1, name_item)
-            
-            # Column 2: Type
-            party_type = party.get('party_type', '')
-            type_item = QTableWidgetItem(party_type.title() if party_type else '')
-            type_item.setFont(get_normal_font())
-            type_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 2, type_item)
-            
-            # Column 3: GSTIN
-            gstin_item = QTableWidgetItem(party.get('gstin', '-') or '-')
-            gstin_item.setFont(get_normal_font())
-            self.table.setItem(row, 3, gstin_item)
-            
-            # Column 4: Mobile
-            mobile_item = QTableWidgetItem(party.get('mobile', '-') or '-')
-            mobile_item.setFont(get_normal_font())
-            self.table.setItem(row, 4, mobile_item)
-            
-            # Column 5: Balance (centered)
-            balance = float(party.get('opening_balance') or 0)
-            balance_item = QTableWidgetItem(format_currency(balance))
-            balance_item.setFont(get_bold_font(FONT_SIZE_SMALL))
-            balance_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 5, balance_item)
-            
-            # Column 6: Balance Type
-            balance_type = party.get('balance_type', '')
-            balance_type_item = QTableWidgetItem(balance_type.upper() if balance_type else '-')
-            balance_type_item.setFont(get_normal_font())
-            balance_type_item.setTextAlignment(Qt.AlignCenter)
-            if balance_type:
-                if balance_type.lower() == 'dr':
-                    balance_type_item.setForeground(QColor(WARNING))
-                elif balance_type.lower() == 'cr':
-                    balance_type_item.setForeground(QColor(DANGER))
-            self.table.setItem(row, 6, balance_type_item)
-            
-            # Column 7: Edit button
-            edit_btn = TableActionButton(
-                text="Edit", tooltip="Edit Party",
-                bg_color="#EEF2FF", hover_color=PRIMARY, size=(60, 32)
-            )
-            edit_btn.clicked.connect(lambda checked, p=party: self._on_edit_party(p))
-            self.table.setCellWidget(row, 7, edit_btn)
-            
-            # Column 8: Delete button
-            delete_btn = TableActionButton(
-                text="Del", tooltip="Delete Party",
-                bg_color="#FEE2E2", hover_color=DANGER, size=(60, 32)
-            )
-            delete_btn.clicked.connect(lambda checked, p=party: self._on_delete_party(p))
-            self.table.setCellWidget(row, 8, delete_btn)
+        # Connect button click handlers for each row
+        for row in range(self._table.rowCount()):
+            party = parties[row] if row < len(parties) else None
+            if party:
+                # Edit button (column 7)
+                edit_btn = self._table.cellWidget(row, 7)
+                if edit_btn:
+                    edit_btn.clicked.connect(lambda checked, p=party: self._on_edit_party(p))
+                
+                # Delete button (column 8)
+                delete_btn = self._table.cellWidget(row, 8)
+                if delete_btn:
+                    delete_btn.clicked.connect(lambda checked, p=party: self._on_delete_party(p))
         
-        logger.debug(f"Table populated with {self.table.rowCount()} rows")
+        logger.debug(f"Table populated with {self._table.rowCount()} rows")
     
     def _force_upper_search(self, text: str):
         """Force search input to uppercase"""
@@ -484,61 +351,16 @@ class PartiesScreen(BaseScreen):
         except Exception as e:
             logger.warning(f"Error forcing uppercase in search: {e}")
     
-    def _on_search_changed(self, text: str):
-        """Handle search text change with debouncing
-        
-        Debouncing prevents excessive reload calls while user is typing
-        """
-        logger.debug(f"Search text changed: '{text}'")
-        
-        # Cancel previous timer
-        self._search_debounce_timer.stop()
-        
-        # Start new debounce timer
-        self._search_debounce_timer.start(self.DEBOUNCE_DELAY)
+    # ─────────────────────────────────────────────────────────────────────────
+    # Event Handler Overrides
+    # ─────────────────────────────────────────────────────────────────────────
     
-    def _on_search_debounce(self):
-        """Execute search after debounce delay"""
-        try:
-            search_text = self._filter_widget.get_search_text() if hasattr(self, '_filter_widget') else ""
-            logger.info(f"Search debounce triggered for: '{search_text}'")
-            self._load_parties(reset_page=True)
-        except Exception as e:
-            logger.error(f"Error in search debounce: {str(e)}", exc_info=True)
-    
-    def _on_filter_changed(self, index: int):
-        """Handle filter change with logging
-        
-        Args:
-            index: The index of the changed filter combo (not used, for signal compatibility)
-        """
-        try:
-            party_type = self.type_combo.currentData() if hasattr(self, 'type_combo') else "all"
-            balance_type = self.balance_combo.currentData() if hasattr(self, 'balance_combo') else "all"
-            logger.info(f"Filter changed - Type: {party_type}, Balance: {balance_type}")
-            self._load_parties(reset_page=True)
-        except Exception as e:
-            logger.error(f"Error changing filter: {str(e)}", exc_info=True)
-    
-    def _on_pagination_page_changed(self, page: int):
-        """Handle page change from pagination widget
-        
-        Args:
-            page: The new page number
-        """
-        try:
-            logger.info(f"Pagination page changed to {page}")
-            page_data = self._get_current_page_data()
-            self._populate_table(page_data)
-        except Exception as e:
-            logger.error(f"Error handling pagination page change: {str(e)}", exc_info=True)
-    
-    def _on_add_party(self):
-        """Show add party dialog"""
+    def _on_add_clicked(self):
+        """Show add party dialog - overrides BaseListScreen"""
         dialog = PartyDialog(parent=self)
         result = dialog.exec()
         if result == QDialog.Accepted or dialog.result_data:
-            self._load_parties()
+            self._load_data()
             self.party_updated.emit()
     
     def _on_edit_party(self, party: dict):
@@ -546,7 +368,7 @@ class PartiesScreen(BaseScreen):
         dialog = PartyDialog(party_data=party, parent=self)
         result = dialog.exec()
         if result == QDialog.Accepted or dialog.result_data:
-            self._load_parties()
+            self._load_data()
             self.party_updated.emit()
     
     def _on_delete_party(self, party: dict):
@@ -568,8 +390,8 @@ class PartiesScreen(BaseScreen):
             
             # Check for related invoices/transactions if method exists
             related_invoices = 0
-            if hasattr(party_service, 'get_party_invoice_count'):
-                related_invoices = party_service.get_party_invoice_count(party_id)
+            if hasattr(party_controller, 'get_party_invoice_count'):
+                related_invoices = party_controller.get_party_invoice_count(party_id)
             
             if related_invoices and related_invoices > 0:
                 logger.warning(f"Attempt to delete party {party_id} with {related_invoices} invoices")
@@ -590,68 +412,18 @@ class PartiesScreen(BaseScreen):
                 logger.debug(f"Delete cancelled by user for party {party_id}")
                 return
             
-            # Attempt deletion
+            # Attempt deletion via controller
             logger.info(f"Deleting party {party_id} ({party_name})")
-            if party_service.delete_party(party_id):
+            success, message = party_controller.delete_party(party_id)
+            if success:
                 logger.info(f"Party {party_id} deleted successfully")
                 UIErrorHandler.show_success("Success", f"Party '{party_name}' deleted successfully!")
-                self._load_parties(reset_page=True)
+                self._load_data(reset_page=True)
                 self.party_updated.emit()
             else:
-                logger.error(f"Failed to delete party {party_id}")
-                UIErrorHandler.show_error("Error", "Failed to delete party. Please try again.")
+                logger.error(f"Failed to delete party {party_id}: {message}")
+                UIErrorHandler.show_error("Error", message or "Failed to delete party. Please try again.")
             
         except Exception as e:
             logger.error(f"Error deleting party {party.get('id')}: {str(e)}", exc_info=True)
             UIErrorHandler.show_error("Error", f"Failed to delete party: {str(e)}")
-
-    def _on_export_clicked(self):
-        """Handle export button click."""
-        logger.info("Export clicked")
-        UIErrorHandler.show_warning(
-            "Export", 
-            "📤 Export functionality will be available soon!\n\n"
-            "This will allow you to export party data to CSV or Excel."
-        )
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Pagination & Helper Methods
-    # ─────────────────────────────────────────────────────────────────────────
-    
-    def _get_current_page_data(self) -> list:
-        """Get parties for current page
-        
-        Returns:
-            List of parties for current page
-        """
-        if not self.pagination_widget:
-            return self._filtered_parties
-        
-        current_page = self.pagination_widget.get_current_page()
-        start_idx = (current_page - 1) * self.ITEMS_PER_PAGE
-        end_idx = start_idx + self.ITEMS_PER_PAGE
-        return self._filtered_parties[start_idx:end_idx]
-    
-    def _get_safe_filter_value(self, value: str) -> str:
-        """Safely get filter value with null/empty checks
-        
-        Args:
-            value: Filter value to validate
-            
-        Returns:
-            Safe filter value (empty string if None/invalid)
-        """
-        try:
-            return str(value or "").strip() if value else ""
-        except Exception as e:
-            logger.warning(f"Error getting safe filter value: {e}")
-            return ""
-    
-    # ─────────────────────────────────────────────────────────────────────────
-    # Public Interface
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def refresh(self):
-        """Public method to refresh the parties list"""
-        logger.info("Manual refresh triggered")
-        self._load_parties(reset_page=True)

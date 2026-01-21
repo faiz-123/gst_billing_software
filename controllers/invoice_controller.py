@@ -20,6 +20,10 @@ from core.db.sqlite_db import db
 from core.logger import get_logger, log_performance, UserActionLogger
 from core.error_handler import ErrorHandler, handle_errors
 from core.exceptions import InvoiceException, InvalidInvoiceTotal
+from theme import (
+    PRIMARY, PRIMARY_LIGHT, SUCCESS, SUCCESS_LIGHT, WARNING, WARNING_LIGHT,
+    DANGER, DANGER_LIGHT, PURPLE, PURPLE_LIGHT
+)
 
 logger = get_logger(__name__)
 
@@ -388,13 +392,13 @@ class InvoiceController:
             Tuple of (text_color, background_color)
         """
         status_colors = {
-            'Unpaid': ("#3B82F6", "#DBEAFE"),
-            'Partially Paid': ("#F59E0B", "#FEF3C7"),
-            'Paid': ("#10B981", "#D1FAE5"),
-            'Overdue': ("#EF4444", "#FEE2E2"),
-            'Cancelled': ("#8B5CF6", "#EDE9FE")
+            'Unpaid': (PRIMARY, PRIMARY_LIGHT),
+            'Partially Paid': (WARNING, WARNING_LIGHT),
+            'Paid': (SUCCESS, SUCCESS_LIGHT),
+            'Overdue': (DANGER, DANGER_LIGHT),
+            'Cancelled': (PURPLE, PURPLE_LIGHT)
         }
-        return status_colors.get(status, ("#3B82F6", "#DBEAFE"))
+        return status_colors.get(status, (PRIMARY, PRIMARY_LIGHT))
 
 
 # Import required for period filtering

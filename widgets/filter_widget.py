@@ -102,8 +102,8 @@ class FilterWidget(QFrame):
         for display_text, value in options.items():
             combo.addItem(display_text, value)
         
-        # Connect signal
-        combo.currentIndexChanged.connect(self.filters_changed.emit)
+        # Connect signal - use lambda to discard index argument
+        combo.currentIndexChanged.connect(lambda _: self.filters_changed.emit())
         
         # Store reference
         self._filters[name] = combo
@@ -133,7 +133,7 @@ class FilterWidget(QFrame):
         date_edit = QDateEdit()
         date_edit.setDate(QDate.currentDate())
         date_edit.setFont(get_normal_font())
-        date_edit.dateChanged.connect(self.filters_changed.emit)
+        date_edit.dateChanged.connect(lambda _: self.filters_changed.emit())
         
         # Store reference
         self._filters[name] = date_edit
