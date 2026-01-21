@@ -15,7 +15,7 @@ from widgets import Sidebar
 from config import config
 from core.db.sqlite_db import db
 
-# Import screens from ui module
+# Import screens from ui module (using original working versions)
 from ui.dashboard.dashboard_screen import DashboardScreen
 from ui.parties.party_list_screen import PartiesScreen
 from ui.products.product_list_screen import ProductsScreen

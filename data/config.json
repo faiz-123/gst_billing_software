@@ -21,7 +21,7 @@
     "ui": {
         "theme": "default",
         "window_maximized": true,
-        "last_screen": "parties"
+        "last_screen": "reports"
     },
     "database": {
         "path": "data/gst_billing.db",

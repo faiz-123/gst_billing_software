@@ -23,7 +23,7 @@ from theme import (
 # Widget imports
 from widgets import (
     StatCard, ListTable, TableFrame, TableActionButton,
-    SearchInputContainer, RefreshButton, ListHeader, StatsContainer
+    SearchInputContainer, RefreshButton, ListHeader, StatsContainer, FilterWidget
 )
 
 # Core imports
@@ -125,65 +125,39 @@ class PartiesScreen(BaseScreen):
         ])
     
     def _create_filters_section(self) -> QWidget:
-        """Create filters section with styled search and pagination"""
-        filters_widget = QFrame()
-        filters_widget.setStyleSheet(f"""
-            QFrame {{
-                background: {WHITE};
-                border: 1px solid {BORDER};
-                border-radius: 8px;
-            }}
-        """)
+        """Create filters section using FilterWidget for consistency"""
+        self._filter_widget = FilterWidget()
         
-        filters_layout = QHBoxLayout(filters_widget)
-        filters_layout.setContentsMargins(16, 12, 16, 12)
-        filters_layout.setSpacing(12)
-        
-        # Search container using common widget
-        self._search_container = SearchInputContainer("Search by name, GSTIN, mobile...")
-        self._search_container.textChanged.connect(self._force_upper_search)
-        self._search_container.textChanged.connect(self._on_search_changed)
-        filters_layout.addWidget(self._search_container)
+        # Search filter - with uppercase conversion
+        search_input = self._filter_widget.add_search_filter("Search by name, GSTIN, mobile...")
+        search_input.textChanged.connect(self._force_upper_search)
+        self._filter_widget.search_changed.connect(self._on_search_changed)
         
         # Party type filter
-        type_label = QLabel("Type:")
-        type_label.setFont(get_normal_font())
-        type_label.setStyleSheet(f"color: {TEXT_SECONDARY}; border: none;")
-        filters_layout.addWidget(type_label)
-        
-        self.type_combo = QComboBox()
-        self.type_combo.setFont(get_normal_font())
-        self.type_combo.setStyleSheet(get_filter_combo_style())
-        self.type_combo.addItem("All Types", "all")
-        self.type_combo.addItem("Customer", PartyType.CUSTOMER.value)
-        self.type_combo.addItem("Supplier", PartyType.SUPPLIER.value)
-        self.type_combo.addItem("Both", PartyType.BOTH.value)
-        self.type_combo.currentIndexChanged.connect(self._on_filter_changed)
-        filters_layout.addWidget(self.type_combo)
+        type_options = {
+            "All Types": "all",
+            "Customer": PartyType.CUSTOMER.value,
+            "Supplier": PartyType.SUPPLIER.value,
+            "Both": PartyType.BOTH.value
+        }
+        self.type_combo = self._filter_widget.add_combo_filter("type", "Type:", type_options)
         
         # Balance type filter
-        balance_label = QLabel("Balance:")
-        balance_label.setFont(get_normal_font())
-        balance_label.setStyleSheet(f"color: {TEXT_SECONDARY}; border: none;")
-        filters_layout.addWidget(balance_label)
+        balance_options = {
+            "All": "all",
+            "Receivable (Dr)": "dr",
+            "Payable (Cr)": "cr"
+        }
+        self.balance_combo = self._filter_widget.add_combo_filter("balance", "Balance:", balance_options)
         
-        self.balance_combo = QComboBox()
-        self.balance_combo.setFont(get_normal_font())
-        self.balance_combo.setStyleSheet(get_filter_combo_style())
-        self.balance_combo.addItem("All", "all")
-        self.balance_combo.addItem("Receivable (Dr)", "dr")
-        self.balance_combo.addItem("Payable (Cr)", "cr")
-        self.balance_combo.currentIndexChanged.connect(self._on_filter_changed)
-        filters_layout.addWidget(self.balance_combo)
+        # Stretch and refresh button
+        self._filter_widget.add_stretch()
+        self._filter_widget.add_refresh_button(lambda: self._load_parties(reset_page=True))
         
-        filters_layout.addStretch()
+        # Connect filter changes
+        self._filter_widget.filters_changed.connect(self._on_filter_changed)
         
-        # Refresh button using common widget
-        refresh_btn = RefreshButton()
-        refresh_btn.clicked.connect(lambda: self._load_parties(reset_page=True))
-        filters_layout.addWidget(refresh_btn)
-        
-        return filters_widget
+        return self._filter_widget
     
     def _create_table_section(self) -> QWidget:
         """Create the parties table with pagination controls"""
@@ -248,7 +222,7 @@ class PartiesScreen(BaseScreen):
                 self.pagination_widget.reset_to_page_one()
             
             # Get filter values with validation
-            search_text = self._get_safe_filter_value(self._search_container.text() if hasattr(self, '_search_container') else "")
+            search_text = self._get_safe_filter_value(self._filter_widget.get_search_text() if hasattr(self, '_filter_widget') else "")
             party_type = self.type_combo.currentData() if hasattr(self, 'type_combo') else "all"
             balance_type = self.balance_combo.currentData() if hasattr(self, 'balance_combo') else "all"
             
@@ -498,13 +472,15 @@ class PartiesScreen(BaseScreen):
     def _force_upper_search(self, text: str):
         """Force search input to uppercase"""
         try:
-            search_input = self._search_container._input
-            cursor_pos = search_input.cursorPosition()
-            search_input.blockSignals(True)
-            search_input.setText(text.upper())
-            search_input.setCursorPosition(cursor_pos)
-            search_input.blockSignals(False)
-            logger.debug(f"Search text converted to uppercase: {text.upper()}")
+            # Get the actual input field from the search container returned by FilterWidget
+            search_input = self._filter_widget.get_filter("search")
+            if hasattr(search_input, '_input'):  # SearchInputContainer has _input attribute
+                cursor_pos = search_input._input.cursorPosition()
+                search_input._input.blockSignals(True)
+                search_input._input.setText(text.upper())
+                search_input._input.setCursorPosition(cursor_pos)
+                search_input._input.blockSignals(False)
+                logger.debug(f"Search text converted to uppercase: {text.upper()}")
         except Exception as e:
             logger.warning(f"Error forcing uppercase in search: {e}")
     
@@ -524,7 +500,7 @@ class PartiesScreen(BaseScreen):
     def _on_search_debounce(self):
         """Execute search after debounce delay"""
         try:
-            search_text = self._search_container.text() if hasattr(self, '_search_container') else ""
+            search_text = self._filter_widget.get_search_text() if hasattr(self, '_filter_widget') else ""
             logger.info(f"Search debounce triggered for: '{search_text}'")
             self._load_parties(reset_page=True)
         except Exception as e:

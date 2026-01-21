@@ -18,25 +18,27 @@ from PySide6.QtGui import QColor
 from theme import (
     PRIMARY, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     SUCCESS, DANGER, WHITE, BACKGROUND,
-    get_title_font, get_normal_font, get_bold_font,
-    get_filter_combo_style, get_filter_frame_style,
-    get_search_container_style, get_search_input_style, get_icon_button_style,
-    get_filter_label_style, FONT_SIZE_SMALL
+    get_normal_font, get_bold_font,
+    FONT_SIZE_SMALL
 )
 
 # Widget imports
-from widgets import CustomButton, StatCard, ListTable, TableFrame, TableActionButton
+from widgets import StatCard, ListTable, TableFrame, TableActionButton, ListHeader, StatsContainer, FilterWidget
+from ui.base import PaginationWidget
 
 # Controller import (NOT service or db directly)
 from controllers.invoice_controller import invoice_controller
 
 # Core imports for formatting only
 from core.core_utils import format_currency
+from core.logger import get_logger
 
 # UI imports
 from ui.base import BaseScreen
 from ui.error_handler import UIErrorHandler
 from ui.invoices.sales.sales_invoice_form_dialog import InvoiceDialog
+
+logger = get_logger(__name__)
 
 
 class InvoicesScreen(BaseScreen):
@@ -54,11 +56,17 @@ class InvoicesScreen(BaseScreen):
     # Signal emitted when invoice data changes
     invoice_updated = Signal()
     
+    # Pagination constant
+    ITEMS_PER_PAGE = 49
+    
     def __init__(self, parent=None):
         super().__init__(title="Sales Invoices", parent=parent)
         self.setObjectName("InvoicesScreen")
         self._controller = invoice_controller
         self._all_invoices = []
+        self._filtered_invoices = []
+        self._is_loading = False
+        self.pagination_widget = None
         self._setup_ui()
         self._load_data()
     
@@ -81,191 +89,81 @@ class InvoicesScreen(BaseScreen):
         self.main_layout.addWidget(self._create_stats_section())
         self.main_layout.addWidget(self._create_filters_section())
         self.main_layout.addWidget(self._create_table_section(), 1)
+        self.main_layout.addWidget(self._create_pagination_controls())
     
     def _create_header(self) -> QWidget:
-        """Create header with title and add button."""
-        header = QWidget()
-        layout = QHBoxLayout(header)
-        layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Title
-        title = QLabel("Sales Invoices")
-        title.setFont(get_title_font())
-        title.setStyleSheet(f"color: {TEXT_PRIMARY};")
-        layout.addWidget(title)
-        
-        layout.addStretch()
-        
-        # Export button
-        export_btn = CustomButton("📤 Export", "secondary")
-        export_btn.setFixedWidth(120)
-        export_btn.setCursor(Qt.PointingHandCursor)
-        export_btn.clicked.connect(self._on_export_clicked)
-        layout.addWidget(export_btn)
-        
-        # Add button
-        add_btn = CustomButton("+ New Invoice", "primary")
-        add_btn.setFixedWidth(160)
-        add_btn.setCursor(Qt.PointingHandCursor)
-        add_btn.clicked.connect(self._on_add_clicked)
-        layout.addWidget(add_btn)
-        
+        """Create header with title and add button using ListHeader."""
+        header = ListHeader("Sales Invoices", "+ New Invoice")
+        header.add_clicked.connect(self._on_add_clicked)
+        header.export_clicked.connect(self._on_export_clicked)
         return header
     
     def _create_stats_section(self) -> QWidget:
-        """Create statistics cards section."""
-        container = QFrame()
-        container.setStyleSheet("background: transparent; border: none;")
-        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-        
+        """Create statistics cards section using StatsContainer."""
         # Create stat cards
         self._total_card = StatCard("📋", "Total Invoices", "0", PRIMARY)
         self._amount_card = StatCard("💰", "Total Revenue", "₹0", SUCCESS)
         self._overdue_card = StatCard("⏰", "Overdue", "0", DANGER)
         self._paid_card = StatCard("✅", "Paid", "0", "#10B981")
         
-        layout.addWidget(self._total_card)
-        layout.addWidget(self._amount_card)
-        layout.addWidget(self._overdue_card)
-        layout.addWidget(self._paid_card)
-        
-        return container
+        return StatsContainer([
+            self._total_card,
+            self._amount_card,
+            self._overdue_card,
+            self._paid_card
+        ])
     
     def _create_filters_section(self) -> QWidget:
-        """Create filters section with search and dropdowns."""
-        container = QFrame()
-        container.setStyleSheet(get_filter_frame_style())
+        """Create filters section using FilterWidget for consistency."""
+        self._filter_widget = FilterWidget()
         
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(12)
-        
-        # Search container
-        search_container = self._create_search_input()
-        layout.addWidget(search_container)
+        # Search filter
+        search_input = self._filter_widget.add_search_filter("Search invoices...")
+        self._filter_widget.search_changed.connect(self._on_search_changed)
         
         # Status filter
-        status_label = QLabel("Status:")
-        status_label.setStyleSheet(get_filter_label_style())
-        layout.addWidget(status_label)
-        
-        self._status_combo = QComboBox()
-        self._status_combo.setStyleSheet(get_filter_combo_style())
-        self._status_combo.addItem("All", "All")
-        self._status_combo.addItem("Unpaid", "Unpaid")
-        self._status_combo.addItem("Partially Paid", "Partially Paid")
-        self._status_combo.addItem("Paid", "Paid")
-        self._status_combo.addItem("Overdue", "Overdue")
-        self._status_combo.addItem("Cancelled", "Cancelled")
-        self._status_combo.currentIndexChanged.connect(self._on_filter_changed)
-        layout.addWidget(self._status_combo)
+        status_options = {
+            "All": "All",
+            "Unpaid": "Unpaid",
+            "Partially Paid": "Partially Paid",
+            "Paid": "Paid",
+            "Overdue": "Overdue",
+            "Cancelled": "Cancelled"
+        }
+        self._status_combo = self._filter_widget.add_combo_filter("status", "Status:", status_options)
         
         # Period filter
-        period_label = QLabel("Period:")
-        period_label.setStyleSheet(get_filter_label_style())
-        layout.addWidget(period_label)
-        
-        self._period_combo = QComboBox()
-        self._period_combo.setStyleSheet(get_filter_combo_style())
-        self._period_combo.addItem("All Time", "All Time")
-        self._period_combo.addItem("Today", "Today")
-        self._period_combo.addItem("This Week", "This Week")
-        self._period_combo.addItem("This Month", "This Month")
-        self._period_combo.addItem("This Year", "This Year")
-        self._period_combo.currentIndexChanged.connect(self._on_filter_changed)
-        layout.addWidget(self._period_combo)
+        period_options = {
+            "All Time": "All Time",
+            "Today": "Today",
+            "This Week": "This Week",
+            "This Month": "This Month",
+            "This Year": "This Year"
+        }
+        self._period_combo = self._filter_widget.add_combo_filter("period", "Period:", period_options)
         
         # Amount filter
-        amount_label = QLabel("Amount:")
-        amount_label.setStyleSheet(get_filter_label_style())
-        layout.addWidget(amount_label)
-        
-        self._amount_combo = QComboBox()
-        self._amount_combo.setStyleSheet(get_filter_combo_style())
-        self._amount_combo.addItem("All Amounts", "All Amounts")
-        self._amount_combo.addItem("Under ₹10K", "Under ₹10K")
-        self._amount_combo.addItem("₹10K - ₹50K", "₹10K - ₹50K")
-        self._amount_combo.addItem("₹50K - ₹1L", "₹50K - ₹1L")
-        self._amount_combo.addItem("Above ₹1L", "Above ₹1L")
-        self._amount_combo.currentIndexChanged.connect(self._on_filter_changed)
-        layout.addWidget(self._amount_combo)
+        amount_options = {
+            "All Amounts": "All Amounts",
+            "Under ₹10K": "Under ₹10K",
+            "₹10K - ₹50K": "₹10K - ₹50K",
+            "₹50K - ₹1L": "₹50K - ₹1L",
+            "Above ₹1L": "Above ₹1L"
+        }
+        self._amount_combo = self._filter_widget.add_combo_filter("amount", "Amount:", amount_options)
         
         # Party filter
-        party_label = QLabel("Party:")
-        party_label.setStyleSheet(get_filter_label_style())
-        layout.addWidget(party_label)
+        party_options = {"All Parties": "All Parties"}
+        self._party_combo = self._filter_widget.add_combo_filter("party", "Party:", party_options)
         
-        self._party_combo = QComboBox()
-        self._party_combo.setStyleSheet(get_filter_combo_style())
-        self._party_combo.setMinimumWidth(120)
-        self._party_combo.addItem("All Parties", "All Parties")
-        self._party_combo.currentIndexChanged.connect(self._on_filter_changed)
-        layout.addWidget(self._party_combo)
+        # Stretch and refresh button
+        self._filter_widget.add_stretch()
+        self._filter_widget.add_refresh_button(lambda: self._load_data())
         
-        layout.addStretch()
+        # Connect filter changes
+        self._filter_widget.filters_changed.connect(self._on_filter_changed)
         
-        # Clear filters button
-        clear_btn = QPushButton("Clear")
-        clear_btn.setFixedHeight(32)
-        clear_btn.setToolTip("Clear All Filters")
-        clear_btn.setCursor(Qt.PointingHandCursor)
-        clear_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {TEXT_SECONDARY};
-                border: none;
-                font-size: 13px;
-                padding: 0 8px;
-            }}
-            QPushButton:hover {{
-                color: {DANGER};
-            }}
-        """)
-        clear_btn.clicked.connect(self._on_clear_filters)
-        layout.addWidget(clear_btn)
-        
-        # Refresh button
-        refresh_btn = QPushButton("🔄")
-        refresh_btn.setFixedSize(32, 32)
-        refresh_btn.setToolTip("Refresh Data")
-        refresh_btn.setCursor(Qt.PointingHandCursor)
-        refresh_btn.setStyleSheet(get_icon_button_style())
-        refresh_btn.clicked.connect(self._on_refresh_clicked)
-        layout.addWidget(refresh_btn)
-        
-        return container
-    
-    def _create_search_input(self) -> QFrame:
-        """Create styled search input container."""
-        container = QFrame()
-        container.setObjectName("searchContainer")
-        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        container.setMinimumWidth(200)
-        container.setMaximumWidth(350)
-        container.setFixedHeight(40)
-        container.setStyleSheet(get_search_container_style())
-        
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(12, 0, 10, 0)
-        layout.setSpacing(8)
-        
-        # Search icon
-        icon = QLabel("🔍")
-        icon.setStyleSheet("border: none; font-size: 14px;")
-        layout.addWidget(icon)
-        
-        # Search input
-        self._search_input = QLineEdit()
-        self._search_input.setPlaceholderText("Search invoices...")
-        self._search_input.setStyleSheet(get_search_input_style())
-        self._search_input.textChanged.connect(self._on_search_changed)
-        layout.addWidget(self._search_input)
-        
-        return container
+        return self._filter_widget
     
     def _create_table_section(self) -> QWidget:
         """Create the invoices table."""
@@ -293,24 +191,91 @@ class InvoicesScreen(BaseScreen):
         frame.set_table(self._table)
         return frame
 
+    def _create_pagination_controls(self) -> QWidget:
+        """Create pagination controls using PaginationWidget."""
+        self.pagination_widget = PaginationWidget(
+            items_per_page=self.ITEMS_PER_PAGE,
+            entity_name="invoice",
+            parent=self
+        )
+        self.pagination_widget.page_changed.connect(self._on_pagination_page_changed)
+        return self.pagination_widget
+
     # ─────────────────────────────────────────────────────────────────────────
     # Data Methods
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _load_data(self):
-        """Load invoices from controller and update UI."""
+    def _load_data(self, reset_page: bool = False):
+        """Load invoices from controller and update UI with proper loading state.
+        
+        Args:
+            reset_page: Reset to first page when called after filter change
+        """
+        # 1. Check if already loading (prevent concurrent calls)
+        if self._is_loading:
+            logger.debug("Load already in progress, skipping")
+            return
+        
         try:
-            # Fetch all invoices
+            self._is_loading = True
+            logger.debug("Loading invoices from database")
+            
+            # 2. Fetch all data from service → self._all_invoices
             self._all_invoices = self._controller.get_all_invoices()
+            logger.info(f"🔄 Fetched {len(self._all_invoices)} TOTAL invoices from database")
+            
+            if len(self._all_invoices) == 0:
+                logger.warning("⚠️  No invoices returned from database!")
+            
+            # 3. Apply filters → self._filtered_invoices
+            search_text = self._get_search_text()
+            status_filter = self._get_status_filter()
+            period_filter = self._get_period_filter()
+            amount_filter = self._get_amount_filter()
+            party_filter = self._get_party_filter()
+            
+            self._filtered_invoices = self._controller.filter_invoices(
+                invoices=self._all_invoices,
+                search_text=search_text,
+                status_filter=status_filter,
+                period_filter=period_filter,
+                amount_filter=amount_filter,
+                party_filter=party_filter
+            )
+            logger.debug(f"🔍 After filtering: {len(self._filtered_invoices)} invoices (from {len(self._all_invoices)} total)")
             
             # Update party filter with available parties
             self._update_party_filter()
             
-            # Apply current filters
-            self._apply_filters()
+            # 4. Update pagination state (reset page if needed, otherwise preserve)
+            if reset_page and self.pagination_widget:
+                self.pagination_widget.reset_to_page_one()
             
+            total_pages = (len(self._filtered_invoices) + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
+            current_page = self.pagination_widget.get_current_page() if self.pagination_widget else 1
+            
+            if self.pagination_widget:
+                self.pagination_widget.set_pagination_state(current_page, total_pages, len(self._filtered_invoices))
+                logger.debug(f"📄 Pagination: Page {current_page}/{total_pages}, Total items: {len(self._filtered_invoices)}")
+            
+            # 5. Update stats (with ALL data, not filtered)
+            logger.info(f"📊 STATS: Showing stats for {len(self._all_invoices)} TOTAL invoices")
+            self._update_stats_display(self._all_invoices)
+            
+            # 6. Get current page data and 7. Populate table with page data
+            page_data = self._get_current_page_data()
+            logger.debug(f"📄 Populating table with {len(page_data)} invoices on page {current_page}")
+            self._populate_table(page_data)
+            
+            logger.info(f"Invoice list loaded successfully. Total: {len(self._all_invoices)}, Filtered: {len(self._filtered_invoices)}")
+            
+        # 8. Handle errors gracefully
         except Exception as e:
-            self._show_error("Load Error", f"Failed to load invoices: {str(e)}")
+            logger.error(f"Error loading invoices: {str(e)}", exc_info=True)
+            UIErrorHandler.show_error("Error", f"Failed to load invoices: {str(e)}")
+        # 9. Finally block: set _is_loading = False
+        finally:
+            self._is_loading = False
     
     def _update_party_filter(self):
         """Update party dropdown with available parties."""
@@ -331,32 +296,10 @@ class InvoicesScreen(BaseScreen):
         
         self._party_combo.blockSignals(False)
     
-    def _apply_filters(self):
-        """Apply all current filters and update display."""
-        search_text = self._get_search_text()
-        status_filter = self._get_status_filter()
-        period_filter = self._get_period_filter()
-        amount_filter = self._get_amount_filter()
-        party_filter = self._get_party_filter()
-        
-        # Filter invoices via controller
-        filtered_invoices = self._controller.filter_invoices(
-            invoices=self._all_invoices,
-            search_text=search_text,
-            status_filter=status_filter,
-            period_filter=period_filter,
-            amount_filter=amount_filter,
-            party_filter=party_filter
-        )
-        
-        # Update stats and table
-        self._update_stats_display(filtered_invoices)
-        self._populate_table(filtered_invoices)
-    
     def _get_search_text(self) -> str:
         """Get current search text safely."""
-        if hasattr(self, '_search_input'):
-            return self._search_input.text().strip()
+        if hasattr(self, '_filter_widget'):
+            return self._filter_widget.get_search_text().strip()
         return ""
     
     def _get_status_filter(self) -> str:
@@ -391,21 +334,41 @@ class InvoicesScreen(BaseScreen):
         self._overdue_card.set_value(str(stats.overdue_count))
         self._paid_card.set_value(str(stats.paid_count))
     
+    def _get_current_page_data(self) -> list:
+        """Get invoices for the current page based on pagination state."""
+        if not self.pagination_widget:
+            return self._filtered_invoices
+        
+        current_page = self.pagination_widget.get_current_page()
+        start_idx = (current_page - 1) * self.ITEMS_PER_PAGE
+        end_idx = start_idx + self.ITEMS_PER_PAGE
+        return self._filtered_invoices[start_idx:end_idx]
+    
     def _populate_table(self, invoices: list):
         """Populate table with invoice data."""
         self._table.setRowCount(0)
         
-        for idx, invoice in enumerate(invoices):
-            self._add_table_row(idx, invoice)
+        # Get current page for row numbering offset
+        current_page = self.pagination_widget.get_current_page() if self.pagination_widget else 1
+        
+        for page_idx, invoice in enumerate(invoices):
+            # Calculate absolute row number accounting for pagination
+            absolute_row_num = (current_page - 1) * self.ITEMS_PER_PAGE + page_idx + 1
+            self._add_table_row(absolute_row_num, invoice)
     
-    def _add_table_row(self, idx: int, invoice: dict):
-        """Add a single row to the table."""
+    def _add_table_row(self, absolute_row_num: int, invoice: dict):
+        """Add a single row to the table.
+        
+        Args:
+            absolute_row_num: The absolute row number (accounting for pagination)
+            invoice: The invoice data dictionary
+        """
         row = self._table.rowCount()
         self._table.insertRow(row)
         self._table.setRowHeight(row, 50)
         
-        # Column 0: Row number
-        num_item = QTableWidgetItem(str(idx + 1))
+        # Column 0: Row number (absolute, accounting for pagination)
+        num_item = QTableWidgetItem(str(absolute_row_num))
         num_item.setTextAlignment(Qt.AlignCenter)
         num_item.setForeground(QColor(TEXT_SECONDARY))
         self._table.setItem(row, 0, num_item)
@@ -511,20 +474,31 @@ class InvoicesScreen(BaseScreen):
     
     def _on_search_changed(self, text: str):
         """Handle search text change."""
-        self._apply_filters()
+        self._load_data(reset_page=True)
     
     def _on_filter_changed(self, index: int):
         """Handle filter combo change."""
-        self._apply_filters()
+        self._load_data(reset_page=True)
+    
+    def _on_pagination_page_changed(self, page: int):
+        """Handle page change from pagination widget.
+        
+        Args:
+            page: The new page number
+        """
+        try:
+            logger.info(f"Pagination page changed to {page}")
+            page_data = self._get_current_page_data()
+            self._populate_table(page_data)
+        except Exception as e:
+            logger.error(f"Error handling pagination page change: {str(e)}", exc_info=True)
     
     def _on_clear_filters(self):
         """Handle clear filters button click."""
-        self._status_combo.setCurrentIndex(0)
-        self._period_combo.setCurrentIndex(0)
-        self._amount_combo.setCurrentIndex(0)
-        self._party_combo.setCurrentIndex(0)
-        self._search_input.clear()
-        self._apply_filters()
+        if hasattr(self, '_filter_widget'):
+            self._filter_widget.reset_filters()
+            self._filter_widget.clear_search()
+        self._load_data()
     
     def _on_refresh_clicked(self):
         """Handle refresh button click."""

@@ -12,8 +12,7 @@ Features:
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QComboBox, QDateEdit, QWidget
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QDate
+from PySide6.QtCore import Qt, Signal, QDate
 
 from theme import (
     WHITE, BORDER, TEXT_SECONDARY,

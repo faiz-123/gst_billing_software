@@ -3,6 +3,14 @@ Receipts List Screen - Customer Receipts (Money IN)
 UI layer - handles layout, signals/slots, and user interactions only.
 
 Architecture: UI → Controller → Service → DB
+
+✅ Uses ListHeader
+✅ Uses StatsContainer
+✅ Uses FilterWidget
+✅ Uses PaginationWidget
+✅ Proper _load_receipts(reset_page=False) pattern
+✅ _is_loading guard
+✅ Stats from ALL data, not filtered
 """
 
 from PySide6.QtWidgets import (
@@ -19,25 +27,26 @@ from theme import (
     PRIMARY, BORDER, TEXT_PRIMARY, TEXT_SECONDARY,
     SUCCESS, DANGER, WARNING,
     FONT_SIZE_SMALL,
-    get_title_font, get_normal_font, get_bold_font,
-    get_filter_combo_style, get_filter_frame_style,
-    get_search_container_style, get_search_input_style, get_icon_button_style,
-    get_filter_label_style, get_clear_button_style
+    get_normal_font, get_bold_font
 )
 
 # Widget imports
-from widgets import CustomButton, StatCard, ListTable, TableFrame, TableActionButton
+from widgets import StatCard, ListTable, TableFrame, TableActionButton, ListHeader, StatsContainer, FilterWidget
+from ui.base import PaginationWidget
 
 # Controller import (NOT service directly)
 from controllers.receipt_controller import receipt_controller, ReceiptFilters
 
 # Core imports for formatting only
 from core.core_utils import format_currency
+from core.logger import get_logger
 
 # UI imports
 from ui.base import BaseScreen
 from ui.receipts.receipt_form_dialog import ReceiptDialog
 from ui.error_handler import UIErrorHandler
+
+logger = get_logger(__name__)
 
 
 class ReceiptsScreen(BaseScreen):
@@ -55,10 +64,17 @@ class ReceiptsScreen(BaseScreen):
     # Signal emitted when receipt data changes
     receipt_updated = Signal()
     
+    # Pagination constant
+    ITEMS_PER_PAGE = 49
+    
     def __init__(self, parent=None):
         super().__init__(title="Receipts (Money In)", parent=parent)
         self.setObjectName("ReceiptsScreen")
         self._controller = receipt_controller
+        self._all_receipts = []
+        self._filtered_receipts = []
+        self._is_loading = False
+        self.pagination_widget = None
         self._setup_ui()
         self._load_data()
     
@@ -67,9 +83,9 @@ class ReceiptsScreen(BaseScreen):
         super().showEvent(event)
         self._load_data()
     
-    # -------------------------------------------------------------------------
+    # ─────────────────────────────────────────────────────────────────────────
     # UI Setup Methods
-    # -------------------------------------------------------------------------
+    # ─────────────────────────────────────────────────────────────────────────
     
     def _setup_ui(self):
         """Set up the main UI layout."""
@@ -86,160 +102,83 @@ class ReceiptsScreen(BaseScreen):
         self.main_layout.addWidget(self._create_stats_section())
         self.main_layout.addWidget(self._create_filters_section())
         self.main_layout.addWidget(self._create_table_section(), 1)
+        self.main_layout.addWidget(self._create_pagination_controls())
     
     def _create_header(self) -> QWidget:
-        """Create header with title and add button."""
-        header = QWidget()
-        layout = QHBoxLayout(header)
-        layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Title
-        title = QLabel("💰 Receipts (Money In)")
-        title.setFont(get_title_font())
-        title.setStyleSheet(f"color: {TEXT_PRIMARY};")
-        layout.addWidget(title)
-        
-        layout.addStretch()
-        
-        # Export button
-        export_btn = CustomButton("📤 Export", "secondary")
-        export_btn.setFixedWidth(120)
-        export_btn.setCursor(Qt.PointingHandCursor)
-        export_btn.clicked.connect(self._on_export_clicked)
-        layout.addWidget(export_btn)
-        
-        # Add button
-        add_btn = CustomButton("+ Add Receipt", "primary")
-        add_btn.setFixedWidth(160)
-        add_btn.setCursor(Qt.PointingHandCursor)
-        add_btn.clicked.connect(self._on_add_clicked)
-        layout.addWidget(add_btn)
-        
+        """Create header with title and add button using ListHeader."""
+        header = ListHeader("💰 Receipts (Money In)", "+ Add Receipt")
+        header.add_clicked.connect(self._on_add_clicked)
+        header.export_clicked.connect(self._on_export_clicked)
         return header
     
     def _create_stats_section(self) -> QWidget:
-        """Create statistics cards section."""
-        container = QFrame()
-        container.setStyleSheet("background: transparent; border: none;")
-        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-        
+        """Create statistics cards section using StatsContainer."""
         # Create stat cards - for customer receipts (money IN)
         self._total_received_card = StatCard("💰", "Total Received", "₹0", SUCCESS)
         self._total_count_card = StatCard("📋", "Total Receipts", "0", PRIMARY)
         self._month_total_card = StatCard("📅", "This Month", "₹0", WARNING)
         self._customers_card = StatCard("👥", "Customers Paid", "0", SUCCESS)
         
-        layout.addWidget(self._total_received_card)
-        layout.addWidget(self._total_count_card)
-        layout.addWidget(self._month_total_card)
-        layout.addWidget(self._customers_card)
-        
-        return container
+        return StatsContainer([
+            self._total_received_card,
+            self._total_count_card,
+            self._month_total_card,
+            self._customers_card
+        ])
     
     def _create_filters_section(self) -> QWidget:
-        """Create filters section with search and filters."""
-        container = QFrame()
-        container.setStyleSheet(get_filter_frame_style())
+        """Create filters section using FilterWidget for consistency."""
+        self._filter_widget = FilterWidget()
         
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(12)
-        
-        # Search container
-        search_container = self._create_search_input()
-        layout.addWidget(search_container)
+        # Search filter
+        self._filter_widget.add_search_filter("Search customer receipts...")
+        self._filter_widget.search_changed.connect(self._on_search_changed)
         
         # Method filter
-        method_label = QLabel("Method:")
-        method_label.setStyleSheet(get_filter_label_style())
-        layout.addWidget(method_label)
-        
-        self._method_combo = QComboBox()
-        self._method_combo.setStyleSheet(get_filter_combo_style())
-        self._method_combo.addItems([
-            "All Methods", "Cash", "Bank Transfer", "UPI", 
-            "Cheque", "Credit Card", "Debit Card", "Net Banking", "Other"
-        ])
-        self._method_combo.currentIndexChanged.connect(self._on_filter_changed)
-        layout.addWidget(self._method_combo)
+        method_options = {
+            "All Methods": "All Methods",
+            "Cash": "Cash",
+            "Bank Transfer": "Bank Transfer",
+            "UPI": "UPI",
+            "Cheque": "Cheque",
+            "Credit Card": "Credit Card",
+            "Debit Card": "Debit Card",
+            "Net Banking": "Net Banking",
+            "Other": "Other"
+        }
+        self._method_combo = self._filter_widget.add_combo_filter("method", "Method:", method_options)
         
         # Period filter
-        period_label = QLabel("Period:")
-        period_label.setStyleSheet(get_filter_label_style())
-        layout.addWidget(period_label)
-        
-        self._period_combo = QComboBox()
-        self._period_combo.setStyleSheet(get_filter_combo_style())
-        self._period_combo.addItems([
-            "All Time", "Today", "This Week", "This Month", "This Year"
-        ])
-        self._period_combo.currentIndexChanged.connect(self._on_filter_changed)
-        layout.addWidget(self._period_combo)
+        period_options = {
+            "All Time": "All Time",
+            "Today": "Today",
+            "This Week": "This Week",
+            "This Month": "This Month",
+            "This Year": "This Year"
+        }
+        self._period_combo = self._filter_widget.add_combo_filter("period", "Period:", period_options)
         
         # Status filter
-        status_label = QLabel("Status:")
-        status_label.setStyleSheet(get_filter_label_style())
-        layout.addWidget(status_label)
+        status_options = {
+            "All Status": "All Status",
+            "Completed": "Completed",
+            "Pending": "Pending",
+            "Failed": "Failed"
+        }
+        self._status_combo = self._filter_widget.add_combo_filter("status", "Status:", status_options)
         
-        self._status_combo = QComboBox()
-        self._status_combo.setStyleSheet(get_filter_combo_style())
-        self._status_combo.addItems(["All Status", "Completed", "Pending", "Failed"])
-        self._status_combo.currentIndexChanged.connect(self._on_filter_changed)
-        layout.addWidget(self._status_combo)
+        # Customer/Party filter
+        party_options = {"All Customers": "All Customers"}
+        self._party_combo = self._filter_widget.add_combo_filter("party", "Customer:", party_options)
         
-        layout.addStretch()
+        # Stretch and refresh button
+        self._filter_widget.add_stretch()
+        self._filter_widget.add_refresh_button(lambda: self._load_data())
         
-        # Refresh button
-        refresh_btn = QPushButton("🔄")
-        refresh_btn.setFixedSize(32, 32)
-        refresh_btn.setToolTip("Refresh Data")
-        refresh_btn.setCursor(Qt.PointingHandCursor)
-        refresh_btn.setStyleSheet(get_icon_button_style())
-        refresh_btn.clicked.connect(self._on_refresh_clicked)
-        layout.addWidget(refresh_btn)
+        # Connect filter changes
+        self._filter_widget.filters_changed.connect(self._on_filter_changed)
         
-        # Clear filters button
-        clear_btn = QPushButton("Clear")
-        clear_btn.setFixedHeight(32)
-        clear_btn.setToolTip("Clear All Filters")
-        clear_btn.setCursor(Qt.PointingHandCursor)
-        clear_btn.setStyleSheet(get_clear_button_style())
-        clear_btn.clicked.connect(self._on_clear_filters)
-        layout.addWidget(clear_btn)
-        
-        return container
-    
-    def _create_search_input(self) -> QFrame:
-        """Create styled search input container."""
-        container = QFrame()
-        container.setObjectName("searchContainer")
-        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        container.setMinimumWidth(250)
-        container.setMaximumWidth(400)
-        container.setFixedHeight(40)
-        container.setStyleSheet(get_search_container_style())
-        
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(12, 0, 10, 0)
-        layout.setSpacing(8)
-        
-        # Search icon
-        icon = QLabel("🔍")
-        icon.setStyleSheet("border: none; font-size: 14px;")
-        layout.addWidget(icon)
-        
-        # Search input
-        self._search_input = QLineEdit()
-        self._search_input.setPlaceholderText("Search customer receipts...")
-        self._search_input.setStyleSheet(get_search_input_style())
-        self._search_input.textChanged.connect(self._on_search_changed)
-        layout.addWidget(self._search_input)
-        
-        return container
+        return self._filter_widget
     
     def _create_table_section(self) -> QWidget:
         """Create the receipts table."""
@@ -247,12 +186,13 @@ class ReceiptsScreen(BaseScreen):
         
         # Create table using common widget
         self._table = ListTable(headers=[
-            "Date", "Customer", "Amount", "Method", 
+            "#", "Date", "Customer", "Amount", "Method", 
             "Reference", "Invoice", "Status", "Actions"
         ])
         
         # Column configuration
         self._table.configure_columns([
+            {"width": 50, "resize": "fixed"},     # #
             {"width": 100, "resize": "fixed"},    # Date
             {"resize": "stretch"},                 # Customer
             {"width": 120, "resize": "fixed"},    # Amount
@@ -266,33 +206,150 @@ class ReceiptsScreen(BaseScreen):
         frame.set_table(self._table)
         return frame
     
-    # -------------------------------------------------------------------------
+    def _create_pagination_controls(self) -> QWidget:
+        """Create pagination controls using PaginationWidget."""
+        self.pagination_widget = PaginationWidget(
+            items_per_page=self.ITEMS_PER_PAGE,
+            entity_name="receipt",
+            parent=self
+        )
+        self.pagination_widget.page_changed.connect(self._on_pagination_page_changed)
+        return self.pagination_widget
+    
+    # ─────────────────────────────────────────────────────────────────────────
     # Data Methods
-    # -------------------------------------------------------------------------
+    # ─────────────────────────────────────────────────────────────────────────
 
-    def _load_data(self):
-        """Load receipts from controller and update UI."""
+    def _load_data(self, reset_page: bool = False):
+        """Load receipts from controller and update UI with proper loading state.
+        
+        Args:
+            reset_page: Reset to first page when called after filter change
+        """
+        # 1. Check if already loading (prevent concurrent calls)
+        if self._is_loading:
+            logger.debug("Load already in progress, skipping")
+            return
+        
         try:
-            # Get current filter values
+            self._is_loading = True
+            logger.debug("Loading receipts from database")
+            
+            # 2. Fetch all data from service → self._all_receipts
+            all_receipts, _ = self._controller.get_filtered_receipts()  # Get all without filters
+            self._all_receipts = all_receipts
+            logger.info(f"🔄 Fetched {len(self._all_receipts)} TOTAL receipts from database")
+            
+            if len(self._all_receipts) == 0:
+                logger.warning("⚠️  No receipts returned from database!")
+            
+            # 3. Apply filters → self._filtered_receipts
             filters = self._get_current_filters()
+            self._filtered_receipts = self._controller._apply_filters(self._all_receipts, filters)
             
-            # Fetch filtered data and stats from controller
-            receipts, stats = self._controller.get_filtered_receipts(filters=filters)
+            # Apply party filter (additional filter from UI)
+            party_filter = self._get_party_filter()
+            if party_filter and party_filter != "All Customers":
+                self._filtered_receipts = [
+                    r for r in self._filtered_receipts
+                    if r.get('party_name') == party_filter
+                ]
             
-            # Update UI
+            logger.debug(f"🔍 After filtering: {len(self._filtered_receipts)} receipts (from {len(self._all_receipts)} total)")
+            
+            # Update party/customer filter with available parties
+            self._update_party_filter()
+            
+            # 4. Update pagination state (reset page if needed, otherwise preserve)
+            if reset_page and self.pagination_widget:
+                self.pagination_widget.reset_to_page_one()
+            
+            total_pages = (len(self._filtered_receipts) + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
+            if total_pages == 0:
+                total_pages = 1
+            current_page = self.pagination_widget.get_current_page() if self.pagination_widget else 1
+            
+            if self.pagination_widget:
+                self.pagination_widget.set_pagination_state(current_page, total_pages, len(self._filtered_receipts))
+                logger.debug(f"📄 Pagination: Page {current_page}/{total_pages}, Total items: {len(self._filtered_receipts)}")
+            
+            # 5. Update stats (with ALL data, not filtered)
+            logger.info(f"📊 STATS: Showing stats for {len(self._all_receipts)} TOTAL receipts")
+            stats = self._controller._calculate_stats(self._all_receipts)
             self._update_stats_display(stats)
-            self._populate_table(receipts)
             
+            # 6. Get current page data and 7. Populate table with page data
+            page_data = self._get_current_page_data()
+            logger.debug(f"📄 Populating table with {len(page_data)} receipts on page {current_page}")
+            self._populate_table(page_data)
+            
+            logger.info(f"Receipt list loaded successfully. Total: {len(self._all_receipts)}, Filtered: {len(self._filtered_receipts)}")
+            
+        # 8. Handle errors gracefully
         except Exception as e:
-            self._show_error("Load Error", f"Failed to load receipts: {str(e)}")
+            logger.error(f"Error loading receipts: {str(e)}", exc_info=True)
+            UIErrorHandler.show_error("Error", f"Failed to load receipts: {str(e)}")
+        # 9. Finally block: set _is_loading = False
+        finally:
+            self._is_loading = False
+    
+    def _update_party_filter(self):
+        """Update party/customer dropdown with available parties."""
+        # Extract unique party names from all receipts
+        parties = sorted(set(r.get('party_name', '') for r in self._all_receipts if r.get('party_name')))
+        
+        current_selection = self._party_combo.currentData()
+        self._party_combo.blockSignals(True)
+        self._party_combo.clear()
+        self._party_combo.addItem("All Customers", "All Customers")
+        
+        for party in parties:
+            self._party_combo.addItem(party, party)
+        
+        # Restore selection if still valid
+        index = self._party_combo.findData(current_selection)
+        if index >= 0:
+            self._party_combo.setCurrentIndex(index)
+        
+        self._party_combo.blockSignals(False)
+    
+    def _get_search_text(self) -> str:
+        """Get current search text safely."""
+        if hasattr(self, '_filter_widget'):
+            return self._filter_widget.get_search_text().strip()
+        return ""
+    
+    def _get_method_filter(self) -> str:
+        """Get current method filter value."""
+        if hasattr(self, '_method_combo'):
+            return self._method_combo.currentData() or "All Methods"
+        return "All Methods"
+    
+    def _get_period_filter(self) -> str:
+        """Get current period filter value."""
+        if hasattr(self, '_period_combo'):
+            return self._period_combo.currentData() or "All Time"
+        return "All Time"
+    
+    def _get_status_filter(self) -> str:
+        """Get current status filter value."""
+        if hasattr(self, '_status_combo'):
+            return self._status_combo.currentData() or "All Status"
+        return "All Status"
+    
+    def _get_party_filter(self) -> str:
+        """Get current party filter value."""
+        if hasattr(self, '_party_combo'):
+            return self._party_combo.currentData() or "All Customers"
+        return "All Customers"
     
     def _get_current_filters(self) -> ReceiptFilters:
         """Get current filter values from UI controls."""
         return ReceiptFilters(
-            search_text=self._search_input.text().strip() if hasattr(self, '_search_input') else "",
-            method=self._method_combo.currentText() if hasattr(self, '_method_combo') else "All Methods",
-            period=self._period_combo.currentText() if hasattr(self, '_period_combo') else "All Time",
-            status=self._status_combo.currentText() if hasattr(self, '_status_combo') else "All Status"
+            search_text=self._get_search_text(),
+            method=self._get_method_filter(),
+            period=self._get_period_filter(),
+            status=self._get_status_filter()
         )
     
     def _update_stats_display(self, stats):
@@ -302,56 +359,82 @@ class ReceiptsScreen(BaseScreen):
         self._month_total_card.set_value(f"₹{stats.month_total:,.0f}")
         self._customers_card.set_value(str(stats.customers_count))
     
+    def _get_current_page_data(self) -> list:
+        """Get receipts for the current page based on pagination state."""
+        if not self.pagination_widget:
+            return self._filtered_receipts
+        
+        current_page = self.pagination_widget.get_current_page()
+        start_idx = (current_page - 1) * self.ITEMS_PER_PAGE
+        end_idx = start_idx + self.ITEMS_PER_PAGE
+        return self._filtered_receipts[start_idx:end_idx]
+    
     def _populate_table(self, receipts: list):
         """Populate table with receipt data."""
         self._table.setRowCount(0)
         
-        for idx, receipt in enumerate(receipts):
-            self._add_table_row(idx, receipt)
+        # Get current page for row numbering offset
+        current_page = self.pagination_widget.get_current_page() if self.pagination_widget else 1
+        
+        for page_idx, receipt in enumerate(receipts):
+            # Calculate absolute row number accounting for pagination
+            absolute_row_num = (current_page - 1) * self.ITEMS_PER_PAGE + page_idx + 1
+            self._add_table_row(absolute_row_num, receipt)
     
-    def _add_table_row(self, idx: int, receipt: dict):
-        """Add a single row to the table."""
+    def _add_table_row(self, absolute_row_num: int, receipt: dict):
+        """Add a single row to the table.
+        
+        Args:
+            absolute_row_num: The absolute row number (accounting for pagination)
+            receipt: The receipt data dictionary
+        """
         row = self._table.rowCount()
         self._table.insertRow(row)
         self._table.setRowHeight(row, 50)
         
-        # Column 0: Date
+        # Column 0: Row number (absolute, accounting for pagination)
+        num_item = QTableWidgetItem(str(absolute_row_num))
+        num_item.setTextAlignment(Qt.AlignCenter)
+        num_item.setForeground(QColor(TEXT_SECONDARY))
+        self._table.setItem(row, 0, num_item)
+        
+        # Column 1: Date
         date_item = QTableWidgetItem(str(receipt.get('date', '')))
         date_item.setTextAlignment(Qt.AlignCenter)
         date_item.setData(Qt.UserRole, receipt.get('id'))  # Store ID
-        self._table.setItem(row, 0, date_item)
+        self._table.setItem(row, 1, date_item)
         
-        # Column 1: Customer name
+        # Column 2: Customer name
         customer_item = QTableWidgetItem(str(receipt.get('party_name', 'N/A')))
         customer_item.setFont(get_bold_font(FONT_SIZE_SMALL))
-        self._table.setItem(row, 1, customer_item)
+        self._table.setItem(row, 2, customer_item)
         
-        # Column 2: Amount (green for money IN)
+        # Column 3: Amount (green for money IN)
         amount = float(receipt.get('amount') or 0)
         amount_item = QTableWidgetItem(f"₹{amount:,.2f}")
         amount_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
         amount_item.setFont(get_bold_font(FONT_SIZE_SMALL))
         amount_item.setForeground(QColor(SUCCESS))  # Green for money IN
-        self._table.setItem(row, 2, amount_item)
+        self._table.setItem(row, 3, amount_item)
         
-        # Column 3: Method
+        # Column 4: Method
         method_item = QTableWidgetItem(str(receipt.get('mode', 'Cash')))
         method_item.setTextAlignment(Qt.AlignCenter)
-        self._table.setItem(row, 3, method_item)
+        self._table.setItem(row, 4, method_item)
         
-        # Column 4: Reference
+        # Column 5: Reference
         reference_item = QTableWidgetItem(str(receipt.get('reference', '') or '-'))
         reference_item.setTextAlignment(Qt.AlignCenter)
-        self._table.setItem(row, 4, reference_item)
+        self._table.setItem(row, 5, reference_item)
         
-        # Column 5: Invoice (linked sales invoice)
+        # Column 6: Invoice (linked sales invoice)
         invoice_id = receipt.get('invoice_id')
         invoice_text = f"INV-{invoice_id}" if invoice_id else "-"
         invoice_item = QTableWidgetItem(invoice_text)
         invoice_item.setTextAlignment(Qt.AlignCenter)
-        self._table.setItem(row, 5, invoice_item)
+        self._table.setItem(row, 6, invoice_item)
         
-        # Column 6: Status with color
+        # Column 7: Status with color
         status = receipt.get('status', 'Completed')
         status_item = QTableWidgetItem(status)
         status_item.setTextAlignment(Qt.AlignCenter)
@@ -367,11 +450,11 @@ class ReceiptsScreen(BaseScreen):
             status_item.setForeground(QColor(color))
             status_item.setBackground(QColor(bg_color))
         
-        self._table.setItem(row, 6, status_item)
+        self._table.setItem(row, 7, status_item)
         
-        # Column 7: Action buttons
+        # Column 8: Action buttons
         actions_widget = self._create_action_buttons(receipt)
-        self._table.setCellWidget(row, 7, actions_widget)
+        self._table.setCellWidget(row, 8, actions_widget)
     
     def _create_action_buttons(self, receipt: dict) -> QWidget:
         """Create styled action buttons for table row."""
@@ -415,29 +498,41 @@ class ReceiptsScreen(BaseScreen):
         
         return widget
 
-    # -------------------------------------------------------------------------
+    # ─────────────────────────────────────────────────────────────────────────
     # Event Handlers (Slots)
-    # -------------------------------------------------------------------------
+    # ─────────────────────────────────────────────────────────────────────────
     
     def _on_search_changed(self, text: str):
         """Handle search text change."""
-        self._load_data()
+        self._load_data(reset_page=True)
     
-    def _on_filter_changed(self, index: int):
+    def _on_filter_changed(self, index: int = None):
         """Handle filter combo change."""
-        self._load_data()
+        self._load_data(reset_page=True)
+    
+    def _on_pagination_page_changed(self, page: int):
+        """Handle page change from pagination widget.
+        
+        Args:
+            page: The new page number
+        """
+        try:
+            logger.info(f"Pagination page changed to {page}")
+            page_data = self._get_current_page_data()
+            self._populate_table(page_data)
+        except Exception as e:
+            logger.error(f"Error handling pagination page change: {str(e)}", exc_info=True)
     
     def _on_refresh_clicked(self):
         """Handle refresh button click."""
         self._load_data()
     
     def _on_clear_filters(self):
-        """Clear all filter controls and reload data."""
-        self._search_input.clear()
-        self._method_combo.setCurrentIndex(0)
-        self._period_combo.setCurrentIndex(0)
-        self._status_combo.setCurrentIndex(0)
-        self._load_data()
+        """Handle clear filters button click."""
+        if hasattr(self, '_filter_widget'):
+            self._filter_widget.reset_filters()
+            self._filter_widget.clear_search()
+        self._load_data(reset_page=True)
     
     def _on_add_clicked(self):
         """Handle add receipt button click."""
@@ -508,9 +603,9 @@ class ReceiptsScreen(BaseScreen):
             "This will allow you to export receipt data to CSV or Excel."
         )
     
-    # -------------------------------------------------------------------------
+    # ─────────────────────────────────────────────────────────────────────────
     # Public Interface
-    # -------------------------------------------------------------------------
+    # ─────────────────────────────────────────────────────────────────────────
     
     def refresh(self):
         """Public method to refresh the receipts list."""

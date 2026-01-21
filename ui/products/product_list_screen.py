@@ -210,42 +210,88 @@ class ProductsScreen(BaseScreen):
     # ─────────────────────────────────────────────────────────────────────────
     
     def _load_products(self, reset_page: bool = False):
-        """Load products from controller and update UI."""
+        """
+        Load products with proper state management and pagination.
+        
+        Pattern:
+        1. Check if already loading (prevent concurrent calls)
+        2. Fetch all data from service → self._all_products
+        3. Apply filters → self._filtered_products
+        4. Update pagination state
+        5. Update stats (with ALL data, not filtered)
+        6. Get current page data
+        7. Populate table with page data
+        8. Handle errors gracefully
+        9. Finally block: set _is_loading = False
+        """
+        # Step 1: Check if already loading
         if self._is_loading:
+            logger.debug("Load already in progress, skipping concurrent request")
             return
         
         try:
             self._is_loading = True
+            logger.info("Starting product data load")
             
-            # Fetch all products
+            # Step 2: Fetch all products from service
             self._all_products = self._controller.get_all_products()
-            logger.debug(f"Loaded {len(self._all_products)} products")
+            logger.debug(f"Fetched {len(self._all_products)} products from service")
             
-            # Update category filter
-            self._update_category_filter()
-            
-            # Reset pagination if requested
-            if reset_page and self.pagination_widget:
-                self.pagination_widget.reset_to_page_one()
-            
-            # Apply filters
+            # Step 3: Apply filters
             self._apply_filters()
             
+            # Step 4: Update category filter options
+            self._update_category_filter()
+            
+            # Step 5: Reset pagination if requested
+            if reset_page and self.pagination_widget:
+                self.pagination_widget.reset_to_page_one()
+                logger.debug("Pagination reset to page 1")
+            
+            # Step 6: Update stats using ALL data (unfiltered)
+            self._update_stats()
+            
+            # Step 7: Populate table with filtered/paginated data
+            self._populate_table()
+            
+            logger.info(f"Product load complete: {len(self._all_products)} total, "
+                       f"{len(self._filtered_products)} filtered")
+            
         except Exception as e:
-            logger.error(f"Failed to load products: {str(e)}")
-            UIErrorHandler.show_error("Load Error", f"Failed to load products: {str(e)}")
+            logger.error(f"Failed to load products: {str(e)}", exc_info=True)
+            UIErrorHandler.show_error(
+                "Load Error",
+                f"Failed to load products: {str(e)}\n\nPlease try again or contact support."
+            )
         finally:
+            # Step 9: Always reset loading state
             self._is_loading = False
+            logger.debug("Product load state reset")
     
     def _apply_filters(self):
-        """Apply all current filters and update display."""
+        """
+        Apply all current filters and update display.
+        
+        Process:
+        1. Fetch current filter values
+        2. Filter products using controller
+        3. Update pagination state with filtered count
+        4. Populate table with current page data
+        5. Handle errors gracefully
+        """
         try:
+            logger.debug("Applying filters to products")
+            
+            # Step 1: Get current filter values
             search_text = self._get_search_text()
             type_filter = self._get_type_filter()
             category_filter = self._get_category_filter()
             stock_filter = self._get_stock_filter()
             
-            # Filter products
+            logger.debug(f"Filter values: search='{search_text}', type={type_filter}, "
+                        f"category={category_filter}, stock={stock_filter}")
+            
+            # Step 2: Apply filters using controller
             self._filtered_products = self._controller.filter_products(
                 products=self._all_products,
                 search_text=search_text,
@@ -253,98 +299,187 @@ class ProductsScreen(BaseScreen):
                 category_filter=category_filter,
                 stock_filter=stock_filter
             )
+            logger.debug(f"Filter result: {len(self._filtered_products)} products after filtering")
             
-            # Update pagination state
+            # Step 3: Update pagination state with filtered count
             if self.pagination_widget:
+                total_items = len(self._filtered_products)
+                items_per_page = self.pagination_widget.get_items_per_page()
+                # Ceiling division for total pages
+                total_pages = (total_items + items_per_page - 1) // items_per_page
+                
                 self.pagination_widget.set_pagination_state(
-                    total_items=len(self._filtered_products),
-                    current_page=1
+                    current_page=1,
+                    total_pages=total_pages,
+                    total_items=total_items
                 )
+                logger.debug(f"Pagination updated: {total_pages} pages, {total_items} items")
             
-            # Update stats (using ALL data, not filtered)
-            self._update_stats()
-            
-            # Populate table
+            # Step 4: Populate table with current page data
             self._populate_table()
             
-            logger.debug(f"Filters applied: {len(self._filtered_products)} products shown")
+            logger.info(f"Filters applied successfully: {len(self._filtered_products)} "
+                       f"products shown out of {len(self._all_products)} total")
             
         except Exception as e:
-            logger.error(f"Failed to apply filters: {str(e)}")
-            UIErrorHandler.show_error("Filter Error", f"Failed to apply filters: {str(e)}")
+            logger.error(f"Failed to apply filters: {str(e)}", exc_info=True)
+            UIErrorHandler.show_error(
+                "Filter Error",
+                f"Failed to apply filters: {str(e)}\n\nPlease try again."
+            )
     
     def _update_category_filter(self):
-        """Update category dropdown with available categories."""
+        """
+        Update category dropdown with available categories from all products.
+        
+        Process:
+        1. Extract unique categories from all products
+        2. Update dropdown options
+        3. Restore previous selection if still valid
+        4. Handle errors gracefully
+        """
         try:
-            categories = self._controller.extract_categories(self._all_products)
+            logger.debug("Updating category filter options")
             
+            # Step 1: Extract unique categories
+            categories = self._controller.extract_categories(self._all_products)
+            logger.debug(f"Found {len(categories)} unique categories")
+            
+            # Step 2: Store current selection
             current_selection = self._category_combo.currentData()
+            
+            # Step 3: Update combo box
             self._category_combo.blockSignals(True)
             self._category_combo.clear()
             self._category_combo.addItem("All Categories", "all")
             
-            for category in categories:
+            for category in sorted(categories):
                 self._category_combo.addItem(category, category)
             
-            # Restore selection if still valid
-            index = self._category_combo.findData(current_selection)
-            if index >= 0:
-                self._category_combo.setCurrentIndex(index)
+            # Step 4: Restore selection if still valid
+            if current_selection and current_selection != "all":
+                index = self._category_combo.findData(current_selection)
+                if index >= 0:
+                    self._category_combo.setCurrentIndex(index)
+                    logger.debug(f"Restored category selection: {current_selection}")
+                else:
+                    logger.debug(f"Previous category '{current_selection}' not found, using 'All'")
             
             self._category_combo.blockSignals(False)
+            logger.info(f"Category filter updated with {len(categories)} options")
+            
         except Exception as e:
-            logger.error(f"Failed to update category filter: {str(e)}")
+            logger.error(f"Failed to update category filter: {str(e)}", exc_info=True)
     
     def _update_stats(self):
-        """Update statistics cards using ALL data (unfiltered)."""
+        """
+        Update statistics cards using ALL data (unfiltered).
+        
+        Stats always show total counts across ALL products,
+        not just the filtered subset. This gives users full visibility.
+        
+        Process:
+        1. Calculate stats from all products
+        2. Update each stat card
+        3. Handle errors gracefully
+        """
         try:
+            logger.debug("Updating statistics from all products")
+            
+            # Step 1: Calculate stats
             stats = self._controller.calculate_stats(self._all_products)
+            
+            # Step 2: Update stat cards
             self._total_card.set_value(str(stats.total))
             self._in_stock_card.set_value(str(stats.in_stock))
             self._low_stock_card.set_value(str(stats.low_stock))
             self._out_stock_card.set_value(str(stats.out_of_stock))
+            
+            logger.debug(f"Stats updated: total={stats.total}, in_stock={stats.in_stock}, "
+                        f"low_stock={stats.low_stock}, out_of_stock={stats.out_of_stock}")
+            
         except Exception as e:
-            logger.error(f"Failed to update stats: {str(e)}")
+            logger.error(f"Failed to update stats: {str(e)}", exc_info=True)
+            # Don't show error dialog for stats - silent failure is acceptable
     
     def _populate_table(self):
-        """Populate table with filtered product data (paginated)."""
+        """
+        Populate table with filtered product data (paginated).
+        
+        Process:
+        1. Clear existing rows
+        2. Get pagination parameters (current page, items per page)
+        3. Calculate slice indices for current page
+        4. Get page data from filtered products
+        5. Add rows to table
+        6. Handle errors gracefully
+        """
         try:
+            logger.debug("Starting table population")
+            
+            # Step 1: Clear table
             self._table.setRowCount(0)
             
             if not self.pagination_widget:
+                logger.warning("Pagination widget not available")
                 return
             
-            # Get current page
+            # Step 2: Get pagination parameters
             current_page = self.pagination_widget.get_current_page()
             items_per_page = self.pagination_widget.get_items_per_page()
+            logger.debug(f"Populating table: page {current_page}, {items_per_page} items/page")
             
-            # Calculate pagination
+            # Step 3 & 4: Calculate slice and get page data
             start_idx = (current_page - 1) * items_per_page
             end_idx = start_idx + items_per_page
             page_products = self._filtered_products[start_idx:end_idx]
             
-            # Add rows
+            logger.debug(f"Page slice: {start_idx}:{end_idx}, {len(page_products)} items to display")
+            
+            # Step 5: Add rows
             for idx, product in enumerate(page_products):
                 self._add_table_row(start_idx + idx, product)
             
+            logger.info(f"Table populated: {len(page_products)} rows added for page {current_page}")
+            
         except Exception as e:
-            logger.error(f"Failed to populate table: {str(e)}")
-            UIErrorHandler.show_error("Table Error", f"Failed to populate table: {str(e)}")
+            logger.error(f"Failed to populate table: {str(e)}", exc_info=True)
+            UIErrorHandler.show_error(
+                "Table Error",
+                f"Failed to populate table: {str(e)}\n\nPlease try refreshing."
+            )
     
     def _add_table_row(self, idx: int, product: dict):
-        """Add a single row to the table."""
+        """
+        Add a single row to the table with all columns formatted.
+        
+        Process:
+        1. Create new row
+        2. Set row number column
+        3. Set name column with icon
+        4. Set type column
+        5. Set HSN code column
+        6. Set price column with formatting
+        7. Set stock cell with status indicator
+        8. Add edit action button
+        9. Add delete action button
+        10. Handle errors gracefully
+        """
         try:
+            logger.debug(f"Adding row {idx + 1} to table")
+            
+            # Step 1: Create new row
             row = self._table.rowCount()
             self._table.insertRow(row)
             self._table.setRowHeight(row, 50)
             
-            # Column 0: Row number
+            # Step 2: Row number
             num_item = QTableWidgetItem(str(idx + 1))
             num_item.setTextAlignment(Qt.AlignCenter)
             num_item.setForeground(QColor(TEXT_SECONDARY))
             self._table.setItem(row, 0, num_item)
             
-            # Column 1: Name
+            # Step 3: Product name with icon
             product_type = product.get('product_type', product.get('type', ''))
             type_icon = "📦" if product_type == "Goods" else "🔧"
             name_text = f"{type_icon} {product.get('name', '')}"
@@ -353,29 +488,36 @@ class ProductsScreen(BaseScreen):
             name_item.setData(Qt.UserRole, product.get('id'))
             self._table.setItem(row, 1, name_item)
             
-            # Column 2: Type
+            # Step 4: Product type
             type_item = QTableWidgetItem(product_type)
             type_item.setFont(get_normal_font())
             type_item.setTextAlignment(Qt.AlignCenter)
             self._table.setItem(row, 2, type_item)
             
-            # Column 3: HSN Code
-            hsn_item = QTableWidgetItem(product.get('hsn_code', '-') or '-')
+            # Step 5: HSN Code
+            hsn_code = product.get('hsn_code', '-') or '-'
+            hsn_item = QTableWidgetItem(hsn_code)
             hsn_item.setFont(get_normal_font())
             self._table.setItem(row, 3, hsn_item)
             
-            # Column 4: Price
-            price = float(product.get('sales_rate', 0) or 0)
-            price_item = QTableWidgetItem(format_currency(price))
+            # Step 6: Price with currency formatting
+            try:
+                price = float(product.get('sales_rate', 0) or 0)
+                price_text = format_currency(price)
+            except (ValueError, TypeError):
+                price_text = "₹0.00"
+                logger.warning(f"Invalid price for product {product.get('id')}: {product.get('sales_rate')}")
+            
+            price_item = QTableWidgetItem(price_text)
             price_item.setFont(get_bold_font(FONT_SIZE_SMALL))
             price_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self._table.setItem(row, 4, price_item)
             
-            # Column 5: Stock
+            # Step 7: Stock status cell
             stock_widget = self._create_stock_cell(product)
             self._table.setCellWidget(row, 5, stock_widget)
             
-            # Column 6: Edit button
+            # Step 8: Edit button
             edit_btn = TableActionButton(
                 text="Edit", tooltip="Edit Product",
                 bg_color="#EEF2FF", hover_color=PRIMARY, size=(60, 32)
@@ -383,7 +525,7 @@ class ProductsScreen(BaseScreen):
             edit_btn.clicked.connect(lambda checked, p=product: self._on_edit_clicked(p))
             self._table.setCellWidget(row, 6, edit_btn)
             
-            # Column 7: Delete button
+            # Step 9: Delete button
             delete_btn = TableActionButton(
                 text="Del", tooltip="Delete Product",
                 bg_color="#FEE2E2", hover_color=DANGER, size=(60, 32)
@@ -391,113 +533,200 @@ class ProductsScreen(BaseScreen):
             delete_btn.clicked.connect(lambda checked, p=product: self._on_delete_clicked(p))
             self._table.setCellWidget(row, 7, delete_btn)
             
+            logger.debug(f"Row {idx + 1} added successfully")
+            
         except Exception as e:
-            logger.error(f"Failed to add table row: {str(e)}")
+            logger.error(f"Failed to add row {idx + 1}: {str(e)}", exc_info=True)
     
     def _create_stock_cell(self, product: dict) -> QWidget:
-        """Create stock cell with status indicator."""
-        widget = QWidget()
-        widget.setStyleSheet("background: transparent; border: none;")
+        """
+        Create stock cell with status indicator and formatted display.
         
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setAlignment(Qt.AlignCenter)
-        
-        product_type = product.get('product_type', product.get('type', ''))
-        status = self._controller.get_stock_status(product)
-        
-        if product_type == 'Service':
-            text = "∞"
-            color = PRIMARY
-            bg = "#EEF2FF"
-        else:
-            stock = product.get('current_stock', product.get('opening_stock', product.get('stock_quantity', 0))) or 0
-            unit = product.get('unit', 'Pcs')
-            text = f"{int(stock)} {unit}"
+        Process:
+        1. Determine product type
+        2. Get stock status
+        3. Format display text based on type (service vs. goods)
+        4. Assign color and background based on status
+        5. Create label with styling
+        6. Return widget
+        """
+        try:
+            widget = QWidget()
+            widget.setStyleSheet("background: transparent; border: none;")
             
-            if status == "In Stock":
-                color = SUCCESS
-                bg = "#ECFDF5"
-            elif status == "Low Stock":
-                color = WARNING
-                bg = "#FFFBEB"
-            else:  # Out of Stock
-                color = DANGER
-                bg = "#FEF2F2"
-        
-        label = QLabel(text)
-        label.setAlignment(Qt.AlignCenter)
-        label.setStyleSheet(get_status_badge_style(color, bg))
-        layout.addWidget(label)
-        
-        return widget
+            layout = QHBoxLayout(widget)
+            layout.setContentsMargins(4, 4, 4, 4)
+            layout.setAlignment(Qt.AlignCenter)
+            
+            product_type = product.get('product_type', product.get('type', ''))
+            status = self._controller.get_stock_status(product)
+            
+            logger.debug(f"Creating stock cell for {product.get('name')}: type={product_type}, status={status}")
+            
+            # Determine display text and colors
+            if product_type == 'Service':
+                # Services have unlimited stock
+                text = "∞"
+                color = PRIMARY
+                bg = "#EEF2FF"
+            else:
+                # Goods have quantified stock
+                try:
+                    stock = (product.get('current_stock') or 
+                            product.get('opening_stock') or 
+                            product.get('stock_quantity') or 0)
+                    stock = int(stock)
+                except (ValueError, TypeError):
+                    stock = 0
+                    logger.warning(f"Invalid stock quantity for {product.get('id')}: {product.get('current_stock')}")
+                
+                unit = product.get('unit', 'Pcs')
+                text = f"{stock} {unit}"
+                
+                # Color based on stock status
+                if status == "In Stock":
+                    color = SUCCESS
+                    bg = "#ECFDF5"
+                elif status == "Low Stock":
+                    color = WARNING
+                    bg = "#FFFBEB"
+                else:  # Out of Stock
+                    color = DANGER
+                    bg = "#FEF2F2"
+            
+            label = QLabel(text)
+            label.setAlignment(Qt.AlignCenter)
+            label.setStyleSheet(get_status_badge_style(color, bg))
+            layout.addWidget(label)
+            
+            return widget
+            
+        except Exception as e:
+            logger.error(f"Failed to create stock cell: {str(e)}", exc_info=True)
+            # Return empty widget on error
+            widget = QWidget()
+            widget.setStyleSheet("background: transparent; border: none;")
+            return widget
     
     # ─────────────────────────────────────────────────────────────────────────
     # Event Handlers (Slots)
     # ─────────────────────────────────────────────────────────────────────────
     
     def _on_search_changed(self, text: str):
-        """Handle search text change with debouncing."""
+        """
+        Handle search text change with debouncing.
+        
+        Debouncing prevents excessive filtering on every keystroke.
+        Waits for DEBOUNCE_DELAY ms of silence before applying filters.
+        """
+        logger.debug(f"Search text changed: '{text}'")
         self._search_debounce_timer.stop()
         self._search_debounce_timer.start(self.DEBOUNCE_DELAY)
     
     def _on_search_debounce(self):
-        """Apply search after debounce delay."""
+        """Apply search after debounce delay expires."""
+        logger.debug("Search debounce timeout, applying filters")
         self._apply_filters()
     
     def _on_filter_changed(self):
-        """Handle filter combo change."""
+        """Handle filter combo change (type, category, stock)."""
+        logger.debug("Filter changed, applying filters")
         self._apply_filters()
     
     def _on_pagination_page_changed(self, page: int):
-        """Handle pagination page change."""
+        """
+        Handle pagination page change.
+        
+        Only repopulates table with data from new page,
+        doesn't reload data from server.
+        """
+        logger.debug(f"Page changed to {page}")
         self._populate_table()
     
     def _on_refresh_clicked(self):
-        """Handle refresh button click."""
+        """
+        Handle refresh button click.
+        
+        Reloads all data from server and resets pagination.
+        """
+        logger.info("Refresh button clicked, reloading all products")
         self._load_products(reset_page=True)
     
     def _on_add_clicked(self):
         """Handle add product button click."""
+        logger.info("Add product dialog opened")
         dialog = ProductDialog(parent=self)
         if dialog.exec() == QDialog.Accepted:
+            logger.info("Product created, reloading data")
             self._load_products()
             self.product_updated.emit()
     
     def _on_edit_clicked(self, product: dict):
         """Handle edit button click."""
+        product_id = product.get('id')
+        product_name = product.get('name')
+        logger.info(f"Edit product dialog opened: {product_id} ({product_name})")
         dialog = ProductDialog(product_data=product, parent=self)
         if dialog.exec() == QDialog.Accepted:
+            logger.info(f"Product {product_id} updated, reloading data")
             self._load_products()
             self.product_updated.emit()
     
     def _on_delete_clicked(self, product: dict):
-        """Handle delete button click with confirmation."""
+        """
+        Handle delete button click with confirmation.
+        
+        Process:
+        1. Get product name
+        2. Show confirmation dialog
+        3. If confirmed, call controller delete
+        4. Reload data on success
+        5. Show success/error message
+        6. Handle errors gracefully
+        """
         product_name = product.get('name', 'Unknown')
         product_id = product.get('id')
         
+        logger.info(f"Delete requested for product {product_id} ({product_name})")
+        
+        # Step 2: Confirmation dialog
         if not UIErrorHandler.ask_confirmation(
             "Confirm Delete",
-            f"Are you sure you want to delete '{product_name}'?\n\nThis action cannot be undone."
+            f"Are you sure you want to delete '{product_name}'?\n\n"
+            f"This action cannot be undone."
         ):
+            logger.debug("Delete cancelled by user")
             return
         
         try:
+            logger.debug(f"Deleting product {product_id}")
+            # Step 3: Call controller delete
             success, message = self._controller.delete_product(product_id)
             
             if success:
-                UIErrorHandler.show_success("Success", f"Product '{product_name}' deleted successfully!")
+                logger.info(f"Product {product_id} deleted successfully")
+                # Step 4: Reload data
                 self._load_products()
+                # Step 5: Show success
+                UIErrorHandler.show_success(
+                    "Success",
+                    f"Product '{product_name}' deleted successfully!"
+                )
                 self.product_updated.emit()
             else:
+                logger.warning(f"Delete failed: {message}")
                 UIErrorHandler.show_error("Error", message)
         except Exception as e:
-            logger.error(f"Failed to delete product: {str(e)}")
-            UIErrorHandler.show_error("Error", f"Failed to delete product: {str(e)}")
+            logger.error(f"Failed to delete product {product_id}: {str(e)}", exc_info=True)
+            UIErrorHandler.show_error(
+                "Error",
+                f"Failed to delete product: {str(e)}\n\nPlease try again."
+            )
     
     def _on_export_clicked(self):
         """Handle export button click."""
         from PySide6.QtWidgets import QMessageBox
+        logger.info("Export clicked")
         QMessageBox.information(
             self, "Export", 
             "📤 Export functionality will be available soon!\n\n"

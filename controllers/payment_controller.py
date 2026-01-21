@@ -56,6 +56,93 @@ class PaymentController:
         logger.debug("PaymentController initialized")
     
     @log_performance
+    def get_all_payments(self) -> List[Dict]:
+        """
+        Get all payments (PAYMENT type = money OUT to suppliers).
+        
+        Returns:
+            List of payment dictionaries
+        """
+        try:
+            logger.debug("Fetching all payments from service")
+            all_payments = self._service.get_payments(payment_type='PAYMENT')
+            logger.info(f"🔄 Fetched {len(all_payments) if all_payments else 0} TOTAL payments from database")
+            return all_payments or []
+        except Exception as e:
+            logger.error(f"Error fetching all payments: {e}", exc_info=True)
+            return []
+    
+    def filter_payments(
+        self,
+        payments: List[Dict],
+        search_text: str = "",
+        method_filter: str = "All Methods",
+        period_filter: str = "All Time",
+        status_filter: str = "All Status"
+    ) -> List[Dict]:
+        """
+        Apply filters to a list of payments.
+        
+        Args:
+            payments: List of payment dictionaries to filter
+            search_text: Text to search in party name, reference, etc.
+            method_filter: Payment method filter
+            period_filter: Time period filter
+            status_filter: Payment status filter
+            
+        Returns:
+            Filtered list of payments
+        """
+        filtered = payments
+        
+        # Apply search filter
+        if search_text:
+            search_lower = search_text.lower()
+            filtered = [
+                p for p in filtered
+                if self._matches_search(p, search_lower)
+            ]
+            logger.debug(f"After search filter: {len(filtered)} payments")
+        
+        # Apply method filter
+        if method_filter and method_filter != "All Methods":
+            filtered = [
+                p for p in filtered
+                if (p.get('mode') or '') == method_filter
+            ]
+            logger.debug(f"After method filter: {len(filtered)} payments")
+        
+        # Apply status filter
+        if status_filter and status_filter != "All Status":
+            filtered = [
+                p for p in filtered
+                if (p.get('status') or 'Completed') == status_filter
+            ]
+            logger.debug(f"After status filter: {len(filtered)} payments")
+        
+        # Apply period filter
+        if period_filter and period_filter != "All Time":
+            filtered = [
+                p for p in filtered
+                if self._matches_period(p.get('date', ''), period_filter)
+            ]
+            logger.debug(f"After period filter: {len(filtered)} payments")
+        
+        return filtered
+    
+    def calculate_stats(self, payments: List[Dict]) -> PaymentStats:
+        """
+        Calculate payment statistics (public method for UI).
+        
+        Args:
+            payments: List of all payments
+            
+        Returns:
+            PaymentStats with computed values
+        """
+        return self._calculate_stats(payments)
+    
+    @log_performance
     def get_filtered_payments(
         self, 
         filters: Optional[PaymentFilters] = None
