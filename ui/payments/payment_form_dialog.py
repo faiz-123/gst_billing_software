@@ -17,6 +17,7 @@ from theme import (
     BORDER, BACKGROUND, PRIMARY_HOVER
 )
 from core.db.sqlite_db import db
+from ui.error_handler import UIErrorHandler
 from widgets import PartySelector
 
 
@@ -1265,13 +1266,13 @@ class SupplierPaymentDialog(QDialog):
         # Validation
         party = self._get_selected_party()
         if not party:
-            QMessageBox.warning(self, "Validation Error", "Please select a valid supplier!")
+            UIErrorHandler.show_validation_error("Validation Error", ["Please select a valid supplier!"])
             self.party_search.setFocus()
             return
         
         amount = self.amount_input.value()
         if amount <= 0:
-            QMessageBox.warning(self, "Validation Error", "Please enter a valid amount!")
+            UIErrorHandler.show_validation_error("Validation Error", ["Please enter a valid amount!"])
             self.amount_input.setFocus()
             return
         
@@ -1279,13 +1280,10 @@ class SupplierPaymentDialog(QDialog):
         method = self.payment_method.currentData()
         reference = self.reference_input.text().strip()
         if method != "Cash" and not reference:
-            reply = QMessageBox.question(
-                self, "Missing Reference",
-                f"No reference number for {method} payment.\n\nContinue without reference?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if reply == QMessageBox.No:
+            if not UIErrorHandler.ask_confirmation(
+                "Missing Reference",
+                f"No reference number for {method} payment.\n\nContinue without reference?"
+            ):
                 self.reference_input.setFocus()
                 return
         
@@ -1296,36 +1294,27 @@ class SupplierPaymentDialog(QDialog):
             if invoice:
                 due = invoice.get('due_amount', invoice.get('grand_total', 0))
                 if amount > due:
-                    reply = QMessageBox.question(
-                        self, "Excess Amount",
-                        f"Payment (₹{amount:,.2f}) exceeds due amount (₹{due:,.2f}).\n\nContinue?",
-                        QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.No
-                    )
-                    if reply == QMessageBox.No:
+                    if not UIErrorHandler.ask_confirmation(
+                        "Excess Amount",
+                        f"Payment (₹{amount:,.2f}) exceeds due amount (₹{due:,.2f}).\n\nContinue?"
+                    ):
                         return
             else:
                 # No invoice selected in bill-to-bill mode
-                reply = QMessageBox.question(
-                    self, "No Invoice Selected",
-                    "No invoice selected. Record as Direct Payment?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
-                )
-                if reply == QMessageBox.No:
+                if not UIErrorHandler.ask_confirmation(
+                    "No Invoice Selected",
+                    "No invoice selected. Record as Direct Payment?"
+                ):
                     return
         
         elif self.settlement_mode == "fifo":
             # Confirm FIFO allocation
             if hasattr(self, 'fifo_allocations') and self.fifo_allocations:
                 alloc_count = len([a for a in self.fifo_allocations if a['amount'] > 0])
-                reply = QMessageBox.question(
-                    self, "Confirm FIFO Settlement",
-                    f"This will settle {alloc_count} invoice(s) using FIFO method.\n\nProceed?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.Yes
-                )
-                if reply == QMessageBox.No:
+                if not UIErrorHandler.ask_confirmation(
+                    "Confirm FIFO Settlement",
+                    f"This will settle {alloc_count} invoice(s) using FIFO method.\n\nProceed?"
+                ):
                     return
         
         # Prepare notes

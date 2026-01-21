@@ -2,8 +2,8 @@
 Product dialog module (moved from products.py to avoid circular imports)
 """
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QMessageBox,
-    QScrollArea, QWidget, QGridLayout, QTextEdit
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QWidget, QGridLayout, QTextEdit
 )
 from PySide6.QtCore import Qt
 
@@ -15,13 +15,14 @@ from theme import (
     # Styles
     get_section_frame_style, get_dialog_footer_style,
     get_cancel_button_style, get_save_button_style,
-    get_link_label_style, get_scroll_area_style
+    get_link_label_style
 )
 from widgets import (
     DialogInput, DialogComboBox, DialogEditableComboBox, DialogSpinBox, DialogDoubleSpinBox,
-    DialogCheckBox, DialogTextEdit, DialogFieldGroup, CustomButton
+    DialogCheckBox, DialogTextEdit, DialogFieldGroup, CustomButton, DialogScrollArea
 )
 from ui.base.base_dialog import BaseDialog
+from ui.error_handler import UIErrorHandler
 from core.services.product_service import ProductService
 from core.validators import set_name_error_state, set_price_error_state
 from core.core_utils import to_upper
@@ -48,16 +49,9 @@ class ProductDialog(BaseDialog):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        # Scroll area for the entire content
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet(get_scroll_area_style())
-        
-        scroll_content = QWidget()
-        self.scroll_layout = QVBoxLayout(scroll_content)
-        self.scroll_layout.setContentsMargins(40, 30, 40, 30)
-        self.scroll_layout.setSpacing(24)
+        # Create scroll area widget
+        scroll_widget = DialogScrollArea()
+        self.scroll_layout = scroll_widget.get_layout()
         
         # Header
         title_text = "Edit Product" if self.product_data else "Add New Product"
@@ -91,8 +85,7 @@ class ProductDialog(BaseDialog):
         
         self.scroll_layout.addStretch()
         
-        scroll.setWidget(scroll_content)
-        main_layout.addWidget(scroll)
+        main_layout.addWidget(scroll_widget)
         
         # Footer with buttons
         main_layout.addWidget(self._build_footer())
@@ -645,11 +638,15 @@ class ProductDialog(BaseDialog):
         self.description_input.setPlainText(data.get('description', ''))
     
     def save_product(self):
-        """Save product data using ProductService"""
+        """Save product data using ProductService with UIErrorHandler"""
         name = self.name_input.text().strip()
         if not self.product_service.validate_product_name(name):
             set_name_error_state(self.name_input, True)
             self.name_input.setFocus()
+            UIErrorHandler.show_validation_error(
+                "Validation Error",
+                ["Product name is required"]
+            )
             return
         
         selling_price = self.selling_price.value()
@@ -657,6 +654,10 @@ class ProductDialog(BaseDialog):
         if not valid:
             set_price_error_state(self.selling_price, True)
             self.selling_price.setFocus()
+            UIErrorHandler.show_validation_error(
+                "Validation Error",
+                [error]
+            )
             return
         
         # Get checkbox states
@@ -693,10 +694,10 @@ class ProductDialog(BaseDialog):
         success, message = self.product_service.save_product(product_data, is_update)
         
         if success:
-            QMessageBox.information(self, "Success", message)
+            UIErrorHandler.show_success("Success", message)
             self.accept()
         else:
-            QMessageBox.critical(self, "Error", message)
+            UIErrorHandler.show_error("Error", message)
     
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts: Enter to save, Escape to cancel."""

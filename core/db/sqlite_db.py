@@ -8,7 +8,11 @@ screens. Data is stored in a local SQLite file configured via
 import json
 import os
 import sqlite3
+import time
 from typing import List, Dict, Optional, Any
+from core.logger import get_logger, log_performance, SQLLogger
+
+logger = get_logger(__name__)
 
 
 def _get_project_root() -> str:
@@ -34,18 +38,22 @@ def _load_db_path() -> str:
 class Database:
     def __init__(self, path: Optional[str] = None):
         self.path = path or _load_db_path()
+        logger.info(f"Initializing database at {self.path}")
         self.conn = sqlite3.connect(self.path, check_same_thread=False, timeout=20.0)
         self.conn.row_factory = sqlite3.Row
         # Set busy timeout to wait up to 20 seconds on locked database
         self.conn.execute("PRAGMA busy_timeout=20000")
         self._current_company_id = None  # Track current company for data isolation
+        logger.debug("Database connection established")
         self.create_tables()
         self._ensure_schema()
         self.ensure_seed()
+        logger.info("Database initialization completed successfully")
 
     def set_current_company(self, company_id: int):
         """Set the current company for data isolation"""
         self._current_company_id = company_id
+        logger.debug(f"Set current company to ID: {company_id}")
 
     def get_current_company_id(self) -> Optional[int]:
         """Get the current company ID"""
@@ -59,24 +67,41 @@ class Database:
         
         while retry_count < max_retries:
             try:
+                start_time = time.time()
                 cur = self.conn.cursor()
                 cur.execute(sql, params)
                 self.conn.commit()
+                execution_time = time.time() - start_time
+                
+                # Log the query with execution time
+                row_count = cur.rowcount
+                SQLLogger.log_query(sql, params, execution_time, row_count)
+                
                 return cur
             except sqlite3.OperationalError as e:
                 if 'database is locked' in str(e):
                     retry_count += 1
                     if retry_count >= max_retries:
+                        logger.error(f"Database locked after {max_retries} retries: {str(e)}")
                         raise Exception(f"Database is locked after {max_retries} retries: {str(e)}")
-                    import time
-                    time.sleep(0.2 * retry_count)  # Exponential backoff
+                    logger.warning(f"Database locked, retry {retry_count}/{max_retries}")
+                    import time as time_module
+                    time_module.sleep(0.2 * retry_count)  # Exponential backoff
                 else:
+                    logger.error(f"Database execution error: {str(e)}", exc_info=True)
                     raise
 
     def _query(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
+        start_time = time.time()
         cur = self.conn.cursor()
         cur.execute(sql, params)
         rows = cur.fetchall()
+        execution_time = time.time() - start_time
+        
+        # Log the query with execution time
+        row_count = len(rows)
+        SQLLogger.log_query(sql, params, execution_time, row_count)
+        
         return [dict(r) for r in rows]
 
     # --- schema ---
@@ -127,16 +152,6 @@ class Database:
             )
             """
         )
-        
-        # Add balance_type column if it doesn't exist (for existing databases)
-        try:
-            self._execute(
-                """
-                ALTER TABLE parties ADD COLUMN balance_type TEXT DEFAULT 'dr'
-                """
-            )
-        except Exception:
-            pass  # Column already exists
         
         # Create table for products
         self._execute(
@@ -325,6 +340,7 @@ class Database:
             ("state", "TEXT"),
             ("pincode", "TEXT"),
             ("opening_balance", "REAL DEFAULT 0"),
+            ("balance_type", "TEXT DEFAULT 'dr'"),
         ]:
             try:
                 self._ensure_column("parties", col, decl)
@@ -373,7 +389,7 @@ class Database:
             ("round_off", "REAL DEFAULT 0"),
             ("grand_total", "REAL DEFAULT 0"),
             ("balance_due", "REAL DEFAULT 0"),
-            ("status", "TEXT DEFAULT 'Draft'"),
+            ("status", "TEXT DEFAULT 'Unpaid'"),
             ("notes", "TEXT"),
             ("created_at", "TEXT"),
         ]:
@@ -524,6 +540,19 @@ class Database:
             balance_type = kwargs.get('balance_type', 'dr')
             is_gst = kwargs.get('is_gst_registered', 0)
             party_type = kwargs.get('party_type', 'Customer')
+
+        # Check for duplicate party name (case-insensitive)
+        if name:
+            existing_parties = self._query(
+                """
+                SELECT id FROM parties 
+                WHERE company_id = ? AND UPPER(name) = UPPER(?) LIMIT 1
+                """,
+                (self._current_company_id, name)
+            )
+            if existing_parties:
+                from core.exceptions import PartyAlreadyExists
+                raise PartyAlreadyExists(f"A party with the name '{name}' already exists")
 
         cur = self._execute(
             """
@@ -715,7 +744,7 @@ class Database:
                 print(f"DEBUG: update_product_stock returned: {result}")
 
     # --- invoices ---
-    def add_invoice(self, invoice_no, date, party_id, tax_type='GST - Same State', subtotal=0, cgst=0, sgst=0, igst=0, round_off=0, grand_total=0, status='Draft', bill_type='CASH', discount=0, balance_due=0, notes=None):
+    def add_invoice(self, invoice_no, date, party_id, tax_type='GST - Same State', subtotal=0, cgst=0, sgst=0, igst=0, round_off=0, grand_total=0, status='Unpaid', bill_type='CASH', discount=0, balance_due=0, notes=None):
         cur = self._execute(
             """INSERT INTO invoices(
                 company_id, invoice_no, date, party_id, tax_type, bill_type,
@@ -760,7 +789,7 @@ class Database:
                 float(invoice_data.get('round_off') or 0),
                 float(invoice_data.get('grand_total') or 0),
                 float(invoice_data.get('balance_due') or 0),
-                invoice_data.get('status', 'Draft'),
+                invoice_data.get('status', 'Unpaid'),
                 invoice_data.get('notes'),
                 iid,
             )

@@ -37,6 +37,7 @@ from core.core_utils import format_currency
 # UI imports
 from ui.base import BaseScreen
 from ui.receipts.receipt_form_dialog import ReceiptDialog
+from ui.error_handler import UIErrorHandler
 
 
 class ReceiptsScreen(BaseScreen):
@@ -476,54 +477,36 @@ class ReceiptsScreen(BaseScreen):
         party_name = receipt.get('party_name', 'Unknown')
         amount = float(receipt.get('amount') or 0)
         receipt_id = receipt.get('id')
+        date = receipt.get('date', '')
         
-        if not self._confirm_delete(party_name, amount, receipt.get('date', '')):
+        # Show confirmation dialog
+        if not UIErrorHandler.ask_confirmation(
+            "Confirm Delete",
+            f"Are you sure you want to delete this customer receipt?\n\n"
+            f"Customer: {party_name}\n"
+            f"Amount: ₹{amount:,.2f}\n"
+            f"Date: {date}\n\n"
+            f"This action cannot be undone."
+        ):
             return
         
         # Delegate to controller
         success, message = self._controller.delete_receipt(receipt_id)
         
         if success:
-            self._show_info("Success", "✓ Receipt deleted successfully!")
+            UIErrorHandler.show_success("Success", "✓ Receipt deleted successfully!")
             self._load_data()
             self.receipt_updated.emit()
         else:
-            self._show_error("Error", message)
+            UIErrorHandler.show_error("Error", message)
     
     def _on_export_clicked(self):
         """Handle export button click."""
-        QMessageBox.information(
-            self, "Export", 
+        UIErrorHandler.show_warning(
+            "Export", 
             "📤 Export functionality will be available soon!\n\n"
             "This will allow you to export receipt data to CSV or Excel."
         )
-    
-    # -------------------------------------------------------------------------
-    # Dialog Helpers
-    # -------------------------------------------------------------------------
-    
-    def _confirm_delete(self, party_name: str, amount: float, date: str) -> bool:
-        """Show delete confirmation dialog."""
-        reply = QMessageBox.question(
-            self,
-            "Confirm Delete",
-            f"Are you sure you want to delete this customer receipt?\n\n"
-            f"Customer: {party_name}\n"
-            f"Amount: ₹{amount:,.2f}\n"
-            f"Date: {date}\n\n"
-            f"This action cannot be undone.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        return reply == QMessageBox.Yes
-    
-    def _show_info(self, title: str, message: str):
-        """Show information message box."""
-        QMessageBox.information(self, title, message)
-    
-    def _show_error(self, title: str, message: str):
-        """Show error message box."""
-        QMessageBox.critical(self, title, message)
     
     # -------------------------------------------------------------------------
     # Public Interface

@@ -8,6 +8,13 @@ from typing import Dict, List, Optional, Tuple
 from core.validators import validate_gstin, validate_pan, validate_mobile, validate_email, validate_pincode
 from core.models.party_model import Party
 from core.enums import PartyType
+from core.logger import get_logger
+from core.exceptions import (
+    PartyException, PartyAlreadyExists, PartyNotFound,
+    CreditLimitExceeded
+)
+
+logger = get_logger(__name__)
 
 
 class PartyService:
@@ -167,17 +174,27 @@ class PartyService:
             Tuple[bool, str]: (is_duplicate, error_message)
         """
         if not self.db:
+            logger.warning("Database not available for duplicate check")
             return False, ""
         
         try:
             existing_parties = self.db.get_parties()
-            for p in existing_parties:
+            if not existing_parties:
+                return False, ""
+            
+            for party in existing_parties:
                 # Skip the current party being edited
-                if current_party_id and p.get('id') == current_party_id:
+                if current_party_id and party.get('id') == current_party_id:
                     continue
-                if p.get('name', '').strip().upper() == name.upper():
-                    return True, f"A party with the name '{name}' already exists."
-        except Exception:
+                
+                party_name = party.get('name', '').strip().upper()
+                check_name = name.strip().upper()
+                
+                # Case-insensitive duplicate check
+                if party_name == check_name:
+                    return True, f"A party with the name '{name}' already exists"
+        except Exception as e:
+            logger.error(f"Error checking duplicate party name: {e}")
             pass
         
         return False, ""
@@ -312,15 +329,22 @@ class PartyService:
             
         Returns:
             int: New party ID or None on failure
+            
+        Raises:
+            PartyAlreadyExists: If party with same name already exists
         """
         if not self.db:
+            logger.error("Database not available for add_party")
             return None
         
         try:
             return self.db.add_party(party_data)
+        except PartyAlreadyExists:
+            # Re-raise duplicate exception so caller knows it's a duplicate
+            raise
         except Exception as e:
-            print(f"Error adding party: {e}")
-            return None
+            logger.error(f"Error adding party: {e}")
+            raise PartyException(f"Failed to add party: {str(e)}") from e
     
     def update_party(self, party_id: int, party_data: Dict) -> bool:
         """
@@ -413,6 +437,39 @@ class PartyService:
             return None
         except Exception:
             return None
+
+    def detect_tax_type_for_party(self, party_data: dict, company_data: dict) -> str:
+        """
+        Detect appropriate tax type based on party and company GSTIN.
+        Compares state codes extracted from GSTINs to determine if intra-state or inter-state.
+        
+        Args:
+            party_data: Dictionary with party information (must have 'gstin' key)
+            company_data: Dictionary with company information (must have 'gstin' key)
+            
+        Returns:
+            str: Tax type 'GST' or 'Non-GST'
+        """
+        try:
+            party_gstin = party_data.get('gstin', '').strip() if party_data else ''
+            company_gstin = company_data.get('gstin', '').strip() if company_data else ''
+            
+            # If either GSTIN is missing or invalid, return Non-GST
+            if not party_gstin or not company_gstin or len(party_gstin) < 2 or len(company_gstin) < 2:
+                return 'Non-GST'
+            
+            # GSTIN format: First 2 characters are state code
+            party_state_code = party_gstin[:2]
+            company_state_code = company_gstin[:2]
+            
+            # If state codes match, it's intra-state GST, otherwise inter-state
+            if party_state_code == company_state_code:
+                return 'GST'
+            else:
+                return 'GST'  # Both intra-state and inter-state use GST
+        except Exception as e:
+            print(f"Error detecting tax type: {e}")
+            return 'Non-GST'
 
 
 # Create a singleton instance for convenience

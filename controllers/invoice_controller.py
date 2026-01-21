@@ -17,6 +17,11 @@ from datetime import datetime, date
 
 from core.services.invoice_service import InvoiceService
 from core.db.sqlite_db import db
+from core.logger import get_logger, log_performance, UserActionLogger
+from core.error_handler import ErrorHandler, handle_errors
+from core.exceptions import InvoiceException, InvalidInvoiceTotal
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -47,6 +52,7 @@ class InvoiceController:
     # Data Fetching
     # ─────────────────────────────────────────────────────────────────────────
     
+    @log_performance
     def get_all_invoices(self) -> List[Dict]:
         """
         Fetch all sales invoices with party details.
@@ -56,6 +62,7 @@ class InvoiceController:
         """
         try:
             company_id = db.get_current_company_id()
+            logger.debug(f"Fetching all invoices for company_id: {company_id}")
             
             if hasattr(db, '_query'):
                 # Use JOIN query for better performance
@@ -90,7 +97,8 @@ class InvoiceController:
                         try:
                             party = db.get_party_by_id(invoice['party_id'])
                             invoice['party_name'] = party.get('name', 'Unknown Party') if party else 'Unknown Party'
-                        except Exception:
+                        except Exception as e:
+                            logger.warning(f"Failed to get party name for party_id {invoice.get('party_id')}: {e}")
                             invoice['party_name'] = 'Unknown Party'
                     else:
                         invoice['party_name'] = 'Unknown Party'
@@ -99,10 +107,11 @@ class InvoiceController:
             for invoice in invoices:
                 invoice['status'] = self._compute_invoice_status(invoice)
             
+            logger.info(f"Successfully fetched {len(invoices) if invoices else 0} invoices")
             return list(invoices) if invoices else []
             
         except Exception as e:
-            print(f"[InvoiceController] Error fetching invoices: {e}")
+            logger.error(f"Error fetching invoices: {e}", exc_info=True)
             return []
     
     def get_invoice_with_items(self, invoice_id: int) -> Optional[Dict]:
@@ -277,6 +286,8 @@ class InvoiceController:
     # CRUD Operations
     # ─────────────────────────────────────────────────────────────────────────
     
+    @log_performance
+    @handle_errors("Delete Invoice")
     def delete_invoice(self, invoice_id: int) -> Tuple[bool, str]:
         """
         Delete an invoice by ID.
@@ -288,10 +299,30 @@ class InvoiceController:
             Tuple of (success, message)
         """
         try:
+            logger.info(f"Attempting to delete invoice ID: {invoice_id}")
+            
+            # Get invoice details before deletion for logging
+            invoice = db.get_invoice_by_id(invoice_id)
+            if not invoice:
+                raise InvoiceException("Invoice not found")
+            
+            invoice_no = invoice.get('invoice_no', 'Unknown')
+            
+            # Delete the invoice
             db.delete_invoice(invoice_id)
+            
+            # Log the user action
+            UserActionLogger.log_invoice_deleted(invoice_id, invoice_no)
+            
+            logger.info(f"Successfully deleted invoice ID: {invoice_id}, Number: {invoice_no}")
             return True, "Invoice deleted successfully!"
+            
+        except InvoiceException as e:
+            logger.error(f"Invoice error while deleting {invoice_id}: {e.error_code}", exc_info=True)
+            return False, e.to_user_message()
         except Exception as e:
-            return False, f"Failed to delete invoice: {str(e)}"
+            logger.error(f"Failed to delete invoice {invoice_id}: {str(e)}", exc_info=True)
+            return ErrorHandler.handle_exception(e, "Delete Invoice", show_dialog=False)
     
     # ─────────────────────────────────────────────────────────────────────────
     # Status Computation
@@ -541,21 +572,141 @@ class InvoiceFormController:
             print(f"Error getting products: {e}")
             return []
     
-    def get_parties(self) -> List[Dict]:
+    def get_parties(self, party_type: str = None) -> List[Dict]:
         """
-        Get all parties for dropdown/selection.
+        Get parties for dropdown/selection, optionally filtered by type.
         
+        Args:
+            party_type: Filter by type ('customer', 'supplier', None for all)
+            
         Returns:
             List of party dictionaries
         """
         try:
             company_id = db.get_current_company_id()
             if company_id and hasattr(db, 'get_parties_by_company'):
-                return db.get_parties_by_company(company_id) or []
-            return db.get_parties() or []
+                parties = db.get_parties_by_company(company_id) or []
+            else:
+                parties = db.get_parties() or []
+            
+            # Filter by type if specified
+            if party_type:
+                parties = [p for p in parties if p.get('party_type', '').lower() == party_type.lower()]
+            
+            return parties
         except Exception as e:
             print(f"Error getting parties: {e}")
             return []
+    
+    def get_party_pending_balance(self, party_id: int) -> float:
+        """
+        Calculate pending balance for a party from unpaid invoices.
+        
+        Calculates: Sum of balance_due for all unpaid/partial invoices
+        
+        Args:
+            party_id: ID of the party
+            
+        Returns:
+            Pending balance amount (positive = money owed by party)
+        """
+        try:
+            pending_balance = 0.0
+            
+            # Get all invoices for this party with unpaid/partial status
+            if hasattr(db, '_query'):
+                company_id = db.get_current_company_id()
+                
+                # Query invoices where status is 'Paid' or 'paid' (case-insensitive check)
+                # and balance_due > 0
+                # Case-insensitive check for 'Paid' status
+                query = """
+                    SELECT balance_due 
+                    FROM invoices 
+                    WHERE party_id = ? 
+                    AND company_id = ? 
+                    AND LOWER(status) NOT IN ('paid')
+                    AND balance_due > 0
+                """
+                invoices = db._query(query, (party_id, company_id))
+                
+                if invoices:
+                    for inv in invoices:
+                        balance_due = inv.get('balance_due', 0) or 0
+                        pending_balance += balance_due
+            
+            return round(pending_balance, 2)
+            
+        except Exception as e:
+            print(f"Error calculating pending balance for party {party_id}: {e}")
+            return 0.0
+    
+    def get_party_total_balance(self, party_id: int, party_data: dict) -> Dict[str, float]:
+        """
+        Calculate total balance for a party (opening + pending invoices).
+        
+        Args:
+            party_id: ID of the party
+            party_data: Party data dictionary containing opening_balance and balance_type
+            
+        Returns:
+            Dictionary with 'opening', 'pending', and 'total' balance amounts
+        """
+        try:
+            # Get opening balance
+            opening_balance = party_data.get('opening_balance', 0) or 0
+            balance_type = party_data.get('balance_type', 'dr') or 'dr'
+            
+            # Convert opening balance based on type
+            if balance_type.lower() == 'cr':
+                opening_bal = -abs(opening_balance)  # Negative = Advance
+            else:
+                opening_bal = abs(opening_balance)   # Positive = Due
+            
+            # Get pending balance from invoices
+            pending_bal = self.get_party_pending_balance(party_id)
+            
+            # Total = opening + pending
+            total_bal = opening_bal + pending_bal
+            
+            return {
+                'opening': opening_bal,
+                'pending': pending_bal,
+                'total': total_bal
+            }
+            
+        except Exception as e:
+            print(f"Error calculating total balance: {e}")
+            return {'opening': 0.0, 'pending': 0.0, 'total': 0.0}
+    
+    def get_party_pending_invoice_count(self, party_id: int) -> int:
+        """
+        Get count of pending (unpaid) invoices for a party.
+        
+        Args:
+            party_id: ID of the party
+            
+        Returns:
+            Count of unpaid invoices
+        """
+        try:
+            if hasattr(db, '_query'):
+                company_id = db.get_current_company_id()
+                query = """
+                    SELECT COUNT(*) as count
+                    FROM invoices 
+                    WHERE party_id = ? 
+                    AND company_id = ? 
+                    AND LOWER(status) NOT IN ('paid')
+                    AND balance_due > 0
+                """
+                result = db._query(query, (party_id, company_id))
+                if result:
+                    return result[0].get('count', 0) or 0
+            return 0
+        except Exception as e:
+            print(f"Error counting pending invoices for party {party_id}: {e}")
+            return 0
     
     # ─────────────────────────────────────────────────────────────────────────
     # Type Mapping
@@ -717,15 +868,20 @@ class InvoiceFormController:
             else:
                 invoice_data['balance_due'] = grand_total  # CREDIT: Full amount is due
             
-            # Compute status based on balance_due
-            # For CASH: balance_due = 0, so status should be 'Paid'
-            # For CREDIT: balance_due = grand_total, so status should be 'Unpaid'
+            # Compute status based on balance_due and grand_total
+            # Logic:
+            # - If balance_due == 0: 'Paid'
+            # - If balance_due == grand_total: 'Unpaid'
+            # - If grand_total > balance_due > 0: 'Partial Paid'
             balance_due = invoice_data.get('balance_due', 0)
-            if balance_due <= 0 and grand_total > 0:
+            if balance_due == 0:
                 computed_status = 'Paid'
-            elif 0 < balance_due < grand_total and grand_total > 0:
-                computed_status = 'Partially Paid'
+            elif balance_due == grand_total:
+                computed_status = 'Unpaid'
+            elif 0 < balance_due < grand_total:
+                computed_status = 'Partial Paid'
             else:
+                # Default for edge cases
                 computed_status = 'Unpaid'
             invoice_data['status'] = computed_status
             
@@ -1034,6 +1190,118 @@ class InvoiceFormController:
         except Exception as e:
             print(f"Error converting number to words: {e}")
             return f"{amount:,.2f} Rupees"
+
+    def get_recent_party_ids(self, limit: int = 5) -> list:
+        """
+        Get list of recently used party IDs for autocomplete suggestions.
+        
+        Args:
+            limit: Maximum number of recent parties to return (default: 5)
+            
+        Returns:
+            List of party IDs ordered by most recent
+        """
+        try:
+            return self._service.get_recent_party_ids(limit)
+        except Exception as e:
+            print(f"Error fetching recent party IDs: {e}")
+            return []
+
+    def get_recent_product_ids(self, limit: int = 10) -> list:
+        """
+        Get list of recently used product IDs for autocomplete suggestions.
+        
+        Args:
+            limit: Maximum number of recent products to return (default: 10)
+            
+        Returns:
+            List of product IDs ordered by most recent
+        """
+        try:
+            return self._service.get_recent_product_ids(limit)
+        except Exception as e:
+            print(f"Error fetching recent product IDs: {e}")
+            return []
+
+    def detect_tax_type_for_party(self, party_data: dict, company_data: dict) -> str:
+        """
+        Detect appropriate tax type (GST/Non-GST) based on party and company GSTIN.
+        
+        Args:
+            party_data: Dictionary with party information (must have 'gstin' key)
+            company_data: Dictionary with company information (must have 'gstin' key)
+            
+        Returns:
+            Tax type string: 'GST' or 'Non-GST'
+        """
+        try:
+            from core.services.party_service import PartyService
+            service = PartyService(db)
+            return service.detect_tax_type_for_party(party_data, company_data)
+        except Exception as e:
+            print(f"Error detecting tax type: {e}")
+            return 'Non-GST'
+
+    def get_current_company(self) -> Optional[Dict]:
+        """
+        Get the currently selected company data.
+        
+        Returns:
+            Dictionary with company information or None if no company selected
+        """
+        try:
+            company_id = db.get_current_company_id()
+            if not company_id:
+                return None
+            return db.get_company_by_id(company_id)
+        except Exception as e:
+            print(f"Error fetching current company: {e}")
+            return None
+
+    def calculate_invoice_totals(self, items: list, tax_type: str,
+                                invoice_discount: float = 0.0,
+                                invoice_discount_type: str = "%",
+                                other_charges: float = 0.0) -> Dict:
+        """
+        Calculate detailed invoice totals for UI display.
+        
+        Delegates to InvoiceService for all calculation logic.
+        The UI passes item data and settings, service returns comprehensive breakdown.
+        
+        Args:
+            items: List of invoice item data dictionaries
+            tax_type: Invoice tax type ('GST - Same State', 'GST - Other State', 'Non-GST')
+            invoice_discount: Invoice-level discount (amount or percentage)
+            invoice_discount_type: Type of discount ("%" for percentage, "₹" for flat)
+            other_charges: Additional charges to add to total
+            
+        Returns:
+            Dictionary with all calculated totals and flags for UI display
+        """
+        try:
+            return self._service.calculate_invoice_totals_detailed(
+                items, tax_type, invoice_discount, invoice_discount_type, other_charges
+            )
+        except Exception as e:
+            print(f"Error calculating invoice totals: {e}")
+            # Return default safe values on error
+            return {
+                'subtotal': 0.0,
+                'item_discount': 0.0,
+                'invoice_discount': 0.0,
+                'total_discount': 0.0,
+                'cgst': 0.0,
+                'sgst': 0.0,
+                'igst': 0.0,
+                'total_tax': 0.0,
+                'other_charges': 0.0,
+                'roundoff_amount': 0.0,
+                'grand_total': 0,
+                'is_interstate': False,
+                'is_non_gst': False,
+                'item_count': 0,
+                'has_decimal': False
+            }
 
 
 # Singleton instance for form operations

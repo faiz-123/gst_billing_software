@@ -40,8 +40,9 @@ class LedgerService:
         invoice_total = float(invoices[0]['total'] or 0) if invoices else 0
         
         # Calculate from receipts (amount received from customer)
+        # Include payments with type='RECEIPT' OR type IS NULL (for backward compatibility)
         receipts = self.db._query(
-            "SELECT SUM(amount) as total FROM payments WHERE party_id = ? AND type = 'RECEIPT'",
+            "SELECT SUM(amount) as total FROM payments WHERE party_id = ? AND (type = 'RECEIPT' OR type IS NULL)",
             (party_id,)
         )
         receipt_total = float(receipts[0]['total'] or 0) if receipts else 0
@@ -54,6 +55,7 @@ class LedgerService:
         purchase_total = float(purchases[0]['total'] or 0) if purchases else 0
         
         # Calculate from payments (amount paid to supplier)
+        # Include payments with type='PAYMENT' (supplier payments typically have explicit type)
         payments = self.db._query(
             "SELECT SUM(amount) as total FROM payments WHERE party_id = ? AND type = 'PAYMENT'",
             (party_id,)

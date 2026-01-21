@@ -7,6 +7,13 @@ from typing import List, Dict, Optional
 from datetime import datetime
 
 from core.db.sqlite_db import db as default_db
+from core.logger import get_logger
+from core.exceptions import (
+    PaymentException, InvalidPaymentAmount,
+    InsufficientPaymentAmount
+)
+
+logger = get_logger(__name__)
 
 
 class PaymentService:
@@ -56,13 +63,27 @@ class PaymentService:
             
         Returns:
             True if successful
+            
+        Raises:
+            PaymentException: If payment not found or deletion fails
         """
         try:
+            # Check if payment exists
+            payment = self.get_payment_by_id(payment_id)
+            if not payment:
+                logger.warning(f"Payment {payment_id} not found for deletion")
+                raise PaymentException("Payment not found")
+            
+            # Delete the payment
             self.db.delete_payment(payment_id)
+            logger.info(f"Successfully deleted payment {payment_id}")
             return True
+            
+        except PaymentException:
+            raise
         except Exception as e:
-            print(f"[PaymentService] Error deleting payment: {e}")
-            return False
+            logger.error(f"Error deleting payment {payment_id}: {e}", exc_info=True)
+            raise PaymentException(f"Failed to delete payment: {str(e)}")
     
     # ─────────────────────────────────────────────────────────────────────────
     # ID Generation

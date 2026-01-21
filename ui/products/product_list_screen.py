@@ -32,6 +32,9 @@ from widgets import (
 # Controller import (NOT service directly)
 from controllers.product_controller import product_controller
 
+# Error handler import
+from ui.error_handler import UIErrorHandler
+
 # Core imports for formatting only
 from core.core_utils import format_currency
 
@@ -422,41 +425,26 @@ class ProductsScreen(BaseScreen):
         product_name = product.get('name', 'Unknown')
         product_id = product.get('id')
         
-        if not self._confirm_delete(product_name):
+        # Use UIErrorHandler for consistent look & feel
+        if not UIErrorHandler.ask_confirmation(
+            "Confirm Delete",
+            f"Are you sure you want to delete '{product_name}'?\n\nThis action cannot be undone."
+        ):
             return
         
         # Delegate to controller
         success, message = self._controller.delete_product(product_id)
         
         if success:
-            self._show_info("Success", f"Product '{product_name}' deleted successfully!")
+            UIErrorHandler.show_success("Success", f"Product '{product_name}' deleted successfully!")
             self._load_data()
             self.product_updated.emit()
         else:
-            self._show_error("Error", message)
+            UIErrorHandler.show_error("Error", message)
     
     # ─────────────────────────────────────────────────────────────────────────
     # Dialog Helpers
     # ─────────────────────────────────────────────────────────────────────────
-    
-    def _confirm_delete(self, product_name: str) -> bool:
-        """Show delete confirmation dialog."""
-        reply = QMessageBox.question(
-            self,
-            "Confirm Delete",
-            f"Are you sure you want to delete '{product_name}'?\n\nThis action cannot be undone.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        return reply == QMessageBox.Yes
-    
-    def _show_info(self, title: str, message: str):
-        """Show information message box."""
-        QMessageBox.information(self, title, message)
-    
-    def _show_error(self, title: str, message: str):
-        """Show error message box."""
-        QMessageBox.critical(self, title, message)
 
     def _on_export_clicked(self):
         """Handle export button click."""

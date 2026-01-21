@@ -1250,11 +1250,11 @@ def get_invoice_dialog_style():
             background: {BACKGROUND};
         }}
         QToolTip {{
-            background-color: #1F2937;
-            color: #FFFFFF;
-            border: 1px solid #374151;
+            background-color: #FFFFFF;
+            color: #1F2937;
+            border: 2px solid #3B82F6;
             border-radius: 6px;
-            padding: 8px 12px;
+            padding: 10px 14px;
             font-size: 13px;
             font-weight: normal;
         }}

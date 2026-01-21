@@ -14,6 +14,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from core.services.payment_service import payment_service
+from core.logger import get_logger, log_performance, UserActionLogger
+from core.error_handler import ErrorHandler, handle_errors
+from core.exceptions import PaymentException, InvalidPaymentAmount
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -48,7 +53,9 @@ class PaymentController:
     def __init__(self):
         """Initialize controller with service reference"""
         self._service = payment_service
+        logger.debug("PaymentController initialized")
     
+    @log_performance
     def get_filtered_payments(
         self, 
         filters: Optional[PaymentFilters] = None
@@ -65,8 +72,11 @@ class PaymentController:
             - PaymentStats with computed statistics
         """
         try:
+            logger.debug(f"Fetching filtered payments with filters: {filters}")
+            
             # Get all payments (PAYMENT type = money OUT to suppliers)
             all_payments = self._service.get_payments(payment_type='PAYMENT')
+            logger.debug(f"Retrieved {len(all_payments) if all_payments else 0} payments")
             
             # Calculate stats on unfiltered data
             stats = self._calculate_stats(all_payments)
@@ -77,10 +87,11 @@ class PaymentController:
             else:
                 filtered = all_payments
             
+            logger.info(f"Filtered payments: {len(filtered) if filtered else 0} out of {len(all_payments) if all_payments else 0}")
             return filtered, stats
             
         except Exception as e:
-            print(f"[PaymentController] Error fetching payments: {e}")
+            logger.error(f"Error fetching payments: {e}", exc_info=True)
             return [], PaymentStats()
     
     def _apply_filters(
@@ -107,6 +118,7 @@ class PaymentController:
                 p for p in filtered
                 if self._matches_search(p, search_lower)
             ]
+            logger.debug(f"After search filter: {len(filtered)} payments")
         
         # Apply method filter
         if filters.method and filters.method != "All Methods":
@@ -114,6 +126,7 @@ class PaymentController:
                 p for p in filtered
                 if (p.get('mode') or '') == filters.method
             ]
+            logger.debug(f"After method filter: {len(filtered)} payments")
         
         # Apply status filter
         if filters.status and filters.status != "All Status":
@@ -121,6 +134,7 @@ class PaymentController:
                 p for p in filtered
                 if (p.get('status') or 'Completed') == filters.status
             ]
+            logger.debug(f"After status filter: {len(filtered)} payments")
         
         # Apply period filter
         if filters.period and filters.period != "All Time":
@@ -128,6 +142,7 @@ class PaymentController:
                 p for p in filtered
                 if self._matches_period(p.get('date', ''), filters.period)
             ]
+            logger.debug(f"After period filter: {len(filtered)} payments")
         
         return filtered
     
@@ -214,6 +229,8 @@ class PaymentController:
             suppliers_count=suppliers_count
         )
     
+    @log_performance
+    @handle_errors("Delete Payment")
     def delete_payment(self, payment_id: int) -> Tuple[bool, str]:
         """
         Delete a payment by ID.
@@ -225,12 +242,25 @@ class PaymentController:
             Tuple of (success, message)
         """
         try:
+            logger.info(f"Attempting to delete payment ID: {payment_id}")
+            
+            # Delete the payment
             success = self._service.delete_payment(payment_id)
+            
             if success:
+                UserActionLogger.log_payment_deleted(payment_id)
+                logger.info(f"Successfully deleted payment ID: {payment_id}")
                 return True, "Payment deleted successfully"
+            
+            logger.warning(f"Failed to delete payment ID: {payment_id}")
             return False, "Failed to delete payment"
+            
+        except PaymentException as e:
+            logger.error(f"Payment error while deleting {payment_id}: {e.error_code}", exc_info=True)
+            return False, e.to_user_message()
         except Exception as e:
-            return False, f"Error deleting payment: {str(e)}"
+            logger.error(f"Error deleting payment {payment_id}: {e}", exc_info=True)
+            return ErrorHandler.handle_exception(e, "Delete Payment", show_dialog=False)
     
     def get_payment_by_id(self, payment_id: int) -> Optional[Dict]:
         """
@@ -243,9 +273,10 @@ class PaymentController:
             Payment dictionary or None if not found
         """
         try:
+            logger.debug(f"Fetching payment ID: {payment_id}")
             return self._service.get_payment_by_id(payment_id)
         except Exception as e:
-            print(f"[PaymentController] Error fetching payment: {e}")
+            logger.error(f"Error fetching payment {payment_id}: {e}", exc_info=True)
             return None
 
 

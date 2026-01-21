@@ -16,6 +16,11 @@ from dataclasses import dataclass
 
 from core.services.product_service import ProductService
 from core.db.sqlite_db import db
+from core.logger import get_logger, log_performance, UserActionLogger
+from core.error_handler import ErrorHandler, handle_errors
+from core.exceptions import ProductException, InsufficientStock
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -158,6 +163,7 @@ class ProductController:
     # List Screen Methods
     # -------------------------------------------------------------------------
     
+    @log_performance
     def get_all_products(self) -> List[Dict]:
         """
         Fetch all products from database.
@@ -166,14 +172,20 @@ class ProductController:
             List of product dictionaries
         """
         try:
+            logger.debug("Fetching all products from database")
             products = db.get_products()
             if products:
-                return [dict(p) if hasattr(p, 'keys') else p for p in products]
+                result = [dict(p) if hasattr(p, 'keys') else p for p in products]
+                logger.info(f"Successfully fetched {len(result)} products")
+                return result
+            logger.debug("No products found in database")
             return []
         except Exception as e:
-            print(f"Error loading products: {e}")
+            logger.error(f"Error loading products: {e}", exc_info=True)
             return []
     
+    @log_performance
+    @handle_errors("Delete Product")
     def delete_product(self, product_id: int) -> Tuple[bool, str]:
         """
         Delete a product by ID.
@@ -185,10 +197,28 @@ class ProductController:
             Tuple of (success, message)
         """
         try:
+            logger.info(f"Attempting to delete product ID: {product_id}")
+            
+            # Get product details before deletion for logging
+            product = db.get_product_by_id(product_id)
+            if not product:
+                raise ProductException("Product not found")
+            
+            product_name = product.get('name', 'Unknown')
+            
+            # Delete the product
             db.delete_product(product_id)
+            
+            UserActionLogger.log_product_created(product_id, product_name)  # Using for consistency
+            logger.info(f"Successfully deleted product ID: {product_id}, Name: {product_name}")
             return True, "Product deleted successfully!"
+            
+        except ProductException as e:
+            logger.error(f"Product error while deleting {product_id}: {e.error_code}", exc_info=True)
+            return False, e.to_user_message()
         except Exception as e:
-            return False, f"Failed to delete product: {str(e)}"
+            logger.error(f"Failed to delete product {product_id}: {e}", exc_info=True)
+            return ErrorHandler.handle_exception(e, "Delete Product", show_dialog=False)
     
     def get_stock_status(self, product: Dict) -> str:
         """

@@ -3,8 +3,8 @@ Party dialog module - Add/Edit Party (Customer/Supplier)
 Follows the same style as product_form_dialog.py
 """
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QMessageBox,
-    QScrollArea, QWidget, QGridLayout
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QWidget, QGridLayout
 )
 from PySide6.QtCore import Qt
 
@@ -16,15 +16,16 @@ from theme import (
     # Styles
     get_section_frame_style, get_dialog_footer_style,
     get_cancel_button_style, get_save_button_style,
-    get_link_label_style, get_scroll_area_style
+    get_link_label_style
 )
 from widgets import (
-    DialogInput, DialogComboBox, DialogTextEdit, DialogFieldGroup, CustomButton
+    DialogInput, DialogComboBox, DialogTextEdit, DialogFieldGroup, CustomButton, DialogScrollArea
 )
 from ui.base.base_dialog import BaseDialog
+from ui.error_handler import UIErrorHandler
 from core.enums import PartyType, BalanceType
 from core.services.party_service import party_service
-from core import to_upper
+from core.core_utils import to_upper
 
 
 class PartyDialog(BaseDialog):
@@ -48,16 +49,9 @@ class PartyDialog(BaseDialog):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        # Scroll area for the entire content
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet(get_scroll_area_style())
-        
-        scroll_content = QWidget()
-        self.scroll_layout = QVBoxLayout(scroll_content)
-        self.scroll_layout.setContentsMargins(40, 30, 40, 30)
-        self.scroll_layout.setSpacing(24)
+        # Create scroll area widget
+        scroll_widget = DialogScrollArea()
+        self.scroll_layout = scroll_widget.get_layout()
         
         # Header
         title_text = "Edit Party" if self.party_data else "Add New Party"
@@ -82,8 +76,7 @@ class PartyDialog(BaseDialog):
         
         self.scroll_layout.addStretch()
         
-        scroll.setWidget(scroll_content)
-        main_layout.addWidget(scroll)
+        main_layout.addWidget(scroll_widget)
         
         # Footer with buttons
         main_layout.addWidget(self._build_footer())
@@ -332,19 +325,53 @@ class PartyDialog(BaseDialog):
     
     def _create_phone_input(self) -> DialogInput:
         self.phone_input = DialogInput("Enter mobile number")
+        self.phone_input.textChanged.connect(self._clear_phone_error)
         return self.phone_input
+    
+    def _clear_phone_error(self, *_):
+        """Reset phone field style when user edits it"""
+        try:
+            self.phone_input.set_error(False)
+        except Exception:
+            pass
     
     def _create_email_input(self) -> DialogInput:
         self.email_input = DialogInput("Enter email address")
+        self.email_input.textChanged.connect(self._clear_email_error)
         return self.email_input
+    
+    def _clear_email_error(self, *_):
+        """Reset email field style when user edits it"""
+        try:
+            self.email_input.set_error(False)
+        except Exception:
+            pass
     
     def _create_gstin_input(self) -> DialogInput:
         self.gst_number_input = DialogInput("Enter GSTIN")
+        self.gst_number_input.textChanged.connect(lambda text: to_upper(self.gst_number_input, text))
+        self.gst_number_input.textChanged.connect(self._clear_gstin_error)
         return self.gst_number_input
+    
+    def _clear_gstin_error(self, *_):
+        """Reset GSTIN field style when user edits it"""
+        try:
+            self.gst_number_input.set_error(False)
+        except Exception:
+            pass
     
     def _create_pan_input(self) -> DialogInput:
         self.pan_input = DialogInput("Enter PAN number")
+        self.pan_input.textChanged.connect(lambda text: to_upper(self.pan_input, text))
+        self.pan_input.textChanged.connect(self._clear_pan_error)
         return self.pan_input
+    
+    def _clear_pan_error(self, *_):
+        """Reset PAN field style when user edits it"""
+        try:
+            self.pan_input.set_error(False)
+        except Exception:
+            pass
     
     def _create_type_combo(self) -> DialogComboBox:
         party_types = ["", PartyType.CUSTOMER.value, PartyType.SUPPLIER.value, PartyType.BOTH.value]
@@ -361,7 +388,15 @@ class PartyDialog(BaseDialog):
     def _create_opening_balance_input(self) -> DialogInput:
         self.opening_balance = DialogInput("Enter opening balance")
         self.opening_balance.setText("0.00")
+        self.opening_balance.textChanged.connect(self._clear_opening_balance_error)
         return self.opening_balance
+    
+    def _clear_opening_balance_error(self, *_):
+        """Reset opening balance field style when user edits it"""
+        try:
+            self.opening_balance.set_error(False)
+        except Exception:
+            pass
     
     def _create_balance_type_combo(self) -> DialogComboBox:
         # Balance types: To Receive (dr) for customers, To Pay (cr) for suppliers
@@ -390,16 +425,33 @@ class PartyDialog(BaseDialog):
     
     def _create_address_input(self) -> DialogTextEdit:
         self.address_input = DialogTextEdit("Enter address", 80)
+        self.address_input.textChanged.connect(self._clear_address_error)
         return self.address_input
+    
+    def _clear_address_error(self, *_):
+        """Reset address field style when user edits it"""
+        try:
+            if hasattr(self.address_input, 'set_error'):
+                self.address_input.set_error(False)
+        except Exception:
+            pass
     
     def _create_city_input(self) -> DialogInput:
         self.city_input = DialogInput("Enter city")
+        self.city_input.textChanged.connect(lambda text: to_upper(self.city_input, text))
+        self.city_input.textChanged.connect(self._clear_city_error)
         return self.city_input
+    
+    def _clear_city_error(self, *_):
+        """Reset city field style when user edits it"""
+        try:
+            self.city_input.set_error(False)
+        except Exception:
+            pass
     
     def _create_state_input(self) -> DialogComboBox:
         # List of all Indian states and union territories
         indian_states = [
-            "",  # Empty option for no selection
             # "Andaman and Nicobar Islands",
             "Andhra Pradesh",
             "Arunachal Pradesh",
@@ -438,11 +490,22 @@ class PartyDialog(BaseDialog):
             "West Bengal",
         ]
         self.state_input = DialogComboBox(indian_states)
+        # Set default state to first item if no existing data
+        if not self.party_data and len(indian_states) > 0:
+            self.state_input.setCurrentIndex(0)
         return self.state_input
     
     def _create_pincode_input(self) -> DialogInput:
         self.pincode_input = DialogInput("Enter pin code")
+        self.pincode_input.textChanged.connect(self._clear_pincode_error)
         return self.pincode_input
+    
+    def _clear_pincode_error(self, *_):
+        """Reset pincode field style when user edits it"""
+        try:
+            self.pincode_input.set_error(False)
+        except Exception:
+            pass
     
     # Bank Details Inputs
     def _create_account_number_input(self) -> DialogInput:
@@ -467,7 +530,15 @@ class PartyDialog(BaseDialog):
     
     def _create_upi_input(self) -> DialogInput:
         self.upi_input = DialogInput("ex: babulal@upi")
+        self.upi_input.textChanged.connect(self._clear_upi_error)
         return self.upi_input
+    
+    def _clear_upi_error(self, *_):
+        """Reset UPI field style when user edits it"""
+        try:
+            self.upi_input.set_error(False)
+        except Exception:
+            pass
     
     # === Helper Methods ===
     
@@ -550,7 +621,7 @@ class PartyDialog(BaseDialog):
         # Check for duplicate party name
         is_duplicate, error = party_service.check_duplicate_name(name, current_party_id)
         if is_duplicate:
-            QMessageBox.warning(self, "Duplicate Name", error)
+            UIErrorHandler.show_validation_error("Duplicate Name", [error])
             self.name_input.setFocus()
             return
         
@@ -559,48 +630,54 @@ class PartyDialog(BaseDialog):
         if not is_valid:
             self.name_input.set_error(True, error)
             self.name_input.setFocus()
+            UIErrorHandler.show_validation_error("Validation Error", [error])
             return
         
         # Validate party type
         is_valid, error = party_service.validate_party_type(party_type)
         if not is_valid:
-            QMessageBox.warning(self, "Validation", error)
+            UIErrorHandler.show_validation_error("Validation Error", [error])
             self.type_combo.setFocus()
             return
         
         # Validate phone number
         is_valid, error = party_service.validate_mobile_number(phone)
         if not is_valid:
-            QMessageBox.warning(self, "Validation", error)
+            self.phone_input.set_error(True, error)
             self.phone_input.setFocus()
+            UIErrorHandler.show_validation_error("Validation Error", [error])
             return
         
         # Validate email
         is_valid, error = party_service.validate_email_address(email)
         if not is_valid:
-            QMessageBox.warning(self, "Validation", error)
+            self.email_input.set_error(True, error)
             self.email_input.setFocus()
+            UIErrorHandler.show_validation_error("Validation Error", [error])
             return
         
         # Validate GSTIN
         is_valid, error = party_service.validate_gstin_number(gst)
         if not is_valid:
-            QMessageBox.warning(self, "Validation", error)
+            self.gst_number_input.set_error(True, error)
             self.gst_number_input.setFocus()
+            UIErrorHandler.show_validation_error("Validation Error", [error])
             return
         
         # Validate PAN
         is_valid, error = party_service.validate_pan_number(pan)
         if not is_valid:
-            QMessageBox.warning(self, "Validation", error)
+            self.pan_input.set_error(True, error)
             self.pan_input.setFocus()
+            UIErrorHandler.show_validation_error("Validation Error", [error])
             return
         
         # Validate pincode
         is_valid, error = party_service.validate_pincode_number(pincode)
         if not is_valid:
-            QMessageBox.warning(self, "Validation", error)
+            self.pincode_input.set_error(True, error)
             self.pincode_input.setFocus()
+            UIErrorHandler.show_validation_error("Validation Error", [error])
             return
         
         # Validate opening balance
@@ -608,20 +685,23 @@ class PartyDialog(BaseDialog):
             self.opening_balance.text()
         )
         if not is_valid:
-            QMessageBox.warning(self, "Validation", error)
+            self.opening_balance.set_error(True, error)
             self.opening_balance.setFocus()
+            UIErrorHandler.show_validation_error("Validation Error", [error])
             return
         
-        # Validate bank details if bank section is visible
+        # Validate bank details if bank section is visible (early validation)
         bank_details = None
         if self.bank_section.isVisible():
             acc_num = self.account_number_input.text().strip()
             acc_confirm = self.account_number_confirm.text().strip()
             
             if acc_num or acc_confirm:
+                # Validate account numbers match early
                 if acc_num != acc_confirm:
-                    QMessageBox.warning(self, "Validation", "Account numbers must match")
+                    self.account_number_confirm.set_error(True, "Account numbers must match")
                     self.account_number_confirm.setFocus()
+                    UIErrorHandler.show_validation_error("Validation Error", ["Account numbers must match"])
                     return
                 
                 bank_details = {
@@ -657,17 +737,22 @@ class PartyDialog(BaseDialog):
             if current_party_id:
                 success = party_service.update_party(current_party_id, party)
                 if not success:
-                    QMessageBox.warning(self, "Error", "Failed to update party.")
+                    UIErrorHandler.show_error("Error", "Failed to update party.")
                     return
             else:
                 party_id = party_service.add_party(party)
                 if party_id:
                     party['id'] = party_id
                 else:
-                    QMessageBox.warning(self, "Error", "Failed to add party.")
+                    UIErrorHandler.show_error("Error", "Failed to add party.")
                     return
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error saving party: {e}")
+            # Show specific error message for duplicate party
+            error_msg = str(e)
+            if "already exists" in error_msg.lower():
+                UIErrorHandler.show_validation_error("Duplicate Party", [error_msg])
+            else:
+                UIErrorHandler.show_error("Error", f"Error saving party: {error_msg}")
             return
 
         # Add bank details to result
@@ -675,7 +760,7 @@ class PartyDialog(BaseDialog):
             party['bank_details'] = bank_details
         
         self.result_data = party
-        QMessageBox.information(self, "Success", "Party saved successfully!")
+        UIErrorHandler.show_success("Success", "Party saved successfully!")
         self.accept()
     
     def keyPressEvent(self, event):
@@ -690,4 +775,83 @@ class PartyDialog(BaseDialog):
             self.reject()
             return
         super().keyPressEvent(event)
+    
+    def closeEvent(self, event):
+        """Clean up resources when dialog is closed"""
+        self._cleanup_resources()
+        super().closeEvent(event)
+    
+    def _cleanup_resources(self):
+        """Disconnect signals and cleanup resources"""
+        try:
+            # Disconnect all signal connections
+            if hasattr(self, 'name_input') and self.name_input:
+                try:
+                    self.name_input.textChanged.disconnect()
+                except Exception:
+                    pass
+            
+            if hasattr(self, 'phone_input') and self.phone_input:
+                try:
+                    self.phone_input.textChanged.disconnect()
+                except Exception:
+                    pass
+            
+            if hasattr(self, 'email_input') and self.email_input:
+                try:
+                    self.email_input.textChanged.disconnect()
+                except Exception:
+                    pass
+            
+            if hasattr(self, 'gst_number_input') and self.gst_number_input:
+                try:
+                    self.gst_number_input.textChanged.disconnect()
+                except Exception:
+                    pass
+            
+            if hasattr(self, 'pan_input') and self.pan_input:
+                try:
+                    self.pan_input.textChanged.disconnect()
+                except Exception:
+                    pass
+            
+            if hasattr(self, 'city_input') and self.city_input:
+                try:
+                    self.city_input.textChanged.disconnect()
+                except Exception:
+                    pass
+            
+            if hasattr(self, 'pincode_input') and self.pincode_input:
+                try:
+                    self.pincode_input.textChanged.disconnect()
+                except Exception:
+                    pass
+            
+            if hasattr(self, 'opening_balance') and self.opening_balance:
+                try:
+                    self.opening_balance.textChanged.disconnect()
+                except Exception:
+                    pass
+            
+            if hasattr(self, 'type_combo') and self.type_combo:
+                try:
+                    self.type_combo.currentTextChanged.disconnect()
+                except Exception:
+                    pass
+            
+            if hasattr(self, 'address_input') and self.address_input:
+                try:
+                    self.address_input.textChanged.disconnect()
+                except Exception:
+                    pass
+            
+            if hasattr(self, 'upi_input') and self.upi_input:
+                try:
+                    self.upi_input.textChanged.disconnect()
+                except Exception:
+                    pass
+        except Exception as e:
+            # Log but don't raise during cleanup
+            import logging
+            logging.debug(f"Error during resource cleanup: {e}")
 

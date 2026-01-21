@@ -24,7 +24,7 @@ from theme import (
     get_checkbox_style, get_textarea_style, get_label_font, get_checkbox_font,
     get_stat_card_style, get_stat_label_style, get_stat_value_style,
     get_stat_icon_container_style, get_table_frame_style, get_enhanced_table_style,
-    get_row_action_button_style
+    get_row_action_button_style, get_scroll_area_style
 )
 
 class CustomButton(QPushButton):
@@ -2825,10 +2825,9 @@ class InvoiceItemWidget(QFrame):
                         border: 1px solid {BORDER};
                     }}
                     QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
-                        width: 20px;
+                        width: 0px;
                         border: none;
                         background: transparent;
-                        display: none;
                     }}
                 """)
                 self.tax_spin.setToolTip("Tax is locked for Non-GST invoices")
@@ -3033,3 +3032,100 @@ class InvoiceItemWidget(QFrame):
             self.item_changed.emit()
         except Exception as e:
             print(f"Update tax for type change error: {e}")
+
+
+class DialogScrollArea(QWidget):
+    """
+    Reusable scroll area container for dialogs with consistent styling.
+    
+    Provides:
+    - Styled scroll area with transparent background
+    - Pre-configured layout for dialog content
+    - Convenience methods for adding widgets
+    - Consistent margins and spacing across all dialogs
+    
+    Usage:
+        scroll_widget = DialogScrollArea()
+        self.scroll_layout = scroll_widget.get_layout()
+        main_layout.addWidget(scroll_widget)
+        
+        # Then add widgets directly to scroll_layout
+        self.scroll_layout.addWidget(title)
+        self.scroll_layout.addWidget(section)
+        self.scroll_layout.addStretch()
+    """
+    
+    def __init__(self, parent=None, margins=(40, 30, 40, 30), spacing=24):
+        """
+        Initialize the DialogScrollArea.
+        
+        Args:
+            parent: Parent widget
+            margins: Tuple of (left, top, right, bottom) margins for content layout
+            spacing: Spacing between widgets in the content layout
+        """
+        super().__init__(parent)
+        
+        # Main layout for this widget
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Create and configure scroll area
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setStyleSheet(get_scroll_area_style())
+        
+        # Create scrollable content widget
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background: transparent; border: none;")
+        
+        # Create layout for scroll content
+        self.content_layout = QVBoxLayout(scroll_content)
+        self.content_layout.setContentsMargins(*margins)
+        self.content_layout.setSpacing(spacing)
+        
+        # Set the scroll content widget
+        self.scroll.setWidget(scroll_content)
+        
+        # Add scroll area to main layout
+        main_layout.addWidget(self.scroll)
+    
+    def add_widget(self, widget):
+        """
+        Add a widget to the scroll area content.
+        
+        Args:
+            widget: Widget to add
+        """
+        self.content_layout.addWidget(widget)
+    
+    def add_stretch(self):
+        """Add vertical stretch to scroll area content layout."""
+        self.content_layout.addStretch()
+    
+    def add_spacing(self, spacing: int):
+        """
+        Add spacing to scroll area content layout.
+        
+        Args:
+            spacing: Amount of spacing to add in pixels
+        """
+        self.content_layout.addSpacing(spacing)
+    
+    def get_layout(self):
+        """
+        Get the scroll content layout for manual widget addition.
+        
+        Returns:
+            QVBoxLayout: The content layout for adding widgets
+        """
+        return self.content_layout
+    
+    def clear_layout(self):
+        """Clear all widgets from the scroll content layout."""
+        while self.content_layout.count():
+            item = self.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()

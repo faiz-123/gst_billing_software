@@ -17,6 +17,11 @@ from dataclasses import dataclass
 
 from core.services.party_service import PartyService
 from core.db.sqlite_db import db
+from core.logger import get_logger, log_performance, UserActionLogger
+from core.error_handler import ErrorHandler, handle_errors
+from core.exceptions import PartyException, PartyAlreadyExists
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -48,6 +53,7 @@ class PartyController:
     # Data Fetching
     # ─────────────────────────────────────────────────────────────────────────
     
+    @log_performance
     def get_all_parties(self) -> List[Dict]:
         """
         Fetch all parties for the current company.
@@ -57,11 +63,17 @@ class PartyController:
         """
         try:
             company_id = db.get_current_company_id()
+            logger.debug(f"Fetching all parties for company_id: {company_id}")
+            
             if company_id:
-                return db.get_parties_by_company(company_id) or []
-            return db.get_parties() or []
+                parties = db.get_parties_by_company(company_id) or []
+            else:
+                parties = db.get_parties() or []
+            
+            logger.info(f"Successfully fetched {len(parties)} parties")
+            return parties
         except Exception as e:
-            print(f"Error fetching parties: {e}")
+            logger.error(f"Error fetching parties: {e}", exc_info=True)
             return []
     
     def get_party_by_id(self, party_id: int) -> Optional[Dict]:
@@ -75,9 +87,10 @@ class PartyController:
             Party dictionary or None
         """
         try:
+            logger.debug(f"Fetching party ID: {party_id}")
             return db.get_party_by_id(party_id)
         except Exception as e:
-            print(f"Error fetching party: {e}")
+            logger.error(f"Error fetching party {party_id}: {e}", exc_info=True)
             return None
     
     def search_parties(self, query: str, party_type: Optional[str] = None) -> List[Dict]:
@@ -261,6 +274,7 @@ class PartyController:
             print(f"Error saving party: {e}")
             return False, f"Error saving party: {str(e)}", None
     
+    @handle_errors("Delete Party")
     def delete_party(self, party_id: int) -> Tuple[bool, str]:
         """
         Delete a party.
@@ -272,16 +286,30 @@ class PartyController:
             Tuple of (success, message)
         """
         try:
-            # Check if party has related transactions
-            # (This check could be in the service layer)
+            logger.info(f"Attempting to delete party ID: {party_id}")
             
+            # Check if party has related transactions
+            party = db.get_party_by_id(party_id)
+            if not party:
+                raise PartyException("Party not found")
+            
+            party_name = party.get('party_name', 'Unknown')
+            
+            # Delete the party
             success = db.delete_party(party_id)
             if success:
+                logger.info(f"Successfully deleted party ID: {party_id}, Name: {party_name}")
                 return True, "Party deleted successfully!"
+            
+            logger.warning(f"Failed to delete party ID: {party_id}")
             return False, "Failed to delete party"
+            
+        except PartyException as e:
+            logger.error(f"Party error while deleting {party_id}: {e.error_code}", exc_info=True)
+            return False, e.to_user_message()
         except Exception as e:
-            print(f"Error deleting party: {e}")
-            return False, f"Error deleting party: {str(e)}"
+            logger.error(f"Error deleting party {party_id}: {e}", exc_info=True)
+            return ErrorHandler.handle_exception(e, "Delete Party", show_dialog=False)
 
 
 # Singleton instance for easy import

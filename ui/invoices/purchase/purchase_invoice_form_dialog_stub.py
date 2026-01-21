@@ -2,10 +2,10 @@
 STUB: Purchase Invoice Dialog
 This is a placeholder stub created during refactoring.
 
-DEPRECATED: The old implementation depends on the monolithic sales_invoice_form_dialog which has been removed.
+DEPRECATED: This file depends on the old monolithic sales_invoice_form_dialog which has been removed.
 TODO (PHASE 6): Refactor purchase invoices to use component-based architecture similar to sales invoices.
 
-Status: The original purchase_invoice_form_dialog.py file was broken after deleting the old sales dialog.
+Status: The purchase_invoice_form_dialog.py file is broken after deleting the old sales dialog.
 This stub allows the application to run while we plan the proper refactoring.
 """
 

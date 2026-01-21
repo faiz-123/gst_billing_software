@@ -18,6 +18,7 @@ from theme import (
     BORDER, BACKGROUND, PRIMARY_HOVER, PRIMARY_LIGHT
 )
 from core.db.sqlite_db import db
+from ui.error_handler import UIErrorHandler
 from widgets import PartySelector, DialogEditableComboBox
 
 
@@ -2348,7 +2349,7 @@ class ReceiptDialog(QDialog):
             # Show first error
             errors = self.validator.errors
             error_message = "\n".join([f"❌ {v}" for v in errors.values()])
-            QMessageBox.critical(self, "Validation Failed", f"Please fix the following errors:\n\n{error_message}")
+            UIErrorHandler.show_error("Validation Failed", f"Please fix the following errors:\n\n{error_message}")
             return
         
         # Validate party selection
@@ -2359,7 +2360,7 @@ class ReceiptDialog(QDialog):
                     border: 2px solid {DANGER} !important;
                 }}
             """)
-            QMessageBox.warning(self, "Validation Error", "Please select a valid customer!")
+            UIErrorHandler.show_validation_error("Validation Error", ["Please select a valid customer!"])
             self.party_search.setFocus()
             return
         else:
@@ -2372,30 +2373,22 @@ class ReceiptDialog(QDialog):
         if reference:
             exclude_id = self.receipt_data.get('id') if self.receipt_data else None
             if self.duplicate_checker.check_duplicate_reference(reference, exclude_id):
-                reply = QMessageBox.warning(
-                    self,
+                if not UIErrorHandler.ask_confirmation(
                     "Duplicate Reference",
                     f"Reference '{reference}' already exists!\n\n"
-                    f"Do you want to use this reference anyway?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
-                )
-                if reply == QMessageBox.No:
+                    f"Do you want to use this reference anyway?"
+                ):
                     self.reference_input.setFocus()
                     return
         
         # Check for duplicate payment (same amount on same date)
         if self.duplicate_checker.check_duplicate_payment(party.get('id'), amount, receipt_date.toString("yyyy-MM-dd")):
-            reply = QMessageBox.warning(
-                self,
+            if not UIErrorHandler.ask_confirmation(
                 "Possible Duplicate Payment",
                 f"A payment of ₹{amount:,.2f} for {party.get('name')} "
                 f"on {receipt_date.toString('dd-MM-yyyy')} already exists!\n\n"
-                f"Do you want to continue?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if reply == QMessageBox.No:
+                f"Do you want to continue?"
+            ):
                 return
         
         # ===== OVER-PAYMENT CONFIRMATION =====
@@ -2406,36 +2399,27 @@ class ReceiptDialog(QDialog):
             if invoice:
                 due = invoice.get('due_amount', invoice.get('grand_total', 0))
                 if amount > due:
-                    reply = QMessageBox.question(
-                        self, "Excess Amount",
-                        f"Receipt (₹{amount:,.2f}) exceeds due amount (₹{due:,.2f}).\n\nContinue?",
-                        QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.No
-                    )
-                    if reply == QMessageBox.No:
+                    if not UIErrorHandler.ask_confirmation(
+                        "Excess Amount",
+                        f"Receipt (₹{amount:,.2f}) exceeds due amount (₹{due:,.2f}).\n\nContinue?"
+                    ):
                         return
             else:
                 # No invoice selected in bill-to-bill mode
-                reply = QMessageBox.question(
-                    self, "No Invoice Selected",
-                    "No invoice selected. Record as Direct Receipt?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
-                )
-                if reply == QMessageBox.No:
+                if not UIErrorHandler.ask_confirmation(
+                    "No Invoice Selected",
+                    "No invoice selected. Record as Direct Receipt?"
+                ):
                     return
         
         elif self.settlement_mode == "fifo":
             # Confirm FIFO allocation
             if hasattr(self, 'fifo_allocations') and self.fifo_allocations:
                 alloc_count = len([a for a in self.fifo_allocations if a['amount'] > 0])
-                reply = QMessageBox.question(
-                    self, "Confirm FIFO Settlement",
-                    f"This will settle {alloc_count} invoice(s) using FIFO method.\n\nProceed?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.Yes
-                )
-                if reply == QMessageBox.No:
+                if not UIErrorHandler.ask_confirmation(
+                    "Confirm FIFO Settlement",
+                    f"This will settle {alloc_count} invoice(s) using FIFO method.\n\nProceed?"
+                ):
                     return
         
         # Prepare notes

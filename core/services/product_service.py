@@ -4,6 +4,12 @@ Business logic for product operations
 """
 
 from typing import Dict, Optional, Tuple
+from core.logger import get_logger
+from core.exceptions import (
+    ProductException, ProductNotFound, InsufficientStock
+)
+
+logger = get_logger(__name__)
 
 
 class ProductService:

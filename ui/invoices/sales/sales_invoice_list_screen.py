@@ -35,6 +35,7 @@ from core.core_utils import format_currency
 
 # UI imports
 from ui.base import BaseScreen
+from ui.error_handler import UIErrorHandler
 from ui.invoices.sales.sales_invoice_form_dialog import InvoiceDialog
 
 
@@ -577,18 +578,22 @@ class InvoicesScreen(BaseScreen):
         invoice_no = invoice.get('invoice_no', f"INV-{invoice.get('id', 0):03d}")
         invoice_id = invoice.get('id')
         
-        if not self._confirm_delete(invoice_no):
+        # Show confirmation dialog
+        if not UIErrorHandler.ask_confirmation(
+            "Confirm Delete",
+            f"Are you sure you want to delete '{invoice_no}'?\n\nThis action cannot be undone."
+        ):
             return
         
         # Delegate to controller
         success, message = self._controller.delete_invoice(invoice_id)
         
         if success:
-            self._show_info("Success", f"Invoice '{invoice_no}' deleted successfully!")
+            UIErrorHandler.show_success("Success", f"Invoice '{invoice_no}' deleted successfully!")
             self._load_data()
             self.invoice_updated.emit()
         else:
-            self._show_error("Error", message)
+            UIErrorHandler.show_error("Error", message)
     
     def _open_invoice_readonly(self, invoice: dict):
         """Open invoice dialog in read-only mode for viewing."""
@@ -610,29 +615,6 @@ class InvoicesScreen(BaseScreen):
             
         except Exception as e:
             self._show_error("Error", f"Failed to open invoice: {str(e)}")
-    
-    # ─────────────────────────────────────────────────────────────────────────
-    # Dialog Helpers
-    # ─────────────────────────────────────────────────────────────────────────
-    
-    def _confirm_delete(self, invoice_no: str) -> bool:
-        """Show delete confirmation dialog."""
-        reply = QMessageBox.question(
-            self,
-            "Confirm Delete",
-            f"Are you sure you want to delete '{invoice_no}'?\n\nThis action cannot be undone.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        return reply == QMessageBox.Yes
-    
-    def _show_info(self, title: str, message: str):
-        """Show information message box."""
-        QMessageBox.information(self, title, message)
-    
-    def _show_error(self, title: str, message: str):
-        """Show error message box."""
-        QMessageBox.critical(self, title, message)
     
     # ─────────────────────────────────────────────────────────────────────────
     # Public Interface

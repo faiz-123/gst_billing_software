@@ -16,6 +16,11 @@ from dataclasses import dataclass
 from datetime import datetime, date, timedelta
 
 from core.db.sqlite_db import db
+from core.logger import get_logger, log_performance, UserActionLogger
+from core.error_handler import ErrorHandler, handle_errors
+from core.exceptions import InvoiceException
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -246,7 +251,7 @@ class PurchaseController:
         total = len(purchases)
         total_amount = sum(float(pur.get('grand_total', 0) or 0) for pur in purchases)
         paid_count = sum(1 for pur in purchases if pur.get('status') == 'Paid')
-        unpaid_count = sum(1 for pur in purchases if pur.get('status') in ['Unpaid', 'Draft'])
+        unpaid_count = sum(1 for pur in purchases if pur.get('status') in ['Unpaid', 'Partial Paid'])
         
         return PurchaseStats(
             total=total,
@@ -276,6 +281,7 @@ class PurchaseController:
     # CRUD Operations
     # ─────────────────────────────────────────────────────────────────────────
     
+    @handle_errors("Delete Purchase Invoice")
     def delete_purchase(self, purchase_id: int) -> Tuple[bool, str]:
         """
         Delete a purchase invoice by ID.
@@ -287,10 +293,27 @@ class PurchaseController:
             Tuple of (success, message)
         """
         try:
+            logger.info(f"Attempting to delete purchase invoice ID: {purchase_id}")
+            
+            # Get purchase details for logging
+            purchase = db.get_purchase_invoice(purchase_id)
+            if not purchase:
+                raise InvoiceException("Purchase invoice not found")
+            
+            purchase_no = purchase.get('invoice_no', 'Unknown')
+            
+            # Delete the purchase
             db.delete_purchase_invoice(purchase_id)
+            
+            logger.info(f"Successfully deleted purchase invoice ID: {purchase_id}, Number: {purchase_no}")
             return True, "Purchase invoice deleted successfully!"
+            
+        except InvoiceException as e:
+            logger.error(f"Invoice error while deleting purchase {purchase_id}: {e.error_code}", exc_info=True)
+            return False, e.to_user_message()
         except Exception as e:
-            return False, f"Failed to delete purchase invoice: {str(e)}"
+            logger.error(f"Failed to delete purchase invoice {purchase_id}: {e}", exc_info=True)
+            return ErrorHandler.handle_exception(e, "Delete Purchase Invoice", show_dialog=False)
     
     # ─────────────────────────────────────────────────────────────────────────
     # Status Computation
@@ -304,7 +327,7 @@ class PurchaseController:
             purchase: Purchase dictionary
             
         Returns:
-            Status string ('Draft', 'Paid', 'Unpaid', 'Cancelled')
+            Status string ('Paid', 'Unpaid', 'Partial Paid', 'Cancelled')
         """
         # Check for explicit status
         explicit_status = purchase.get('status')
@@ -318,10 +341,12 @@ class PurchaseController:
         if balance_due <= 0 and grand_total > 0:
             return 'Paid'
         
-        # Default to Unpaid if has value, Draft otherwise
-        if grand_total > 0:
-            return 'Unpaid'
-        return 'Draft'
+        # Partial Paid if some balance remains
+        if 0 < balance_due < grand_total and grand_total > 0:
+            return 'Partial Paid'
+        
+        # Default to Unpaid
+        return 'Unpaid'
     
     def get_purchase_status_color(self, status: str) -> Tuple[str, str]:
         """
@@ -334,8 +359,8 @@ class PurchaseController:
             Tuple of (text_color, background_color)
         """
         status_colors = {
-            'Draft': ("#6B7280", "#F3F4F6"),
             'Unpaid': ("#6366F1", "#EEF2FF"),
+            'Partial Paid': ("#F59E0B", "#FEF3C7"),
             'Paid': ("#10B981", "#D1FAE5"),
             'Cancelled': ("#6B7280", "#F3F4F6")
         }

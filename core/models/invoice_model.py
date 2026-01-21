@@ -80,7 +80,7 @@ class Invoice:
     round_off: float = 0.0
     grand_total: float = 0.0
     balance_due: float = 0.0
-    status: str = "Draft"
+    status: str = "Unpaid"
     notes: Optional[str] = None
     created_at: Optional[str] = None
     items: List[InvoiceItem] = field(default_factory=list)
@@ -104,7 +104,7 @@ class Invoice:
             round_off=float(data.get('round_off', 0) or 0),
             grand_total=float(data.get('grand_total', 0) or 0),
             balance_due=float(data.get('balance_due', 0) or 0),
-            status=data.get('status', 'Draft'),
+            status=data.get('status', 'Unpaid'),
             notes=data.get('notes'),
             created_at=data.get('created_at')
         )
