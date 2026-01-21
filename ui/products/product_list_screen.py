@@ -1,69 +1,92 @@
 """
-Products List Screen
-UI layer - handles layout, signals/slots, and user interactions only.
+Products List Screen (Refactored)
+Simplified refactored version using reusable FilterWidget and ListTableHelper
 
 Architecture: UI → Controller → Service → DB
 """
 
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel,
-    QComboBox, QFrame, QTableWidgetItem,
-    QMessageBox, QDialog
+    QWidget, QHBoxLayout, QLabel, QComboBox, QFrame, QTableWidgetItem, QDialog
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QColor
 
 # Theme imports
 from theme import (
-    PRIMARY, TEXT_PRIMARY, TEXT_SECONDARY,
+    PRIMARY, TEXT_PRIMARY, TEXT_SECONDARY, WHITE, BORDER,
     SUCCESS, DANGER, WARNING,
     FONT_SIZE_SMALL,
     get_normal_font, get_bold_font,
-    get_filter_combo_style, get_filter_frame_style,
-    get_filter_label_style, get_status_badge_style
+    get_filter_combo_style, get_filter_label_style,
+    get_status_badge_style
 )
 
 # Widget imports
 from widgets import (
     StatCard, ListTable, TableFrame, TableActionButton,
-    SearchInputContainer, RefreshButton, ListHeader, StatsContainer
+    SearchInputContainer, RefreshButton, ListHeader, StatsContainer,
+    FilterWidget
 )
 
-# Controller import (NOT service directly)
+# Base screen imports
+from ui.base import BaseScreen, PaginationWidget
+
+# Controller import
 from controllers.product_controller import product_controller
 
 # Error handler import
 from ui.error_handler import UIErrorHandler
 
-# Core imports for formatting only
+# Core imports
 from core.core_utils import format_currency
+from core.logger import get_logger
 
-# UI imports
-from ui.base import BaseScreen
+# Dialog import
 from ui.products.product_form_dialog import ProductDialog
+
+logger = get_logger(__name__)
+
 
 class ProductsScreen(BaseScreen):
     """
-    Main screen for managing products and services.
+    Refactored Products List Screen using reusable FilterWidget and PaginationWidget
     
-    This UI component handles:
-    - Layout and visual presentation
-    - User interactions (clicks, typing)
-    - Signal emissions for external communication
-    
-    Business logic is delegated to ProductController.
+    Improvements over previous version:
+    - FilterWidget eliminates duplicate filter code
+    - Better code organization with clear separation of concerns
+    - Consistent with party_list_screen pattern
     """
     
     # Signal emitted when product data changes
     product_updated = Signal()
     
+    # Pagination constant
+    ITEMS_PER_PAGE = 49
+    DEBOUNCE_DELAY = 500  # ms
+    
     def __init__(self, parent=None):
+        """Initialize products screen."""
         super().__init__(title="Products", parent=parent)
         self.setObjectName("ProductsScreen")
+        logger.debug("Initializing ProductsScreen")
+        
         self._controller = product_controller
+        
+        # Data caching
         self._all_products = []
+        self._filtered_products = []
+        self._is_loading = False
+        
+        # Pagination widget
+        self.pagination_widget = None
+        
+        # Debounce timer for search
+        self._search_debounce_timer = QTimer()
+        self._search_debounce_timer.setSingleShot(True)
+        self._search_debounce_timer.timeout.connect(self._on_search_debounce)
+        
         self._setup_ui()
-        self._load_data()
+        self._load_products()
     
     # ─────────────────────────────────────────────────────────────────────────
     # UI Setup Methods
@@ -84,6 +107,7 @@ class ProductsScreen(BaseScreen):
         self.main_layout.addWidget(self._create_stats_section())
         self.main_layout.addWidget(self._create_filters_section())
         self.main_layout.addWidget(self._create_table_section(), 1)
+        self.main_layout.addWidget(self._create_pagination_controls())
     
     def _create_header(self) -> QWidget:
         """Create header with title and add button."""
@@ -94,7 +118,6 @@ class ProductsScreen(BaseScreen):
     
     def _create_stats_section(self) -> QWidget:
         """Create statistics cards section."""
-        # Create stat cards
         self._total_card = StatCard("📦", "Total Products", "0", PRIMARY)
         self._in_stock_card = StatCard("✅", "In Stock", "0", SUCCESS)
         self._low_stock_card = StatCard("⚠️", "Low Stock", "0", WARNING)
@@ -108,78 +131,57 @@ class ProductsScreen(BaseScreen):
         ])
     
     def _create_filters_section(self) -> QWidget:
-        """Create filters section with search and dropdowns."""
-        container = QFrame()
-        container.setStyleSheet(get_filter_frame_style())
+        """Create filters section using FilterWidget."""
+        filter_widget = FilterWidget()
         
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(12)
-        
-        # Search container using common widget
-        self._search_container = SearchInputContainer("Search by name, HSN, category...")
-        self._search_container.textChanged.connect(self._on_search_changed)
-        layout.addWidget(self._search_container)
+        # Search filter
+        filter_widget.add_search_filter("Search by name, HSN, category...")
+        filter_widget.search_changed.connect(self._on_search_changed)
         
         # Type filter
-        type_label = QLabel("Type:")
-        type_label.setStyleSheet(get_filter_label_style())
-        layout.addWidget(type_label)
-        
-        self._type_combo = QComboBox()
-        self._type_combo.setStyleSheet(get_filter_combo_style())
-        self._type_combo.addItem("All Types", "all")
-        self._type_combo.addItem("Goods", "Goods")
-        self._type_combo.addItem("Service", "Service")
-        self._type_combo.currentIndexChanged.connect(self._on_filter_changed)
-        layout.addWidget(self._type_combo)
+        type_options = {
+            "All Types": "all",
+            "Goods": "Goods",
+            "Service": "Service"
+        }
+        self._type_combo = filter_widget.add_combo_filter(
+            "type", "Type:", type_options
+        )
         
         # Category filter
-        category_label = QLabel("Category:")
-        category_label.setStyleSheet(get_filter_label_style())
-        layout.addWidget(category_label)
-        
-        self._category_combo = QComboBox()
-        self._category_combo.setStyleSheet(get_filter_combo_style())
+        self._category_combo = filter_widget.add_combo_filter(
+            "category", "Category:", {"All Categories": "all"}
+        )
         self._category_combo.setMinimumWidth(150)
-        self._category_combo.addItem("All Categories", "all")
-        self._category_combo.currentIndexChanged.connect(self._on_filter_changed)
-        layout.addWidget(self._category_combo)
         
         # Stock filter
-        stock_label = QLabel("Stock:")
-        stock_label.setStyleSheet(get_filter_label_style())
-        layout.addWidget(stock_label)
+        stock_options = {
+            "All": "All",
+            "In Stock": "In Stock",
+            "Low Stock": "Low Stock",
+            "Out of Stock": "Out of Stock"
+        }
+        self._stock_combo = filter_widget.add_combo_filter(
+            "stock", "Stock:", stock_options
+        )
         
-        self._stock_combo = QComboBox()
-        self._stock_combo.setStyleSheet(get_filter_combo_style())
-        self._stock_combo.addItem("All", "All")
-        self._stock_combo.addItem("In Stock", "In Stock")
-        self._stock_combo.addItem("Low Stock", "Low Stock")
-        self._stock_combo.addItem("Out of Stock", "Out of Stock")
-        self._stock_combo.currentIndexChanged.connect(self._on_filter_changed)
-        layout.addWidget(self._stock_combo)
+        # Stretch and refresh button
+        filter_widget.add_stretch()
+        filter_widget.add_refresh_button(self._on_refresh_clicked)
         
-        layout.addStretch()
+        # Connect filter changes
+        filter_widget.filters_changed.connect(self._on_filter_changed)
         
-        # Refresh button using common widget
-        refresh_btn = RefreshButton()
-        refresh_btn.clicked.connect(self._on_refresh_clicked)
-        layout.addWidget(refresh_btn)
-        
-        return container
+        return filter_widget
     
     def _create_table_section(self) -> QWidget:
         """Create the products table."""
-        # Create table frame container
         table_frame = TableFrame()
         
-        # Create table with headers
         self._table = ListTable(headers=[
             "#", "Name", "Type", "HSN", "Price", "Stock", "Edit", "Delete"
         ])
         
-        # Configure column widths
         self._table.configure_columns([
             {"width": 50, "resize": "fixed"},      # #
             {"resize": "stretch"},                  # Name
@@ -194,163 +196,203 @@ class ProductsScreen(BaseScreen):
         table_frame.set_table(self._table)
         return table_frame
     
+    def _create_pagination_controls(self) -> QWidget:
+        """Create pagination widget."""
+        self.pagination_widget = PaginationWidget(
+            items_per_page=self.ITEMS_PER_PAGE,
+            entity_name="product"
+        )
+        self.pagination_widget.page_changed.connect(self._on_pagination_page_changed)
+        return self.pagination_widget
+    
     # ─────────────────────────────────────────────────────────────────────────
-    # Data Methods
+    # Data Loading and Filtering
     # ─────────────────────────────────────────────────────────────────────────
-
-    def _load_data(self):
+    
+    def _load_products(self, reset_page: bool = False):
         """Load products from controller and update UI."""
+        if self._is_loading:
+            return
+        
         try:
-            # Fetch all products first
-            self._all_products = self._controller.get_all_products()
+            self._is_loading = True
             
-            # Update category filter with available categories
+            # Fetch all products
+            self._all_products = self._controller.get_all_products()
+            logger.debug(f"Loaded {len(self._all_products)} products")
+            
+            # Update category filter
             self._update_category_filter()
             
-            # Apply current filters
+            # Reset pagination if requested
+            if reset_page and self.pagination_widget:
+                self.pagination_widget.reset_to_page_one()
+            
+            # Apply filters
             self._apply_filters()
             
         except Exception as e:
-            self._show_error("Load Error", f"Failed to load products: {str(e)}")
-    
-    def _update_category_filter(self):
-        """Update category dropdown with available categories."""
-        categories = self._controller.extract_categories(self._all_products)
-        
-        current_selection = self._category_combo.currentData()
-        self._category_combo.blockSignals(True)
-        self._category_combo.clear()
-        self._category_combo.addItem("All Categories", "all")
-        
-        for category in categories:
-            self._category_combo.addItem(category, category)
-        
-        # Restore selection if still valid
-        index = self._category_combo.findData(current_selection)
-        if index >= 0:
-            self._category_combo.setCurrentIndex(index)
-        
-        self._category_combo.blockSignals(False)
+            logger.error(f"Failed to load products: {str(e)}")
+            UIErrorHandler.show_error("Load Error", f"Failed to load products: {str(e)}")
+        finally:
+            self._is_loading = False
     
     def _apply_filters(self):
         """Apply all current filters and update display."""
-        search_text = self._get_search_text()
-        type_filter = self._get_type_filter()
-        category_filter = self._get_category_filter()
-        stock_filter = self._get_stock_filter()
-        
-        # Filter products via controller
-        filtered_products = self._controller.filter_products(
-            products=self._all_products,
-            search_text=search_text,
-            type_filter=type_filter,
-            category_filter=category_filter,
-            stock_filter=stock_filter
-        )
-        
-        # Update stats and table
-        self._update_stats_display(filtered_products)
-        self._populate_table(filtered_products)
+        try:
+            search_text = self._get_search_text()
+            type_filter = self._get_type_filter()
+            category_filter = self._get_category_filter()
+            stock_filter = self._get_stock_filter()
+            
+            # Filter products
+            self._filtered_products = self._controller.filter_products(
+                products=self._all_products,
+                search_text=search_text,
+                type_filter=type_filter,
+                category_filter=category_filter,
+                stock_filter=stock_filter
+            )
+            
+            # Update pagination state
+            if self.pagination_widget:
+                self.pagination_widget.set_pagination_state(
+                    total_items=len(self._filtered_products),
+                    current_page=1
+                )
+            
+            # Update stats (using ALL data, not filtered)
+            self._update_stats()
+            
+            # Populate table
+            self._populate_table()
+            
+            logger.debug(f"Filters applied: {len(self._filtered_products)} products shown")
+            
+        except Exception as e:
+            logger.error(f"Failed to apply filters: {str(e)}")
+            UIErrorHandler.show_error("Filter Error", f"Failed to apply filters: {str(e)}")
     
-    def _get_search_text(self) -> str:
-        """Get current search text safely."""
-        if hasattr(self, '_search_container'):
-            return self._search_container.text()
-        return ""
+    def _update_category_filter(self):
+        """Update category dropdown with available categories."""
+        try:
+            categories = self._controller.extract_categories(self._all_products)
+            
+            current_selection = self._category_combo.currentData()
+            self._category_combo.blockSignals(True)
+            self._category_combo.clear()
+            self._category_combo.addItem("All Categories", "all")
+            
+            for category in categories:
+                self._category_combo.addItem(category, category)
+            
+            # Restore selection if still valid
+            index = self._category_combo.findData(current_selection)
+            if index >= 0:
+                self._category_combo.setCurrentIndex(index)
+            
+            self._category_combo.blockSignals(False)
+        except Exception as e:
+            logger.error(f"Failed to update category filter: {str(e)}")
     
-    def _get_type_filter(self) -> str:
-        """Get current type filter value."""
-        if hasattr(self, '_type_combo'):
-            data = self._type_combo.currentData()
-            return "All" if data == "all" else data
-        return "All"
+    def _update_stats(self):
+        """Update statistics cards using ALL data (unfiltered)."""
+        try:
+            stats = self._controller.calculate_stats(self._all_products)
+            self._total_card.set_value(str(stats.total))
+            self._in_stock_card.set_value(str(stats.in_stock))
+            self._low_stock_card.set_value(str(stats.low_stock))
+            self._out_stock_card.set_value(str(stats.out_of_stock))
+        except Exception as e:
+            logger.error(f"Failed to update stats: {str(e)}")
     
-    def _get_category_filter(self) -> str:
-        """Get current category filter value."""
-        if hasattr(self, '_category_combo'):
-            data = self._category_combo.currentData()
-            return "All Categories" if data == "all" else data
-        return "All Categories"
-    
-    def _get_stock_filter(self) -> str:
-        """Get current stock filter value."""
-        if hasattr(self, '_stock_combo'):
-            return self._stock_combo.currentData() or "All"
-        return "All"
-    
-    def _update_stats_display(self, products: list):
-        """Update statistics cards with data from controller."""
-        stats = self._controller.calculate_stats(products)
-        self._total_card.set_value(str(stats.total))
-        self._in_stock_card.set_value(str(stats.in_stock))
-        self._low_stock_card.set_value(str(stats.low_stock))
-        self._out_stock_card.set_value(str(stats.out_of_stock))
-    
-    def _populate_table(self, products: list):
-        """Populate table with product data."""
-        self._table.setRowCount(0)
-        
-        for idx, product in enumerate(products):
-            self._add_table_row(idx, product)
+    def _populate_table(self):
+        """Populate table with filtered product data (paginated)."""
+        try:
+            self._table.setRowCount(0)
+            
+            if not self.pagination_widget:
+                return
+            
+            # Get current page
+            current_page = self.pagination_widget.get_current_page()
+            items_per_page = self.pagination_widget.get_items_per_page()
+            
+            # Calculate pagination
+            start_idx = (current_page - 1) * items_per_page
+            end_idx = start_idx + items_per_page
+            page_products = self._filtered_products[start_idx:end_idx]
+            
+            # Add rows
+            for idx, product in enumerate(page_products):
+                self._add_table_row(start_idx + idx, product)
+            
+        except Exception as e:
+            logger.error(f"Failed to populate table: {str(e)}")
+            UIErrorHandler.show_error("Table Error", f"Failed to populate table: {str(e)}")
     
     def _add_table_row(self, idx: int, product: dict):
         """Add a single row to the table."""
-        row = self._table.rowCount()
-        self._table.insertRow(row)
-        self._table.setRowHeight(row, 50)
-        
-        # Column 0: Row number
-        num_item = QTableWidgetItem(str(idx + 1))
-        num_item.setTextAlignment(Qt.AlignCenter)
-        num_item.setForeground(QColor(TEXT_SECONDARY))
-        self._table.setItem(row, 0, num_item)
-        
-        # Column 1: Name (stores product ID in UserRole)
-        product_type = product.get('product_type', product.get('type', ''))
-        type_icon = "📦" if product_type == "Goods" else "🔧"
-        name_text = f"{type_icon} {product.get('name', '')}"
-        name_item = QTableWidgetItem(name_text)
-        name_item.setFont(get_bold_font(FONT_SIZE_SMALL))
-        name_item.setData(Qt.UserRole, product.get('id'))
-        self._table.setItem(row, 1, name_item)
-        
-        # Column 2: Type
-        type_item = QTableWidgetItem(product_type)
-        type_item.setFont(get_normal_font())
-        type_item.setTextAlignment(Qt.AlignCenter)
-        self._table.setItem(row, 2, type_item)
-        
-        # Column 3: HSN Code
-        hsn_item = QTableWidgetItem(product.get('hsn_code', '-') or '-')
-        hsn_item.setFont(get_normal_font())
-        self._table.setItem(row, 3, hsn_item)
-        
-        # Column 4: Price
-        price = float(product.get('sales_rate', 0) or 0)
-        price_item = QTableWidgetItem(format_currency(price))
-        price_item.setFont(get_bold_font(FONT_SIZE_SMALL))
-        price_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self._table.setItem(row, 4, price_item)
-        
-        # Column 5: Stock with status indicator
-        stock_widget = self._create_stock_cell(product)
-        self._table.setCellWidget(row, 5, stock_widget)
-        
-        # Column 6: Edit button
-        edit_btn = TableActionButton(
-            text="Edit", tooltip="Edit Product",
-            bg_color="#EEF2FF", hover_color=PRIMARY, size=(60, 32)
-        )
-        edit_btn.clicked.connect(lambda checked, p=product: self._on_edit_clicked(p))
-        self._table.setCellWidget(row, 6, edit_btn)
-        
-        # Column 7: Delete button
-        delete_btn = TableActionButton(
-            text="Del", tooltip="Delete Product",
-            bg_color="#FEE2E2", hover_color=DANGER, size=(60, 32)
-        )
-        delete_btn.clicked.connect(lambda checked, p=product: self._on_delete_clicked(p))
-        self._table.setCellWidget(row, 7, delete_btn)
+        try:
+            row = self._table.rowCount()
+            self._table.insertRow(row)
+            self._table.setRowHeight(row, 50)
+            
+            # Column 0: Row number
+            num_item = QTableWidgetItem(str(idx + 1))
+            num_item.setTextAlignment(Qt.AlignCenter)
+            num_item.setForeground(QColor(TEXT_SECONDARY))
+            self._table.setItem(row, 0, num_item)
+            
+            # Column 1: Name
+            product_type = product.get('product_type', product.get('type', ''))
+            type_icon = "📦" if product_type == "Goods" else "🔧"
+            name_text = f"{type_icon} {product.get('name', '')}"
+            name_item = QTableWidgetItem(name_text)
+            name_item.setFont(get_bold_font(FONT_SIZE_SMALL))
+            name_item.setData(Qt.UserRole, product.get('id'))
+            self._table.setItem(row, 1, name_item)
+            
+            # Column 2: Type
+            type_item = QTableWidgetItem(product_type)
+            type_item.setFont(get_normal_font())
+            type_item.setTextAlignment(Qt.AlignCenter)
+            self._table.setItem(row, 2, type_item)
+            
+            # Column 3: HSN Code
+            hsn_item = QTableWidgetItem(product.get('hsn_code', '-') or '-')
+            hsn_item.setFont(get_normal_font())
+            self._table.setItem(row, 3, hsn_item)
+            
+            # Column 4: Price
+            price = float(product.get('sales_rate', 0) or 0)
+            price_item = QTableWidgetItem(format_currency(price))
+            price_item.setFont(get_bold_font(FONT_SIZE_SMALL))
+            price_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self._table.setItem(row, 4, price_item)
+            
+            # Column 5: Stock
+            stock_widget = self._create_stock_cell(product)
+            self._table.setCellWidget(row, 5, stock_widget)
+            
+            # Column 6: Edit button
+            edit_btn = TableActionButton(
+                text="Edit", tooltip="Edit Product",
+                bg_color="#EEF2FF", hover_color=PRIMARY, size=(60, 32)
+            )
+            edit_btn.clicked.connect(lambda checked, p=product: self._on_edit_clicked(p))
+            self._table.setCellWidget(row, 6, edit_btn)
+            
+            # Column 7: Delete button
+            delete_btn = TableActionButton(
+                text="Del", tooltip="Delete Product",
+                bg_color="#FEE2E2", hover_color=DANGER, size=(60, 32)
+            )
+            delete_btn.clicked.connect(lambda checked, p=product: self._on_delete_clicked(p))
+            self._table.setCellWidget(row, 7, delete_btn)
+            
+        except Exception as e:
+            logger.error(f"Failed to add table row: {str(e)}")
     
     def _create_stock_cell(self, product: dict) -> QWidget:
         """Create stock cell with status indicator."""
@@ -395,29 +437,38 @@ class ProductsScreen(BaseScreen):
     # ─────────────────────────────────────────────────────────────────────────
     
     def _on_search_changed(self, text: str):
-        """Handle search text change."""
+        """Handle search text change with debouncing."""
+        self._search_debounce_timer.stop()
+        self._search_debounce_timer.start(self.DEBOUNCE_DELAY)
+    
+    def _on_search_debounce(self):
+        """Apply search after debounce delay."""
         self._apply_filters()
     
-    def _on_filter_changed(self, index: int):
+    def _on_filter_changed(self):
         """Handle filter combo change."""
         self._apply_filters()
     
+    def _on_pagination_page_changed(self, page: int):
+        """Handle pagination page change."""
+        self._populate_table()
+    
     def _on_refresh_clicked(self):
         """Handle refresh button click."""
-        self._load_data()
+        self._load_products(reset_page=True)
     
     def _on_add_clicked(self):
         """Handle add product button click."""
         dialog = ProductDialog(parent=self)
         if dialog.exec() == QDialog.Accepted:
-            self._load_data()
+            self._load_products()
             self.product_updated.emit()
     
     def _on_edit_clicked(self, product: dict):
         """Handle edit button click."""
         dialog = ProductDialog(product_data=product, parent=self)
         if dialog.exec() == QDialog.Accepted:
-            self._load_data()
+            self._load_products()
             self.product_updated.emit()
     
     def _on_delete_clicked(self, product: dict):
@@ -425,44 +476,79 @@ class ProductsScreen(BaseScreen):
         product_name = product.get('name', 'Unknown')
         product_id = product.get('id')
         
-        # Use UIErrorHandler for consistent look & feel
         if not UIErrorHandler.ask_confirmation(
             "Confirm Delete",
             f"Are you sure you want to delete '{product_name}'?\n\nThis action cannot be undone."
         ):
             return
         
-        # Delegate to controller
-        success, message = self._controller.delete_product(product_id)
-        
-        if success:
-            UIErrorHandler.show_success("Success", f"Product '{product_name}' deleted successfully!")
-            self._load_data()
-            self.product_updated.emit()
-        else:
-            UIErrorHandler.show_error("Error", message)
+        try:
+            success, message = self._controller.delete_product(product_id)
+            
+            if success:
+                UIErrorHandler.show_success("Success", f"Product '{product_name}' deleted successfully!")
+                self._load_products()
+                self.product_updated.emit()
+            else:
+                UIErrorHandler.show_error("Error", message)
+        except Exception as e:
+            logger.error(f"Failed to delete product: {str(e)}")
+            UIErrorHandler.show_error("Error", f"Failed to delete product: {str(e)}")
     
-    # ─────────────────────────────────────────────────────────────────────────
-    # Dialog Helpers
-    # ─────────────────────────────────────────────────────────────────────────
-
     def _on_export_clicked(self):
         """Handle export button click."""
+        from PySide6.QtWidgets import QMessageBox
         QMessageBox.information(
             self, "Export", 
             "📤 Export functionality will be available soon!\n\n"
-            "This will allow you to export receipt data to CSV or Excel."
+            "This will allow you to export product data to CSV or Excel."
         )
-
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # Filter Value Getters
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    def _get_search_text(self) -> str:
+        """Get current search text."""
+        try:
+            return self._type_combo.parent().parent().findChild(SearchInputContainer).text()
+        except:
+            return ""
+    
+    def _get_type_filter(self) -> str:
+        """Get current type filter value."""
+        try:
+            data = self._type_combo.currentData()
+            return "All" if data == "all" else data
+        except:
+            return "All"
+    
+    def _get_category_filter(self) -> str:
+        """Get current category filter value."""
+        try:
+            data = self._category_combo.currentData()
+            return "All Categories" if data == "all" else data
+        except:
+            return "All Categories"
+    
+    def _get_stock_filter(self) -> str:
+        """Get current stock filter value."""
+        try:
+            return self._stock_combo.currentData() or "All"
+        except:
+            return "All"
+    
     # ─────────────────────────────────────────────────────────────────────────
     # Public Interface
     # ─────────────────────────────────────────────────────────────────────────
     
     def refresh(self):
-        """Public method to refresh the products list."""
-        self._load_data()
+        """Public method to refresh products."""
+        self._load_products()
     
     def showEvent(self, event):
         """Refresh data when screen becomes visible."""
         super().showEvent(event)
-        self._load_data()
+        if not self._all_products:  # Only load if empty
+            self._load_products()
+
