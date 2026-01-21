@@ -16,6 +16,7 @@ from .common_widgets import (
     # Invoice item widget and helpers
     InvoiceItemWidget, highlight_error, highlight_success, show_validation_error
 )
+from .filter_widget import FilterWidget
 
 __all__ = [
     # General widgets
@@ -29,5 +30,7 @@ __all__ = [
     # Selector dialogs
     'PartySelector', 'ProductSelector',
     # Invoice item widget and helpers
-    'InvoiceItemWidget', 'highlight_error', 'highlight_success', 'show_validation_error'
+    'InvoiceItemWidget', 'highlight_error', 'highlight_success', 'show_validation_error',
+    # Filter widget
+    'FilterWidget'
 ]
