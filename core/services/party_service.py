@@ -18,6 +18,36 @@ logger = get_logger(__name__)
 
 
 class PartyService:
+    def check_duplicate_gstin(self, gstin: str, current_party_id: Optional[int] = None) -> Tuple[bool, str]:
+        """
+        Check if a party with the same GSTIN already exists
+        Args:
+            gstin: GSTIN to check
+            current_party_id: ID of current party (for edit mode, to exclude self)
+        Returns:
+            Tuple[bool, str]: (is_duplicate, error_message)
+        """
+        if not gstin:
+            return False, ""
+        if not self.db:
+            logger.warning("Database not available for duplicate GSTIN check")
+            return False, ""
+        try:
+            existing_parties = self.db.get_parties()
+            if not existing_parties:
+                return False, ""
+            for party in existing_parties:
+                if current_party_id and party.get('id') == current_party_id:
+                    continue
+                # Normalize possible None values safely
+                party_gstin = (party.get('gst_number') or '').strip().upper()
+                check_gstin = (gstin or '').strip().upper()
+                if party_gstin and check_gstin and party_gstin == check_gstin:
+                    return True, f"A party with the GSTIN '{gstin}' already exists"
+        except Exception as e:
+            logger.error(f"Error checking duplicate GSTIN: {e}")
+            pass
+        return False, ""
     """Service class for party-related business logic"""
     
     def __init__(self, db=None):
@@ -276,6 +306,9 @@ class PartyService:
         opening_balance: float = 0.0,
         balance_type: str = "dr",
         party_type: str = "Customer",
+        credit_limit: float = 0.0,
+        credit_days: int = 0,
+        status: str = "Active",
         party_id: Optional[int] = None
     ) -> Dict:
         """
@@ -300,7 +333,10 @@ class PartyService:
             'opening_balance': float(opening_balance or 0),
             'balance_type': balance_type.lower() if balance_type else 'dr',
             'party_type': party_type,
-            'is_gst_registered': 1 if gst_number else 0
+            'is_gst_registered': 1 if gst_number else 0,
+            'credit_limit': float(credit_limit or 0),
+            'credit_days': int(credit_days or 0),
+            'status': status or 'Active'
         }
         
         if party_id:

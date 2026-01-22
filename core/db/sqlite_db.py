@@ -148,6 +148,7 @@ class Database:
                 pincode TEXT,
                 opening_balance REAL DEFAULT 0,
                 balance_type TEXT DEFAULT 'dr',
+                status TEXT DEFAULT 'Active',
                 FOREIGN KEY(company_id) REFERENCES companies(id)
             )
             """
@@ -510,62 +511,90 @@ class Database:
         Dict keys: name, phone/mobile, email, gst_number/gstin, pan, address, city, state, pincode, opening_balance, balance_type, is_gst_registered, party_type
         Positional signature: (name, phone=None, email=None, gstin=None, pan=None, address=None, city=None, state=None, pincode=None, opening_balance=0, balance_type='dr', is_gst_registered=0, party_type='Customer')
         """
-        if args and isinstance(args[0], dict):
-            d = args[0]
-            name = d.get('name')
-            phone = d.get('phone') or d.get('mobile')
-            email = d.get('email')
-            gst = d.get('gst_number') or d.get('gstin')
-            pan = d.get('pan')
-            address = d.get('address')
-            city = d.get('city')
-            state = d.get('state')
-            pincode = d.get('pincode')
-            opening = d.get('opening_balance', 0) or 0
-            balance_type = d.get('balance_type', 'dr')
-            is_gst = d.get('is_gst_registered', 1 if gst else 0)
-            party_type = d.get('type') or d.get('party_type', 'Customer')
-        else:
-            # Map legacy positional args
-            name = args[0] if args else kwargs.get('name')
-            phone = kwargs.get('phone') or kwargs.get('mobile')
-            email = kwargs.get('email')
-            gst = kwargs.get('gstin')
-            pan = kwargs.get('pan')
-            address = kwargs.get('address')
-            city = kwargs.get('city')
-            state = kwargs.get('state')
-            pincode = kwargs.get('pincode')
-            opening = kwargs.get('opening_balance', 0) or 0
-            balance_type = kwargs.get('balance_type', 'dr')
-            is_gst = kwargs.get('is_gst_registered', 0)
-            party_type = kwargs.get('party_type', 'Customer')
+        self.conn.execute('BEGIN')
+        name = None  # Ensure name is always defined for logging
+        try:
+            if args and isinstance(args[0], dict):
+                d = args[0]
+                name = d.get('name')
+                phone = d.get('phone') or d.get('mobile')
+                email = d.get('email')
+                gst = d.get('gst_number') or d.get('gstin')
+                pan = d.get('pan')
+                address = d.get('address')
+                city = d.get('city')
+                state = d.get('state')
+                pincode = d.get('pincode')
+                opening = d.get('opening_balance', 0) or 0
+                balance_type = d.get('balance_type', 'dr')
+                is_gst = d.get('is_gst_registered', 1 if gst else 0)
+                party_type = d.get('type') or d.get('party_type', 'Customer')
+                credit_limit = d.get('credit_limit', 0)
+                credit_days = d.get('credit_days', 0)
+                status = d.get('status', 'Active')
+            else:
+                # Map legacy positional args
+                name = args[0] if args else kwargs.get('name')
+                phone = kwargs.get('phone') or kwargs.get('mobile')
+                email = kwargs.get('email')
+                gst = kwargs.get('gstin')
+                pan = kwargs.get('pan')
+                address = kwargs.get('address')
+                city = kwargs.get('city')
+                state = kwargs.get('state')
+                pincode = kwargs.get('pincode')
+                opening = kwargs.get('opening_balance', 0) or 0
+                balance_type = kwargs.get('balance_type', 'dr')
+                is_gst = kwargs.get('is_gst_registered', 0)
+                party_type = kwargs.get('party_type', 'Customer')
+                credit_limit = kwargs.get('credit_limit', 0)
+                credit_days = kwargs.get('credit_days', 0)
+                status = kwargs.get('status', 'Active')
 
-        # Check for duplicate party name (case-insensitive)
-        if name:
-            existing_parties = self._query(
+            # Check for duplicate party name (case-insensitive)
+            if name:
+                existing_parties = self._query(
+                    """
+                    SELECT id FROM parties 
+                    WHERE company_id = ? AND UPPER(name) = UPPER(?) LIMIT 1
+                    """,
+                    (self._current_company_id, name)
+                )
+                if existing_parties:
+                    from core.exceptions import PartyAlreadyExists
+                    raise PartyAlreadyExists(f"A party with the name '{name}' already exists")
+
+            cur = self._execute(
                 """
-                SELECT id FROM parties 
-                WHERE company_id = ? AND UPPER(name) = UPPER(?) LIMIT 1
+                INSERT INTO parties(company_id, name, mobile, email, party_type, gst_number, pan, address, city, state, pincode, opening_balance, balance_type, status, credit_limit, credit_days)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
-                (self._current_company_id, name)
+                (self._current_company_id, name, phone, email, party_type, gst, pan, address, city, state, pincode, float(opening or 0), balance_type, status, float(credit_limit or 0), int(credit_days or 0)),
             )
-            if existing_parties:
-                from core.exceptions import PartyAlreadyExists
-                raise PartyAlreadyExists(f"A party with the name '{name}' already exists")
+            self.conn.commit()
+            logger.info(f"Party created: {name} (ID: {cur.lastrowid}) by company {self._current_company_id}")
+            return cur.lastrowid
+        except Exception as e:
+            self.conn.rollback()
+            logger.error(f"Failed to create party: {name if name else ''} | Error: {e}")
+            raise
 
-        cur = self._execute(
-            """
-            INSERT INTO parties(company_id, name, mobile, email, party_type, gst_number, pan, address, city, state, pincode, opening_balance, balance_type)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """,
-            (self._current_company_id, name, phone, email, party_type, gst, pan, address, city, state, pincode, float(opening or 0), balance_type),
-        )
-        return cur.lastrowid
+    def update_party(self, party_id: int, data: dict) -> bool:
+        """
+        Update an existing party record with the provided data dict.
 
-    def update_party(self, party_id: int, party_data: dict) -> bool:
-        """Update an existing party"""
-        d = party_data
+        Args:
+            party_id: ID of the party to update
+            data: Dictionary containing party fields to update
+
+        Returns:
+            True on success; raises on failure
+        """
+        if not party_id:
+            return False
+
+        # Accept either the prepared dict or a legacy-style mapping
+        d = data or {}
         name = d.get('name')
         phone = d.get('phone') or d.get('mobile')
         email = d.get('email')
@@ -578,18 +607,28 @@ class Database:
         opening = d.get('opening_balance', 0) or 0
         balance_type = d.get('balance_type', 'dr')
         party_type = d.get('type') or d.get('party_type', 'Customer')
-        
-        self._execute(
-            """
-            UPDATE parties SET 
-                name = ?, mobile = ?, email = ?, party_type = ?, 
-                gst_number = ?, pan = ?, address = ?, city = ?, 
-                state = ?, pincode = ?, opening_balance = ?, balance_type = ?
-            WHERE id = ?
-            """,
-            (name, phone, email, party_type, gst, pan, address, city, state, pincode, float(opening or 0), balance_type, party_id),
-        )
-        return True
+        credit_limit = d.get('credit_limit', 0)
+        credit_days = d.get('credit_days', 0)
+        status = d.get('status', 'Active')
+
+        try:
+            self._execute(
+                """
+                UPDATE parties SET 
+                    name = ?, mobile = ?, email = ?, party_type = ?, 
+                    gst_number = ?, pan = ?, address = ?, city = ?, 
+                    state = ?, pincode = ?, opening_balance = ?, balance_type = ?, status = ?, credit_limit = ?, credit_days = ?
+                WHERE id = ?
+                """,
+                (name, phone, email, party_type, gst, pan, address, city, state, pincode, float(opening or 0), balance_type, status, float(credit_limit or 0), int(credit_days or 0), party_id),
+            )
+            self.conn.commit()
+            logger.info(f"Party updated: {name} (ID: {party_id}) by company {self._current_company_id}")
+            return True
+        except Exception as e:
+            self.conn.rollback()
+            logger.error(f"Failed to update party: {name if 'name' in locals() else ''} | Error: {e}")
+            raise
 
     def get_parties(self):
         if self._current_company_id:
@@ -609,7 +648,18 @@ class Database:
         )
 
     def delete_party(self, party_id: int):
-        self._execute("DELETE FROM parties WHERE id = ?", (party_id,))
+        # Start transaction
+        self.conn.execute('BEGIN')
+        try:
+            party = self.get_party_by_id(party_id)
+            self._execute("DELETE FROM parties WHERE id = ?", (party_id,))
+            self.conn.commit()
+            logger.info(f"Party deleted: {party.get('name', '') if party else ''} (ID: {party_id}) by company {self._current_company_id}")
+            return True
+        except Exception as e:
+            self.conn.rollback()
+            logger.error(f"Failed to delete party: ID {party_id} | Error: {e}")
+            raise
 
     # --- products ---
     def add_product(self, name, hsn_code=None, barcode=None, unit='PCS', sales_rate=0, purchase_rate=0, discount_percent=0, mrp=0, tax_rate=18, sgst_rate=9, cgst_rate=9, opening_stock=0, low_stock=0, product_type='Goods', category=None, description=None, warranty_months=0, has_serial_number=0, track_stock=0, is_gst_registered=0):
@@ -667,9 +717,15 @@ class Database:
             return self._query("SELECT * FROM products WHERE company_id = ? ORDER BY id DESC", (self._current_company_id,))
         return self._query("SELECT * FROM products ORDER BY id DESC")
 
+
     def get_product_by_id(self, product_id: int):
         """Get a single product by ID"""
         result = self._query("SELECT * FROM products WHERE id = ?", (product_id,))
+        return result[0] if result else None
+
+    def get_party_by_id(self, party_id: int):
+        """Get a single party by ID"""
+        result = self._query("SELECT * FROM parties WHERE id = ?", (party_id,))
         return result[0] if result else None
 
     def delete_product(self, product_id: int):
