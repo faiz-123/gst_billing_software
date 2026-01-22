@@ -1,145 +1,110 @@
 """
 Party dialog module - Add/Edit Party (Customer/Supplier)
-Follows the same style as product_form_dialog.py
+Uses common methods from BaseDialog
 """
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QVBoxLayout, QHBoxLayout, QLabel,
     QWidget, QGridLayout
 )
 from PySide6.QtCore import Qt
 
 from theme import (
-    # Colors
-    PRIMARY, TEXT_PRIMARY, BORDER,
-    # Fonts
-    get_title_font, get_section_title_font, get_link_font,
-    # Styles
-    get_section_frame_style, get_dialog_footer_style,
-    get_cancel_button_style, get_save_button_style,
-    get_link_label_style
+    PRIMARY, TEXT_PRIMARY,
+    get_title_font,
+    DIALOG_FORM_DEFAULT_WIDTH, DIALOG_FORM_DEFAULT_HEIGHT,
+    DIALOG_FORM_MIN_WIDTH, DIALOG_FORM_MIN_HEIGHT
 )
 from widgets import (
-    DialogInput, DialogComboBox, DialogTextEdit, DialogFieldGroup, CustomButton, DialogScrollArea
+    DialogInput, DialogComboBox, DialogEditableComboBox, DialogTextEdit, DialogScrollArea   
 )
 from ui.base.base_dialog import BaseDialog
 from ui.error_handler import UIErrorHandler
-from core.enums import PartyType, BalanceType
+from core.enums import PartyType, BalanceType, get_state_list
 from core.services.party_service import party_service
 from core.core_utils import to_upper
+from core.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class PartyDialog(BaseDialog):
-    """Dialog for adding/editing a party (customer/supplier)"""
-    
     def __init__(self, parent=None, party_data=None):
         self.party_data = party_data
         self.result_data = None
         super().__init__(
             parent=parent,
             title="Add Party" if not party_data else "Edit Party",
-            default_width=1300,
-            default_height=1000,
-            min_width=800,
-            min_height=600
+            default_width=DIALOG_FORM_DEFAULT_WIDTH,
+            default_height=DIALOG_FORM_DEFAULT_HEIGHT,
+            min_width=DIALOG_FORM_MIN_WIDTH,
+            min_height=DIALOG_FORM_MIN_HEIGHT
         )
         self.build_ui()
-    
+
     def build_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-        
+
+        # Always create credit fields for dialog lifetime
+        self._create_credit_limit_input()
+        self._create_credit_days_input()
+
         # Create scroll area widget
         scroll_widget = DialogScrollArea()
         self.scroll_layout = scroll_widget.get_layout()
-        
+
         # Header
         title_text = "Edit Party" if self.party_data else "Add New Party"
         title = QLabel(title_text)
         title.setFont(get_title_font())
         title.setStyleSheet(f"color: {TEXT_PRIMARY}; background: transparent;")
         self.scroll_layout.addWidget(title)
-        
+
         # === SECTION 1: General Details ===
         self.scroll_layout.addWidget(self._create_section("General Details", self._build_general_section()))
-        
+
         # === SECTION 2: Address ===
         self.scroll_layout.addWidget(self._create_section("Address", self._build_address_section()))
-        
+
         # === Bank Details Link ===
         self._build_bank_link()
-        
+
         # === SECTION 3: Bank Details (hidden by default) ===
         self.bank_section = self._create_section("Bank Account Details", self._build_bank_section())
         self.bank_section.setVisible(False)
         self.scroll_layout.addWidget(self.bank_section)
-        
+
         self.scroll_layout.addStretch()
-        
+
         main_layout.addWidget(scroll_widget)
-        
+
+        # Set tab order for keyboard navigation
+        self._set_tab_order()
+
         # Footer with buttons
-        main_layout.addWidget(self._build_footer())
-        
+        main_layout.addWidget(self._build_footer(
+            save_text="Save Party",
+            save_callback=self._on_save
+        ))
+
         # Populate form if editing
         if self.party_data:
             self._populate_form()
-    
+
     def _build_bank_link(self):
         """Create a hyperlink to show/hide bank details section"""
-        link_container = QWidget()
-        link_container.setStyleSheet("background: transparent;")
-        link_layout = QHBoxLayout(link_container)
-        link_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.bank_link = QLabel("➕ <a href='#' style='color: {0}; text-decoration: none;'>Add Bank Account Details</a>".format(PRIMARY))
-        self.bank_link.setTextFormat(Qt.RichText)
-        self.bank_link.setFont(get_link_font())
-        self.bank_link.setCursor(Qt.PointingHandCursor)
-        self.bank_link.setStyleSheet(get_link_label_style())
+        self.bank_link = self._create_collapsible_link(
+            add_text="Add Bank Account Details",
+            hide_text="Hide Bank Account Details",
+            scroll_layout=self.scroll_layout
+        )
         self.bank_link.mousePressEvent = self._toggle_bank_section
-        link_layout.addWidget(self.bank_link)
-        link_layout.addStretch()
-        
-        self.scroll_layout.addWidget(link_container)
-    
+
     def _toggle_bank_section(self, event=None):
         """Show/hide bank details section"""
-        is_visible = self.bank_section.isVisible()
-        self.bank_section.setVisible(not is_visible)
-        
-        if is_visible:
-            self.bank_link.setText("➕ <a href='#' style='color: {0}; text-decoration: none;'>Add Bank Account Details</a>".format(PRIMARY))
-        else:
-            self.bank_link.setText("➖ <a href='#' style='color: {0}; text-decoration: none;'>Hide Bank Account Details</a>".format(PRIMARY))
-    
-    def _create_section(self, title: str, content_widget: QWidget) -> QFrame:
-        """Create a styled section card with title and content"""
-        section = QFrame()
-        section.setObjectName("sectionFrame")
-        section.setStyleSheet(get_section_frame_style())
-        
-        layout = QVBoxLayout(section)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
-        
-        # Section title
-        title_label = QLabel(title)
-        title_label.setFont(get_section_title_font())
-        title_label.setStyleSheet(f"color: {TEXT_PRIMARY}; border: none; background: transparent;")
-        layout.addWidget(title_label)
-        
-        # Separator line
-        separator = QFrame()
-        separator.setFixedHeight(1)
-        separator.setStyleSheet(f"background: {BORDER}; border: none;")
-        layout.addWidget(separator)
-        
-        # Content
-        layout.addWidget(content_widget)
-        
-        return section
-    
+        self._toggle_collapsible_section(self.bank_section, self.bank_link)
+
     def _build_general_section(self) -> QWidget:
         """Build the general details section with 3 columns"""
         widget = QWidget()
@@ -150,57 +115,87 @@ class PartyDialog(BaseDialog):
         layout.setColumnStretch(0, 1)
         layout.setColumnStretch(1, 1)
         layout.setColumnStretch(2, 1)
-        
+
         # Row 0: Party Name, Mobile, Email
         layout.addWidget(self._create_field_group(
             "Party Name <span style='color:#d32f2f'>*</span>",
             self._create_name_input()
         ), 0, 0)
-        
+
         layout.addWidget(self._create_field_group(
             "Mobile Number",
             self._create_phone_input()
         ), 0, 1)
-        
+
         layout.addWidget(self._create_field_group(
             "Email",
             self._create_email_input()
         ), 0, 2)
-        
+
         # Row 1: GSTIN, PAN, Party Type
         layout.addWidget(self._create_field_group(
             "GSTIN",
             self._create_gstin_input()
         ), 1, 0)
-        
+
         layout.addWidget(self._create_field_group(
             "PAN Number",
             self._create_pan_input()
         ), 1, 1)
-        
+
         layout.addWidget(self._create_field_group(
             "Party Type <span style='color:#d32f2f'>*</span>",
             self._create_type_combo()
         ), 1, 2)
-        
+
         # Row 2: Opening Balance, Balance Type
         layout.addWidget(self._create_field_group(
             "Opening Balance",
             self._create_opening_balance_input()
         ), 2, 0)
-        
+
         layout.addWidget(self._create_field_group(
             "Balance Type",
             self._create_balance_type_combo()
         ), 2, 1)
-        
-        # Empty placeholder for alignment
-        empty_widget = QWidget()
-        empty_widget.setStyleSheet("background: transparent; border: none;")
-        layout.addWidget(empty_widget, 2, 2)
-        
+
+        # Row 3: Credit Limit, Credit Days
+        layout.addWidget(self._create_field_group(
+            "Credit Limit",
+            self._create_credit_limit_input()
+        ), 3, 0)
+        layout.addWidget(self._create_field_group(
+            "Credit Days",
+            self._create_credit_days_input()
+        ), 3, 1)
+        layout.addWidget(self._create_field_group(
+            "Status",
+            self._create_status_combo()
+        ), 3, 2)
         return widget
-    
+
+    def _validate_credit_fields(self):
+        # Credit limit: must be a valid decimal >= 0
+        # Credit days: must be integer >= 0
+        errors = []
+        try:
+            credit_limit = float(self.credit_limit_input.text() or 0)
+            if credit_limit < 0:
+                errors.append("Credit limit cannot be negative.")
+                self.credit_limit_input.set_error(True)
+        except Exception:
+            errors.append("Credit limit must be a valid number.")
+            self.credit_limit_input.set_error(True)
+        try:
+            credit_days = int(self.credit_days_input.text() or 0)
+            if credit_days < 0:
+                errors.append("Credit days cannot be negative.")
+                self.credit_days_input.set_error(True)
+        except Exception:
+            errors.append("Credit days must be a valid integer.")
+            self.credit_days_input.set_error(True)
+        return errors
+
     def _build_address_section(self) -> QWidget:
         """Build the address section"""
         widget = QWidget()
@@ -281,51 +276,101 @@ class PartyDialog(BaseDialog):
         ), 1, 2)
         
         return widget
-    
-    def _create_field_group(self, label_text: str, input_widget: QWidget) -> DialogFieldGroup:
-        """Create a field group with label and input using DialogFieldGroup"""
-        return DialogFieldGroup(label_text, input_widget)
-    
-    def _build_footer(self) -> QFrame:
-        """Build the footer with action buttons"""
-        footer = QFrame()
-        footer.setFixedHeight(80)
-        footer.setStyleSheet(get_dialog_footer_style())
-        
-        layout = QHBoxLayout(footer)
-        layout.setContentsMargins(40, 0, 40, 0)
-        
-        layout.addStretch()
-        
-        cancel_btn = CustomButton("Cancel", "secondary")
-        cancel_btn.setCursor(Qt.PointingHandCursor)
-        cancel_btn.setFixedSize(120, 44)
-        cancel_btn.setStyleSheet(get_cancel_button_style())
-        cancel_btn.clicked.connect(self.reject)
-        layout.addWidget(cancel_btn)
-        
-        layout.addSpacing(12)
-        
-        save_btn = CustomButton("Save Party", "primary")
-        save_btn.setCursor(Qt.PointingHandCursor)
-        save_btn.setFixedSize(140, 44)
-        save_btn.setStyleSheet(get_save_button_style())
-        save_btn.clicked.connect(self._save_party)
-        layout.addWidget(save_btn)
-        
-        return footer
-    
+
+    def _create_status_combo(self) -> DialogComboBox:
+        self.status_combo = DialogComboBox(items=["Active", "Inactive"])
+        self.status_combo.setAccessibleName("Party Status")
+        self.status_combo.setToolTip("Active parties appear in invoices. Inactive parties are hidden.")
+        self.status_combo.setCurrentIndex(0)
+        return self.status_combo
+
+    def _create_credit_limit_input(self) -> DialogInput:
+        self.credit_limit_input = DialogInput("Credit Limit (₹)")
+        self.credit_limit_input.setPlaceholderText("0.00")
+        self.credit_limit_input.setAccessibleName("Credit Limit")
+        self.credit_limit_input.setToolTip("Maximum credit amount allowed for this party (0 = unlimited)")
+        self.credit_limit_input.setMaxLength(12)
+        self.credit_limit_input.setValidator(self._get_decimal_validator())
+        self.credit_limit_input.textChanged.connect(self._clear_credit_limit_error)
+        return self.credit_limit_input
+
+    def _clear_credit_limit_error(self, *_):
+        try:
+            self.credit_limit_input.set_error(False)
+        except Exception:
+            pass
+
+    def _create_credit_days_input(self) -> DialogInput:
+        self.credit_days_input = DialogInput("Credit Days")
+        self.credit_days_input.setPlaceholderText("0")
+        self.credit_days_input.setAccessibleName("Credit Days")
+        self.credit_days_input.setToolTip("Payment due period in days (0 = immediate payment)")
+        self.credit_days_input.setMaxLength(3)
+        self.credit_days_input.setValidator(self._get_int_validator())
+        self.credit_days_input.textChanged.connect(self._clear_credit_days_error)
+        return self.credit_days_input
+
+    def _clear_credit_days_error(self, *_):
+        try:
+            self.credit_days_input.set_error(False)
+        except Exception:
+            pass
+
+    def _get_decimal_validator(self):
+        from PySide6.QtGui import QDoubleValidator
+        v = QDoubleValidator(0.00, 99999999.99, 2)
+        v.setNotation(QDoubleValidator.StandardNotation)
+        return v
+
+    def _get_int_validator(self):
+        from PySide6.QtGui import QIntValidator
+        return QIntValidator(0, 365)
+
+    def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent
+        from PySide6.QtWidgets import QToolTip
+        if event.type() == QEvent.FocusIn:
+            if obj is getattr(self, 'gst_number_input', None):
+                QToolTip.showText(obj.mapToGlobal(obj.rect().bottomLeft()), obj.toolTip(), obj)
+            elif obj is getattr(self, 'pan_input', None):
+                QToolTip.showText(obj.mapToGlobal(obj.rect().bottomLeft()), obj.toolTip(), obj)
+        return super().eventFilter(obj, event)
+
+    def _set_tab_order(self):
+        # Set tab order for keyboard navigation (main fields only)
+        """Dialog for adding/editing a party (customer/supplier)"""
+        widgets = [
+            self.name_input,
+            self.phone_input,
+            self.email_input,
+            self.gst_number_input,
+            self.pan_input,
+            self.type_combo,
+            self.opening_balance,
+            self.balance_type_combo,
+            self.address_input,
+            self.city_input,
+            self.state_input,
+            self.pincode_input
+        ]
+        for i in range(len(widgets) - 1):
+            self.setTabOrder(widgets[i], widgets[i + 1])
+
     # === Input Field Creators ===
     
     def _create_name_input(self) -> DialogInput:
         self.name_input = DialogInput("Enter party name")
+        self.name_input.setToolTip("Required. Party name (will be stored in uppercase)")
         self.name_input.textChanged.connect(self._on_name_changed)
         self.name_input.textChanged.connect(self._clear_name_error)
+        self.name_input.textChanged.connect(self._mark_form_modified)
         return self.name_input
     
     def _create_phone_input(self) -> DialogInput:
         self.phone_input = DialogInput("Enter mobile number")
+        self.phone_input.setToolTip("10-digit Indian mobile number (optional)")
         self.phone_input.textChanged.connect(self._clear_phone_error)
+        self.phone_input.textChanged.connect(self._mark_form_modified)
         return self.phone_input
     
     def _clear_phone_error(self, *_):
@@ -337,7 +382,9 @@ class PartyDialog(BaseDialog):
     
     def _create_email_input(self) -> DialogInput:
         self.email_input = DialogInput("Enter email address")
+        self.email_input.setToolTip("Valid email address (optional)")
         self.email_input.textChanged.connect(self._clear_email_error)
+        self.email_input.textChanged.connect(self._mark_form_modified)
         return self.email_input
     
     def _clear_email_error(self, *_):
@@ -348,10 +395,24 @@ class PartyDialog(BaseDialog):
             pass
     
     def _create_gstin_input(self) -> DialogInput:
-        self.gst_number_input = DialogInput("Enter GSTIN")
+        self.gst_number_input = DialogInput("Ex: 22AAAAA0000A1Z5")
+        self.gst_number_input.setAccessibleName("GSTIN")
+        self.gst_number_input.setToolTip("15-character GST Identification Number (format: 22AAAAA0000A1Z5)")
+        self.gst_number_input.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.gst_number_input.customContextMenuRequested.connect(self._show_gstin_context_menu)
         self.gst_number_input.textChanged.connect(lambda text: to_upper(self.gst_number_input, text))
         self.gst_number_input.textChanged.connect(self._clear_gstin_error)
+        self.gst_number_input.textChanged.connect(self._mark_form_modified)
+        self.gst_number_input.installEventFilter(self)
         return self.gst_number_input
+
+    def _show_gstin_context_menu(self, pos):
+        from PySide6.QtWidgets import QMenu, QApplication
+        menu = QMenu()
+        copy_action = menu.addAction("Copy GSTIN")
+        action = menu.exec_(self.gst_number_input.mapToGlobal(pos))
+        if action == copy_action:
+            QApplication.clipboard().setText(self.gst_number_input.text())
     
     def _clear_gstin_error(self, *_):
         """Reset GSTIN field style when user edits it"""
@@ -361,9 +422,11 @@ class PartyDialog(BaseDialog):
             pass
     
     def _create_pan_input(self) -> DialogInput:
-        self.pan_input = DialogInput("Enter PAN number")
+        self.pan_input = DialogInput("Ex: ABCDE1234F")
+        self.pan_input.setToolTip("10-character Permanent Account Number (format: ABCDE1234F)")
         self.pan_input.textChanged.connect(lambda text: to_upper(self.pan_input, text))
         self.pan_input.textChanged.connect(self._clear_pan_error)
+        self.pan_input.installEventFilter(self)
         return self.pan_input
     
     def _clear_pan_error(self, *_):
@@ -376,6 +439,7 @@ class PartyDialog(BaseDialog):
     def _create_type_combo(self) -> DialogComboBox:
         party_types = ["", PartyType.CUSTOMER.value, PartyType.SUPPLIER.value, PartyType.BOTH.value]
         self.type_combo = DialogComboBox(items=party_types)
+        self.type_combo.setToolTip("Required. Select party type (Customer/Supplier/Both)")
         # Default to Customer on new party
         if not self.party_data:
             idx = self.type_combo.findText(PartyType.CUSTOMER.value)
@@ -388,6 +452,7 @@ class PartyDialog(BaseDialog):
     def _create_opening_balance_input(self) -> DialogInput:
         self.opening_balance = DialogInput("Enter opening balance")
         self.opening_balance.setText("0.00")
+        self.opening_balance.setToolTip("Opening balance amount from previous accounting period")
         self.opening_balance.textChanged.connect(self._clear_opening_balance_error)
         return self.opening_balance
     
@@ -405,6 +470,7 @@ class PartyDialog(BaseDialog):
             ("To Pay (CR)", "cr")
         ]
         self.balance_type_combo = DialogComboBox(items=[bt[0] for bt in balance_types])
+        self.balance_type_combo.setToolTip("To Receive (DR) = Party owes you | To Pay (CR) = You owe party")
         # Store mapping for later use
         self._balance_type_map = {bt[0]: bt[1] for bt in balance_types}
         self._balance_type_reverse_map = {bt[1]: bt[0] for bt in balance_types}
@@ -425,6 +491,7 @@ class PartyDialog(BaseDialog):
     
     def _create_address_input(self) -> DialogTextEdit:
         self.address_input = DialogTextEdit("Enter address", 80)
+        self.address_input.setToolTip("Full address including street, building, landmark etc.")
         self.address_input.textChanged.connect(self._clear_address_error)
         return self.address_input
     
@@ -438,6 +505,7 @@ class PartyDialog(BaseDialog):
     
     def _create_city_input(self) -> DialogInput:
         self.city_input = DialogInput("Enter city")
+        self.city_input.setToolTip("City or town name")
         self.city_input.textChanged.connect(lambda text: to_upper(self.city_input, text))
         self.city_input.textChanged.connect(self._clear_city_error)
         return self.city_input
@@ -449,54 +517,23 @@ class PartyDialog(BaseDialog):
         except Exception:
             pass
     
-    def _create_state_input(self) -> DialogComboBox:
-        # List of all Indian states and union territories
-        indian_states = [
-            # "Andaman and Nicobar Islands",
-            "Andhra Pradesh",
-            "Arunachal Pradesh",
-            "Assam",
-            "Bihar",
-            "Chandigarh",
-            "Chhattisgarh",
-            # "Dadra and Nagar Haveli and Daman and Diu",
-            "Delhi",
-            "Goa",
-            "Gujarat",
-            "Haryana",
-            "Himachal Pradesh",
-            "Jammu and Kashmir",
-            "Jharkhand",
-            "Karnataka",
-            "Kerala",
-            "Ladakh",
-            "Lakshadweep",
-            "Madhya Pradesh",
-            "Maharashtra",
-            "Manipur",
-            "Meghalaya",
-            "Mizoram",
-            "Nagaland",
-            "Odisha",
-            "Puducherry",
-            "Punjab",
-            "Rajasthan",
-            "Sikkim",
-            "Tamil Nadu",
-            "Telangana",
-            "Tripura",
-            "Uttar Pradesh",
-            "Uttarakhand",
-            "West Bengal",
-        ]
-        self.state_input = DialogComboBox(indian_states)
+    def _create_state_input(self) -> DialogEditableComboBox:
+        # Use centralized state list from core.enums
+        states = get_state_list()
+        self.state_input = DialogEditableComboBox(
+            items=states,
+            placeholder="Select or type state",
+            auto_upper=False  # State names have proper casing
+        )
+        self.state_input.setToolTip("Type to search or select from dropdown")
         # Set default state to first item if no existing data
-        if not self.party_data and len(indian_states) > 0:
+        if not self.party_data and len(states) > 0:
             self.state_input.setCurrentIndex(0)
         return self.state_input
     
     def _create_pincode_input(self) -> DialogInput:
         self.pincode_input = DialogInput("Enter pin code")
+        self.pincode_input.setToolTip("6-digit postal code for the party's address")
         self.pincode_input.textChanged.connect(self._clear_pincode_error)
         return self.pincode_input
     
@@ -510,26 +547,32 @@ class PartyDialog(BaseDialog):
     # Bank Details Inputs
     def _create_account_number_input(self) -> DialogInput:
         self.account_number_input = DialogInput("ex: 123456789")
+        self.account_number_input.setToolTip("Bank account number for payment transactions")
         return self.account_number_input
     
     def _create_account_number_confirm_input(self) -> DialogInput:
         self.account_number_confirm = DialogInput("ex: 123456789")
+        self.account_number_confirm.setToolTip("Re-enter account number for verification")
         return self.account_number_confirm
     
     def _create_ifsc_input(self) -> DialogInput:
         self.ifsc_input = DialogInput("ex: ICIC0001234")
+        self.ifsc_input.setToolTip("11-character IFSC code (e.g., ICIC0001234)")
         return self.ifsc_input
     
     def _create_bank_branch_input(self) -> DialogInput:
         self.bank_branch_input = DialogInput("ex: ICICI Bank, Mumbai")
+        self.bank_branch_input.setToolTip("Bank name and branch location")
         return self.bank_branch_input
     
     def _create_account_holder_input(self) -> DialogInput:
         self.account_holder_input = DialogInput("ex: Babu Lal")
+        self.account_holder_input.setToolTip("Name of the account holder as per bank records")
         return self.account_holder_input
     
     def _create_upi_input(self) -> DialogInput:
         self.upi_input = DialogInput("ex: babulal@upi")
+        self.upi_input.setToolTip("UPI ID for quick digital payments (e.g., name@bank)")
         self.upi_input.textChanged.connect(self._clear_upi_error)
         return self.upi_input
     
@@ -579,31 +622,49 @@ class PartyDialog(BaseDialog):
             if bt_index >= 0:
                 self.balance_type_combo.setCurrentIndex(bt_index)
         
-        # State (combo box)
+        # State (editable combo box - use setText for better compatibility)
         state_value = d.get('state', '')
-        state_index = self.state_input.findText(state_value)
-        if state_index >= 0:
-            self.state_input.setCurrentIndex(state_index)
+        if state_value:
+            self.state_input.setText(state_value)
         
         self.city_input.setText(d.get('city', ''))
         self.pincode_input.setText(d.get('pincode', ''))
         
-        # Bank details (if present)
+        # Credit settings
+        status = d.get('status', 'Active')
+        status_index = self.status_combo.findText(status)
+        if status_index >= 0:
+            self.status_combo.setCurrentIndex(status_index)
+        
+        self.credit_limit_input.setText(str(d.get('credit_limit', 0)))
+        self.credit_days_input.setText(str(d.get('credit_days', 0)))
+        
+        # Bank details - handle both nested dict and flat columns from database
         bank_data = d.get('bank_details', {})
-        if bank_data:
-            self.account_number_input.setText(bank_data.get('account_number', ''))
-            self.account_number_confirm.setText(bank_data.get('account_number', ''))
-            self.ifsc_input.setText(bank_data.get('ifsc', ''))
-            self.bank_branch_input.setText(bank_data.get('bank_branch', ''))
-            self.account_holder_input.setText(bank_data.get('account_holder', ''))
-            self.upi_input.setText(bank_data.get('upi', ''))
+        # Also check for flat bank columns (direct from database)
+        account_number = bank_data.get('account_number') or d.get('account_number', '')
+        ifsc = bank_data.get('ifsc') or d.get('ifsc', '')
+        bank_branch = bank_data.get('bank_branch') or d.get('bank_branch', '')
+        account_holder = bank_data.get('account_holder') or d.get('account_holder', '')
+        upi = bank_data.get('upi') or d.get('upi', '')
+        
+        if account_number or ifsc or bank_branch or account_holder or upi:
+            self.account_number_input.setText(account_number or '')
+            self.account_number_confirm.setText(account_number or '')
+            self.ifsc_input.setText(ifsc or '')
+            self.bank_branch_input.setText(bank_branch or '')
+            self.account_holder_input.setText(account_holder or '')
+            self.upi_input.setText(upi or '')
             # Show bank section if data exists
-            if any(bank_data.values()):
-                self.bank_section.setVisible(True)
-                self.bank_link.setText("➖ <a href='#' style='color: {0}; text-decoration: none;'>Hide Bank Account Details</a>".format(PRIMARY))
+            self.bank_section.setVisible(True)
+            self.bank_link.setText("➖ <a href='#' style='color: {0}; text-decoration: none;'>Hide Bank Account Details</a>".format(PRIMARY))
+        
+        # Reset form modified flag after population
+        self._form_modified = False
     
-    def _save_party(self):
+    def _on_save(self):
         """Validate and save party data"""
+        self._show_loading(True)
         name = self.name_input.text().strip()
         phone = self.phone_input.text().strip()
         email = self.email_input.text().strip()
@@ -614,72 +675,108 @@ class PartyDialog(BaseDialog):
         city = self.city_input.text().strip()
         pincode = self.pincode_input.text().strip()
         party_type = self.type_combo.currentText().strip()
-        
+
         # Get current party ID for edit mode
         current_party_id = self.party_data.get('id') if self.party_data else None
-        
-        # Check for duplicate party name
+
+        # Required fields check
+        required_fields = [
+            (self.name_input, name, "Party name is required."),
+            (self.type_combo, party_type, "Party type is required."),
+        ]
+        missing = []
+        for widget, value, msg in required_fields:
+            if not value:
+                if hasattr(widget, 'set_error'):
+                    widget.set_error(True, msg)
+                missing.append(msg)
+        if missing:
+            UIErrorHandler.show_validation_error("Missing Required Fields", missing)
+            self._show_loading(False)
+            return
+
+        # Duplicate party name
         is_duplicate, error = party_service.check_duplicate_name(name, current_party_id)
         if is_duplicate:
-            UIErrorHandler.show_validation_error("Duplicate Name", [error])
+            self.name_input.set_error(True, error)
             self.name_input.setFocus()
+            UIErrorHandler.show_validation_error("Duplicate Name", [error])
+            self._show_loading(False)
             return
-        
+
+        # Duplicate GSTIN (if provided)
+        if gst:
+            is_dup_gstin, gstin_error = party_service.check_duplicate_gstin(gst, current_party_id)
+            if is_dup_gstin:
+                self.gst_number_input.set_error(True, gstin_error)
+                self.gst_number_input.setFocus()
+                UIErrorHandler.show_validation_error("Duplicate GSTIN", [gstin_error])
+                self._show_loading(False)
+                return
+
         # Validate party name
         is_valid, error = party_service.validate_party_name(name)
         if not is_valid:
             self.name_input.set_error(True, error)
             self.name_input.setFocus()
             UIErrorHandler.show_validation_error("Validation Error", [error])
+            self._show_loading(False)
             return
-        
+
         # Validate party type
         is_valid, error = party_service.validate_party_type(party_type)
         if not is_valid:
-            UIErrorHandler.show_validation_error("Validation Error", [error])
+            self.type_combo.set_error(True, error) if hasattr(self.type_combo, 'set_error') else None
             self.type_combo.setFocus()
+            UIErrorHandler.show_validation_error("Validation Error", [error])
+            self._show_loading(False)
             return
-        
+
         # Validate phone number
         is_valid, error = party_service.validate_mobile_number(phone)
         if not is_valid:
             self.phone_input.set_error(True, error)
             self.phone_input.setFocus()
             UIErrorHandler.show_validation_error("Validation Error", [error])
+            self._show_loading(False)
             return
-        
+
         # Validate email
         is_valid, error = party_service.validate_email_address(email)
         if not is_valid:
             self.email_input.set_error(True, error)
             self.email_input.setFocus()
             UIErrorHandler.show_validation_error("Validation Error", [error])
+            self._show_loading(False)
             return
-        
+
         # Validate GSTIN
         is_valid, error = party_service.validate_gstin_number(gst)
         if not is_valid:
             self.gst_number_input.set_error(True, error)
             self.gst_number_input.setFocus()
             UIErrorHandler.show_validation_error("Validation Error", [error])
+            self._show_loading(False)
             return
-        
+
         # Validate PAN
         is_valid, error = party_service.validate_pan_number(pan)
         if not is_valid:
             self.pan_input.set_error(True, error)
             self.pan_input.setFocus()
             UIErrorHandler.show_validation_error("Validation Error", [error])
+            self._show_loading(False)
             return
-        
+
         # Validate pincode
         is_valid, error = party_service.validate_pincode_number(pincode)
         if not is_valid:
             self.pincode_input.set_error(True, error)
             self.pincode_input.setFocus()
             UIErrorHandler.show_validation_error("Validation Error", [error])
+            self._show_loading(False)
             return
-        
+
         # Validate opening balance
         is_valid, opening, error = party_service.validate_opening_balance(
             self.opening_balance.text()
@@ -688,22 +785,32 @@ class PartyDialog(BaseDialog):
             self.opening_balance.set_error(True, error)
             self.opening_balance.setFocus()
             UIErrorHandler.show_validation_error("Validation Error", [error])
+            self._show_loading(False)
             return
-        
+
+
+        # Validate credit fields
+        credit_errors = self._validate_credit_fields()
+        if credit_errors:
+            UIErrorHandler.show_validation_error("Validation Error", credit_errors)
+            self._show_loading(False)
+            return
+
         # Validate bank details if bank section is visible (early validation)
         bank_details = None
         if self.bank_section.isVisible():
             acc_num = self.account_number_input.text().strip()
             acc_confirm = self.account_number_confirm.text().strip()
-            
+
             if acc_num or acc_confirm:
                 # Validate account numbers match early
                 if acc_num != acc_confirm:
                     self.account_number_confirm.set_error(True, "Account numbers must match")
                     self.account_number_confirm.setFocus()
                     UIErrorHandler.show_validation_error("Validation Error", ["Account numbers must match"])
+                    self._show_loading(False)
                     return
-                
+
                 bank_details = {
                     'account_number': acc_num,
                     'ifsc': self.ifsc_input.text().strip(),
@@ -729,52 +836,55 @@ class PartyDialog(BaseDialog):
             opening_balance=opening,
             balance_type=balance_type,
             party_type=party_type,
-            party_id=current_party_id
+            credit_limit=float(self.credit_limit_input.text() or 0),
+            credit_days=int(self.credit_days_input.text() or 0),
+            status=self.status_combo.currentText(),
+            party_id=current_party_id,
+            bank_details=bank_details
         )
 
         # Save to database via service
+        is_update = current_party_id is not None
+        action = "update" if is_update else "create"
+        logger.info(f"Attempting to {action} party: {name}")
+        
         try:
             if current_party_id:
                 success = party_service.update_party(current_party_id, party)
                 if not success:
+                    logger.error(f"Failed to update party: {name}")
                     UIErrorHandler.show_error("Error", "Failed to update party.")
+                    self._show_loading(False)
                     return
             else:
                 party_id = party_service.add_party(party)
                 if party_id:
                     party['id'] = party_id
                 else:
+                    logger.error(f"Failed to add party: {name}")
                     UIErrorHandler.show_error("Error", "Failed to add party.")
+                    self._show_loading(False)
                     return
         except Exception as e:
             # Show specific error message for duplicate party
             error_msg = str(e)
+            logger.error(f"Error saving party {name}: {error_msg}")
             if "already exists" in error_msg.lower():
                 UIErrorHandler.show_validation_error("Duplicate Party", [error_msg])
             else:
                 UIErrorHandler.show_error("Error", f"Error saving party: {error_msg}")
+            self._show_loading(False)
             return
 
         # Add bank details to result
         if bank_details:
             party['bank_details'] = bank_details
-        
+
         self.result_data = party
+        logger.info(f"Party {action}d successfully: {name}")
         UIErrorHandler.show_success("Success", "Party saved successfully!")
+        self._show_loading(False)
         self.accept()
-    
-    def keyPressEvent(self, event):
-        """Handle keyboard shortcuts: Enter to save, Escape to cancel."""
-        if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
-            # Don't save if focus is in TextEdit
-            from PySide6.QtWidgets import QTextEdit
-            if not isinstance(self.focusWidget(), QTextEdit):
-                self._save_party()
-                return
-        elif event.key() == Qt.Key_Escape:
-            self.reject()
-            return
-        super().keyPressEvent(event)
     
     def closeEvent(self, event):
         """Clean up resources when dialog is closed"""

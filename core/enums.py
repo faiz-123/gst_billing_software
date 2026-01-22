@@ -152,6 +152,13 @@ def get_gst_rate_list():
     return [rate.value for rate in GSTRate]
 
 
+# Quick GST rates for chip buttons (common rates without 0%)
+QUICK_GST_RATES = [5, 12, 18, 28]
+
+# All valid GST rates including 0%
+ALL_GST_RATES = [0, 5, 12, 18, 28]
+
+
 def get_payment_mode_list():
     """Get list of payment modes for dropdowns"""
     return [mode.value for mode in PaymentMode]

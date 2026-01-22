@@ -309,13 +309,19 @@ class PartyService:
         credit_limit: float = 0.0,
         credit_days: int = 0,
         status: str = "Active",
-        party_id: Optional[int] = None
+        party_id: Optional[int] = None,
+        account_number: Optional[str] = None,
+        ifsc: Optional[str] = None,
+        bank_branch: Optional[str] = None,
+        account_holder: Optional[str] = None,
+        upi: Optional[str] = None,
+        bank_details: Optional[Dict] = None
     ) -> Dict:
         """
         Prepare party data dictionary for database operations
         
         Args:
-            All party fields
+            All party fields including bank details
             
         Returns:
             dict: Prepared party data
@@ -338,6 +344,20 @@ class PartyService:
             'credit_days': int(credit_days or 0),
             'status': status or 'Active'
         }
+        
+        # Handle bank details - can be passed as separate fields or as bank_details dict
+        if bank_details:
+            data['account_number'] = bank_details.get('account_number')
+            data['ifsc'] = bank_details.get('ifsc')
+            data['bank_branch'] = bank_details.get('bank_branch')
+            data['account_holder'] = bank_details.get('account_holder')
+            data['upi'] = bank_details.get('upi')
+        else:
+            data['account_number'] = account_number.strip() if account_number else None
+            data['ifsc'] = ifsc.strip().upper() if ifsc else None
+            data['bank_branch'] = bank_branch.strip() if bank_branch else None
+            data['account_holder'] = account_holder.strip() if account_holder else None
+            data['upi'] = upi.strip() if upi else None
         
         if party_id:
             data['id'] = party_id

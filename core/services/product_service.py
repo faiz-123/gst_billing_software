@@ -45,6 +45,58 @@ class ProductService:
             return False, "Selling price must be greater than zero"
         return True, ""
     
+    def check_duplicate_product(self, name: str, product_id: int = None) -> bool:
+        """
+        Check if a product with the same name already exists
+        
+        Args:
+            name: Product name to check
+            product_id: If updating, exclude this product from check
+            
+        Returns:
+            bool: True if duplicate exists, False otherwise
+        """
+        if not self.db:
+            return False
+        
+        try:
+            existing = self.db.get_product_by_name(name)
+            if existing:
+                # If updating, allow same name for same product
+                if product_id and existing.get('id') == product_id:
+                    return False
+                return True
+            return False
+        except Exception as e:
+            logger.warning(f"Error checking duplicate product: {e}")
+            return False
+    
+    def check_duplicate_barcode(self, barcode: str, product_id: int = None) -> bool:
+        """
+        Check if a product with the same barcode already exists
+        
+        Args:
+            barcode: Barcode to check
+            product_id: If updating, exclude this product from check
+            
+        Returns:
+            bool: True if duplicate exists, False otherwise
+        """
+        if not self.db or not barcode or not barcode.strip():
+            return False
+        
+        try:
+            existing = self.db.get_product_by_barcode(barcode)
+            if existing:
+                # If updating, allow same barcode for same product
+                if product_id and existing.get('id') == product_id:
+                    return False
+                return True
+            return False
+        except Exception as e:
+            logger.warning(f"Error checking duplicate barcode: {e}")
+            return False
+    
     def validate_product_name(self, name: str) -> bool:
         """
         Validate that product name is not empty

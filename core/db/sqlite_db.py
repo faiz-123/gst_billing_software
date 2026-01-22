@@ -139,7 +139,7 @@ class Database:
                 name TEXT NOT NULL,
                 mobile TEXT,
                 email TEXT,
-                party_type TEXT NOT NULL,
+                party_type TEXT NOT NULL DEFAULT 'Customer',
                 gst_number TEXT,
                 pan TEXT,
                 address TEXT,
@@ -149,6 +149,14 @@ class Database:
                 opening_balance REAL DEFAULT 0,
                 balance_type TEXT DEFAULT 'dr',
                 status TEXT DEFAULT 'Active',
+                credit_limit REAL DEFAULT 0,
+                credit_days INTEGER DEFAULT 0,
+                account_number TEXT,
+                ifsc TEXT,
+                bank_branch TEXT,
+                account_holder TEXT,
+                upi TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(company_id) REFERENCES companies(id)
             )
             """
@@ -163,19 +171,24 @@ class Database:
                 name TEXT NOT NULL,
                 hsn_code TEXT,
                 barcode TEXT,
+                product_type TEXT,
+                category TEXT,
                 unit TEXT,
                 sales_rate REAL DEFAULT 0,
                 purchase_rate REAL DEFAULT 0,
-                discount_percent REAL DEFAULT 0,
                 mrp REAL DEFAULT 0,
+                discount_percent REAL DEFAULT 0,
+                is_gst_registered INTEGER DEFAULT 0,
                 tax_rate REAL DEFAULT 18,
                 sgst_rate REAL DEFAULT 9,
                 cgst_rate REAL DEFAULT 9,
+                track_stock INTEGER DEFAULT 0,
                 opening_stock REAL DEFAULT 0,
                 low_stock REAL DEFAULT 0,
-                product_type TEXT,
-                category TEXT,
+                current_stock REAL DEFAULT 0,
+                warranty_months INTEGER DEFAULT 0,
                 description TEXT,
+                has_serial_number INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(company_id) REFERENCES companies(id)
             )
@@ -333,7 +346,7 @@ class Database:
         for col, decl in [
             ("mobile", "TEXT"),
             ("email", "TEXT"),
-            ("party_type", "TEXT"),
+            ("party_type", "TEXT DEFAULT 'Customer'"),
             ("gst_number", "TEXT"),
             ("pan", "TEXT"),
             ("address", "TEXT"),
@@ -342,6 +355,15 @@ class Database:
             ("pincode", "TEXT"),
             ("opening_balance", "REAL DEFAULT 0"),
             ("balance_type", "TEXT DEFAULT 'dr'"),
+            ("status", "TEXT DEFAULT 'Active'"),
+            ("credit_limit", "REAL DEFAULT 0"),
+            ("credit_days", "INTEGER DEFAULT 0"),
+            ("account_number", "TEXT"),
+            ("ifsc", "TEXT"),
+            ("bank_branch", "TEXT"),
+            ("account_holder", "TEXT"),
+            ("upi", "TEXT"),
+            ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
         ]:
             try:
                 self._ensure_column("parties", col, decl)
@@ -532,6 +554,13 @@ class Database:
                 credit_limit = d.get('credit_limit', 0)
                 credit_days = d.get('credit_days', 0)
                 status = d.get('status', 'Active')
+                # Bank details
+                bank_details = d.get('bank_details', {})
+                account_number = bank_details.get('account_number') or d.get('account_number')
+                ifsc = bank_details.get('ifsc') or d.get('ifsc')
+                bank_branch = bank_details.get('bank_branch') or d.get('bank_branch')
+                account_holder = bank_details.get('account_holder') or d.get('account_holder')
+                upi = bank_details.get('upi') or d.get('upi')
             else:
                 # Map legacy positional args
                 name = args[0] if args else kwargs.get('name')
@@ -550,6 +579,12 @@ class Database:
                 credit_limit = kwargs.get('credit_limit', 0)
                 credit_days = kwargs.get('credit_days', 0)
                 status = kwargs.get('status', 'Active')
+                # Bank details
+                account_number = kwargs.get('account_number')
+                ifsc = kwargs.get('ifsc')
+                bank_branch = kwargs.get('bank_branch')
+                account_holder = kwargs.get('account_holder')
+                upi = kwargs.get('upi')
 
             # Check for duplicate party name (case-insensitive)
             if name:
@@ -566,10 +601,10 @@ class Database:
 
             cur = self._execute(
                 """
-                INSERT INTO parties(company_id, name, mobile, email, party_type, gst_number, pan, address, city, state, pincode, opening_balance, balance_type, status, credit_limit, credit_days)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                INSERT INTO parties(company_id, name, mobile, email, party_type, gst_number, pan, address, city, state, pincode, opening_balance, balance_type, status, credit_limit, credit_days, account_number, ifsc, bank_branch, account_holder, upi)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
-                (self._current_company_id, name, phone, email, party_type, gst, pan, address, city, state, pincode, float(opening or 0), balance_type, status, float(credit_limit or 0), int(credit_days or 0)),
+                (self._current_company_id, name, phone, email, party_type, gst, pan, address, city, state, pincode, float(opening or 0), balance_type, status, float(credit_limit or 0), int(credit_days or 0), account_number, ifsc, bank_branch, account_holder, upi),
             )
             self.conn.commit()
             logger.info(f"Party created: {name} (ID: {cur.lastrowid}) by company {self._current_company_id}")
@@ -610,6 +645,13 @@ class Database:
         credit_limit = d.get('credit_limit', 0)
         credit_days = d.get('credit_days', 0)
         status = d.get('status', 'Active')
+        # Bank details
+        bank_details = d.get('bank_details', {})
+        account_number = bank_details.get('account_number') or d.get('account_number')
+        ifsc = bank_details.get('ifsc') or d.get('ifsc')
+        bank_branch = bank_details.get('bank_branch') or d.get('bank_branch')
+        account_holder = bank_details.get('account_holder') or d.get('account_holder')
+        upi = bank_details.get('upi') or d.get('upi')
 
         try:
             self._execute(
@@ -617,10 +659,12 @@ class Database:
                 UPDATE parties SET 
                     name = ?, mobile = ?, email = ?, party_type = ?, 
                     gst_number = ?, pan = ?, address = ?, city = ?, 
-                    state = ?, pincode = ?, opening_balance = ?, balance_type = ?, status = ?, credit_limit = ?, credit_days = ?
+                    state = ?, pincode = ?, opening_balance = ?, balance_type = ?, 
+                    status = ?, credit_limit = ?, credit_days = ?,
+                    account_number = ?, ifsc = ?, bank_branch = ?, account_holder = ?, upi = ?
                 WHERE id = ?
                 """,
-                (name, phone, email, party_type, gst, pan, address, city, state, pincode, float(opening or 0), balance_type, status, float(credit_limit or 0), int(credit_days or 0), party_id),
+                (name, phone, email, party_type, gst, pan, address, city, state, pincode, float(opening or 0), balance_type, status, float(credit_limit or 0), int(credit_days or 0), account_number, ifsc, bank_branch, account_holder, upi, party_id),
             )
             self.conn.commit()
             logger.info(f"Party updated: {name} (ID: {party_id}) by company {self._current_company_id}")
@@ -721,6 +765,34 @@ class Database:
     def get_product_by_id(self, product_id: int):
         """Get a single product by ID"""
         result = self._query("SELECT * FROM products WHERE id = ?", (product_id,))
+        return result[0] if result else None
+
+    def get_product_by_name(self, name: str):
+        """Get a product by name (case-insensitive) for current company"""
+        if self._current_company_id:
+            result = self._query(
+                "SELECT * FROM products WHERE UPPER(name) = UPPER(?) AND company_id = ?",
+                (name, self._current_company_id)
+            )
+        else:
+            result = self._query(
+                "SELECT * FROM products WHERE UPPER(name) = UPPER(?)",
+                (name,)
+            )
+        return result[0] if result else None
+
+    def get_product_by_barcode(self, barcode: str):
+        """Get a product by barcode for current company"""
+        if self._current_company_id:
+            result = self._query(
+                "SELECT * FROM products WHERE barcode = ? AND company_id = ?",
+                (barcode, self._current_company_id)
+            )
+        else:
+            result = self._query(
+                "SELECT * FROM products WHERE barcode = ?",
+                (barcode,)
+            )
         return result[0] if result else None
 
     def get_party_by_id(self, party_id: int):

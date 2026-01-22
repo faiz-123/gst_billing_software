@@ -1,5 +1,5 @@
 """
-Theme module - Contains colors, fonts, and styles for the application
+Theme module - Contains colors, fonts, styles, and dimensions for the application
 """
 
 from .colors import (
@@ -20,6 +20,27 @@ from .fonts import (
     FONT_SIZE_TITLE, FONT_SIZE_HEADER, get_title_font, get_header_font,
     get_normal_font, get_bold_font, get_label_font, get_section_title_font,
     get_link_font, get_checkbox_font
+)
+from .dimensions import (
+    # Dialog sizes
+    DIALOG_FORM_DEFAULT_WIDTH, DIALOG_FORM_DEFAULT_HEIGHT,
+    DIALOG_FORM_MIN_WIDTH, DIALOG_FORM_MIN_HEIGHT,
+    DIALOG_LARGE_DEFAULT_WIDTH, DIALOG_LARGE_DEFAULT_HEIGHT,
+    DIALOG_LARGE_MIN_WIDTH, DIALOG_LARGE_MIN_HEIGHT,
+    DIALOG_SMALL_DEFAULT_WIDTH, DIALOG_SMALL_DEFAULT_HEIGHT,
+    DIALOG_SMALL_MIN_WIDTH, DIALOG_SMALL_MIN_HEIGHT,
+    # Button sizes
+    BUTTON_PRIMARY_WIDTH, BUTTON_PRIMARY_HEIGHT,
+    BUTTON_SECONDARY_WIDTH, BUTTON_SECONDARY_HEIGHT, BUTTON_ICON_SIZE,
+    CHIP_HEIGHT, CHIP_MIN_WIDTH,
+    # Header/Footer
+    DIALOG_HEADER_HEIGHT, DIALOG_FOOTER_HEIGHT,
+    # Spacing
+    SECTION_MARGIN, SECTION_SPACING, FIELD_SPACING, GRID_SPACING,
+    # Input sizes
+    INPUT_HEIGHT, INPUT_MIN_WIDTH, TEXTAREA_MIN_HEIGHT,
+    # Helper functions
+    get_form_dialog_size, get_large_dialog_size, get_small_dialog_size
 )
 from .styles import (
     APP_STYLESHEET, get_button_style, get_sidebar_style, get_card_style,
@@ -97,6 +118,25 @@ __all__ = [
     'FONT_SIZE_TITLE', 'FONT_SIZE_HEADER', 'get_title_font', 'get_header_font',
     'get_normal_font', 'get_bold_font', 'get_label_font', 'get_section_title_font',
     'get_link_font', 'get_checkbox_font',
+    # Dimensions - Dialog sizes
+    'DIALOG_FORM_DEFAULT_WIDTH', 'DIALOG_FORM_DEFAULT_HEIGHT',
+    'DIALOG_FORM_MIN_WIDTH', 'DIALOG_FORM_MIN_HEIGHT',
+    'DIALOG_LARGE_DEFAULT_WIDTH', 'DIALOG_LARGE_DEFAULT_HEIGHT',
+    'DIALOG_LARGE_MIN_WIDTH', 'DIALOG_LARGE_MIN_HEIGHT',
+    'DIALOG_SMALL_DEFAULT_WIDTH', 'DIALOG_SMALL_DEFAULT_HEIGHT',
+    'DIALOG_SMALL_MIN_WIDTH', 'DIALOG_SMALL_MIN_HEIGHT',
+    # Dimensions - Button sizes
+    'BUTTON_PRIMARY_WIDTH', 'BUTTON_PRIMARY_HEIGHT',
+    'BUTTON_SECONDARY_WIDTH', 'BUTTON_SECONDARY_HEIGHT', 'BUTTON_ICON_SIZE',
+    'CHIP_HEIGHT', 'CHIP_MIN_WIDTH',
+    # Dimensions - Header/Footer
+    'DIALOG_HEADER_HEIGHT', 'DIALOG_FOOTER_HEIGHT',
+    # Dimensions - Spacing
+    'SECTION_MARGIN', 'SECTION_SPACING', 'FIELD_SPACING', 'GRID_SPACING',
+    # Dimensions - Input sizes
+    'INPUT_HEIGHT', 'INPUT_MIN_WIDTH', 'TEXTAREA_MIN_HEIGHT',
+    # Dimensions - Helper functions
+    'get_form_dialog_size', 'get_large_dialog_size', 'get_small_dialog_size',
     # Styles - Dialog/General
     'APP_STYLESHEET', 'get_button_style', 'get_sidebar_style', 'get_card_style',
     'get_calendar_stylesheet', 'get_input_style', 'get_table_style',
